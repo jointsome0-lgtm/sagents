@@ -1,0 +1,19 @@
+{
+  "name": "sagents",
+  "version": "0.0.1",
+  "description": "Story agents: models that live in an interactive story or evaluate one.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "scripts": {
+    "test": "node --test src/*.test.ts",
+    "check": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "24.9.2",
+    "typescript": "7.0.2"
+  }
+}
