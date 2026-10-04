@@ -6,7 +6,8 @@ Orientation for AI coding assistants and people working in this project. Keep it
 
 sagents runs story agents: models with tools for an interactive story where a coding agent has tools for a repository.
 [README.md](README.md) says what is written and what is only planned. Today the code is the model connection
-(`src/chatgpt.ts`) and its command line (`src/cli.ts`).
+(`src/chatgpt.ts`), a prototype of the live mode (`src/world.ts` for the rules, `src/live.ts` for the run) and the
+command line (`src/cli.ts`).
 
 ## The code
 

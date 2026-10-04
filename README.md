@@ -3,13 +3,14 @@
 Story agents. A coding agent gets a shell and a patch tool and works in a repository. A story agent gets an interactive
 story: its scenes, the moves that continue it, its checkpoints and its memory. sagents is the program that runs them.
 
-It is early. Today sagents signs in with ChatGPT and sends one request to a model. The agent loop and the story tools
-come next. This page keeps the two apart.
+It is early. Today sagents signs in with ChatGPT, sends one request to a model and runs a first prototype of the live
+mode. The agent loop and the story tools come next. This page keeps the two apart.
 
 ## Two modes
 
-Neither is written yet. Both will run on the same model connection and the same loop, with a cap on steps. They differ
-in what the agent sees and which tools it gets.
+Eval is not written yet. Live has a first prototype with a small world of its own in place of a story engine; it is
+described under [What works today](#a-live-world). Both will run on the same model connection and the same loop, with
+a cap on steps. They differ in what the agent sees and which tools it gets.
 
 **live.** The agent lives in the story's world as one of its characters. It sees what that character sees, which is the
 scenes as they arrive and its own notes. It acts by making a move. It cannot go back in time or read the story's
@@ -84,6 +85,43 @@ limit cut short comes back as `output_limit`, without the text written by then.
 
 So far this code has talked to a stand-in for OpenAI's services in its own checks and to nothing else. The first real
 sign-in has not happened yet.
+
+### A live world
+
+```sh
+node src/cli.ts live examples/night-station.json [--model <id>] [--minutes <n>] [--calls <n>] [--json]
+```
+
+`live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
+each with a place and a sheet. Every character is played by the model, `gpt-6.1-sol@low` unless `--model` says
+otherwise. One turn is one request and one action: `say`, `call`, `go`, `do` or `wait`, with an optional private note.
+
+The rules of time and hearing:
+
+- The clock counts whole seconds of the story. The character who is free first plays next.
+- Speech lasts as long as its words take at the world's `wordsPerMinute`, 130 by default. A `say` or a `call` holds at
+  most 65 words, and fewer when the end of the run is near. A longer one is cut.
+- Everyone in the speaker's place hears a `say` and is held until it ends, so people in one place take turns.
+- A `call` goes through the world's `remote`, a telephone for example. The one called hears it wherever they are, and
+  those next to the caller hear the caller's half. A world without `remote` has no calls.
+- A `go` takes the minutes between the two places. On the way a character hears nothing and does not act. A call to
+  it is delivered when it arrives.
+- A `do`, a leaving and an arrival are seen by everyone in the place and end their waiting.
+- A character is sent its own sheet, the world's description and what it heard and saw, with clock times. It is never
+  sent another character's sheet or note, or an event it did not perceive.
+- An answer that cannot be used counts as a wait of 30 seconds.
+
+The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default. It stops at
+the first failure of the model connection and tries nothing again. It prints one line per event, or one JSON object
+per event with `--json`, and then one line of totals: the status and its reason, the story minutes played, the
+requests, the unusable answers and the tokens.
+
+What it lacks:
+
+- There is no author above the characters. Nothing happens in the world unless a character does it.
+- Nobody judges what a `do` achieves. It is seen and takes time, and it changes nothing else.
+- There is no memory beyond one run, and inside a run a character's whole history is sent at every turn.
+- It has run only against a scripted stand-in for the model. No real model has played a world yet.
 
 ## The model connection
 
