@@ -106,7 +106,8 @@ The rules of time and hearing:
   those next to the caller hear the caller's half. A world without `remote` has no calls.
 - A `go` takes the minutes between the two places. On the way a character hears nothing and does not act. A call to
   it is delivered when it arrives.
-- A `do`, a leaving and an arrival are seen by everyone in the place and end their waiting.
+- A leaving and an arrival are seen by everyone in the place and end their waiting. A `do` is seen too, and a witness
+  learns of it at its own next turn.
 - A character is sent its own sheet, the world's description and what it heard and saw, with clock times. It is never
   sent another character's sheet or note, or an event it did not perceive.
 - An answer that cannot be used counts as a wait of 30 seconds.

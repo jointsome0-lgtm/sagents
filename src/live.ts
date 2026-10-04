@@ -13,7 +13,7 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - call: you speak \`text\` to the person \`to\` (an id) by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
 - go: you walk to \`place\` (an id). On the way you hear and see nothing and cannot act.
 - do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it.
-- wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). Speech or movement near you ends the wait early.
+- wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). Speech near you, or someone coming or leaving, ends the wait early.
 - note: with any action, a private line you keep for yourself. Nobody else ever reads it. Null when you have none.
 
 Speak the way people speak: briefly, one thought at a time, and leave room for an answer. Words cost the story's time: each takes part of a second, those who listen are held until you finish, and the story ends at a fixed moment. Each turn says how many words \`text\` may hold; a longer speech is cut there.

@@ -121,8 +121,8 @@ export function readAction(world: World, actor: Person, answer: string): Action 
   return null;
 }
 
-// Something happened near this character: its wait or its activity ends. It is free now, or when its own speech and
-// the speech it is hearing have ended.
+// Someone spoke, came or left near this character: its wait or its activity ends. It is free now, or when its own
+// speech and the speech it is hearing have ended.
 const attend = (person: Person, now: number) => { person.freeAt = Math.max(now, person.speaking, person.listening); };
 
 // One action of a character in a place, at `now`: the event, with the actor and those who perceive it moved on.
@@ -157,8 +157,9 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     event.seconds = travelSeconds(world, place, action.place as string);
     for (const witness of here) attend(witness, now);
     Object.assign(actor, { place: null, heading: action.place });
-  } else if (action.action === 'do') for (const witness of here) attend(witness, now);
-  else event.heard = [];
+  } else if (action.action === 'wait') event.heard = [];
+  // A `do` is left: it is seen and interrupts nobody, and a witness learns of it at its own next turn. Otherwise every
+  // gesture in a room would cost one call to the model for each person who waits there.
   actor.freeAt = now + event.seconds;
   return event;
 }
