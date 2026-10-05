@@ -16,8 +16,9 @@ const folder = () => mkdtempSync(join(tmpdir(), 'chatgpt-check-'));
 const account = (path: string, patch: object = {}) => writeFileSync(path, JSON.stringify({ hostId: 'urn:uuid:host', clientId: 'oaiapp_1', subject: 'sub-1',
   accessToken: 'ACCESS-OLD', refreshToken: 'REFRESH-OLD', expiresAt: Date.now() + 3_600_000,
   scopes: ['chatgpt.tokens.use.direct', 'offline_access', 'openid'], ...patch }), { mode: 0o600 });
-const sse = (events: object[]) => new Response(events.map(event => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`).join(''),
-  { status: 200, headers: { 'content-type': 'text/event-stream' } });
+// The plan's route names no content type for its stream, so the stand-in for it names none: bytes carry no type of their own.
+const sse = (events: object[]) => new Response(new TextEncoder().encode(
+  events.map(event => `event: ${(event as { type: string }).type}\ndata: ${JSON.stringify(event)}\n\n`).join('')), { status: 200 });
 const json = (status: number, body: object) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const answer = (text: string, usage = { input_tokens: 120, output_tokens: 30, input_tokens_details: { cached_tokens: 100 }, output_tokens_details: { reasoning_tokens: 20 } }) => sse([
   { type: 'response.created', response: {} },

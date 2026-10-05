@@ -370,7 +370,10 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
           const refusal = await jsonOf(response).catch(() => null);
           throw failure(errorCodeOf(refusal), response.status, paramOf(refusal));
         }
-        if (!response.headers.get('content-type')?.includes('text/event-stream')) {
+        // The plan's route names no content type for its stream. A type that is named must be a stream's, and only
+        // the closing event below makes an answer of what is read.
+        const type = response.headers.get('content-type');
+        if (type !== null && !type.includes('text/event-stream')) {
           await response.body?.cancel();
           throw new ModelError('invalid_stream');
         }
