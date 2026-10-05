@@ -147,7 +147,12 @@ test('a request that the service declined is counted and not sent again, and the
   assert.equal(journal.all[4].record.kind === 'act' && journal.all[4].record.action, 'declined');
   assert.match(sent.dan[1].messages[0].content, /\n09:00:00 Your answer could not be used and counted as a wait of 30 seconds\. Answer with one JSON object and nothing else, with one of the listed actions\.\n/);
   assert.deepEqual([sent.dan.length, sent.world.length, Object.values(sent).flat().length], [3, 1, 8]);
-  assert.deepEqual([outcome.status, outcome.reason, outcome.calls, outcome.declined, outcome.invalid, outcome.void, outcome.kinds.world.calls], ['failed', 'declined', 8, 3, 3, 1, 1]);
+  assert.deepEqual([outcome.status, outcome.reason, outcome.calls, outcome.declined, outcome.models['stand-in'].declined, outcome.invalid, outcome.void, outcome.kinds.world.calls], ['failed', 'declined', 8, 3, 3, 3, 1, 1]);
+  // A memory rewrite that was declined is asked once and lost: Anna's four requests are two turns, it, and a turn.
+  const asleep = standIn({ anna: [act('say', { text: 'one two' }), act('sleep', { seconds: 60 }), declined()] });
+  const night = memoryStore();
+  const woke = await runLive({ world, respond: asleep.respond, model: 'stand-in', minutes: 2, journal: night });
+  assert.deepEqual([asleep.sent.anna.length, woke.rewrites, woke.lost, woke.declined, woke.kinds.memory.calls, night.all.find(({ record }) => record.kind === 'memory')?.event.text], [4, 1, 1, 1, 1, null]);
 });
 
 test('a sleeper perceives nothing and wakes with the memory it wrote and the calls that waited; a rewrite that fails twice is lost in the open', async () => {

@@ -368,7 +368,7 @@ export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 
 // and `kinds` the calls and the tokens by what a request was for, so that a resident's turn is told from the world's answer when one model gives both.
 // `refused` counts the answers of the world that could be read and that the rules of things did not take, and `void`
 // the deeds and speeches to figures that nothing came of because neither of the two answers asked for could be used
-// or taken. A run that a connection's failure ended keeps what the failure may say of itself besides its code: the
+// or taken, or because the service declined to write the one that was asked for. A run that a connection's failure ended keeps what the failure may say of itself besides its code: the
 // HTTP status, and the service's own code and field name, when it had them. Never the service's words.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string;
   seconds: number; rewrites: number; lost: number; refused: number; void: number;
