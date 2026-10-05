@@ -9,7 +9,7 @@ import { blank, idle, lineOf, remember, rewrite } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
-import { apply, arrive, clockAt, hasClock, lying, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, start, timeFor, wake } from './world.ts';
+import { apply, arrive, clockAt, hasClock, lying, isRefusal, namesOf, readReply, reply, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, start, timeFor, wake } from './world.ts';
 import type { Action, Change, Event, Lying, Person, Refusal, World } from './world.ts';
 
 // The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
@@ -20,24 +20,31 @@ export class JournalError extends Error {}
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
 // `at`: what came of the deed, or null, the sleepers it wakes, what it changes of bodies and belongings, whether
 // the deed was a search of its place, and the labels of the hidden things it went straight to.
+// `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`: its words, or
+// null, and what the answer changes of bodies and belongings.
 // A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
 // no answer is behind it.
 export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal }
   | { kind: 'arrive' | 'wake'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean }
+  | { kind: 'reply'; who: string; at: number; figure: string; text: string | null; changes: Change[] }
   | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[]; changes: Change[]; search: boolean; finds: string[] }
   | LawRecord;
 // `by` is the name of the model whose answer the record came of, and null for a record no answer is behind. The rules
 // never read it: the same records give the same world whoever answered.
 export type Entry = { seq: number; record: Record; event: Event; by: string | null };
 // Everything a journal amounts to: where everyone is and what each one remembers. `seq` is the next record's number.
-// `deed` is a `do` the world has not answered yet: its answer is the only record that can come next. `results` holds,
-// for each place, the latest of what came of the deeds done there, which the world is shown when it answers the next.
+// `deed` is a `do`, or a `say` to a figure, that the world has not answered yet: its answer is the only record that
+// can come next. `results` holds, for each place, the latest of what came of the deeds done there, which the world is
+// shown when it answers the next, and `said` the latest of what was said to the figures of the place and answered.
 // `lies` is what lies in each place now, hidden or not, with how long each person has searched each place, and `laws`
 // holds the parts of the state that the laws of `laws.ts` keep.
-export type State = { people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>; lies: Lying; laws: Parts };
+export type State = { people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
+  said: Map<string, Line[]>; lies: Lying; laws: Parts };
 // How many words of earlier results a place keeps. The newest one stays whatever its size.
 export const RESULT_WORDS = 400;
+// How many words of earlier speeches to its figures and their answers a place keeps, the newest whatever its size.
+export const SAID_WORDS = 300;
 // Where a journal is kept. `append` is one step: its entries are written together or not at all.
 export type Store = { entries(): Iterable<Entry>; append(entries: Entry[]): void };
 // The sentences about a place where a journal is kept that cannot be used, a state file for one; they may be shown.
@@ -67,12 +74,14 @@ export const CUT = 'Your speech was longer than the limit: the others heard only
 const NOTHING = 'Nothing came of it that could be noticed.';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
+// A speech as it opens when it is addressed to a figure of the place.
+const toFigure = (world: World, event: Event) => event.kind === 'say' && event.to !== null ? ` to ${named(namesOf(world), event.to)}` : '';
 
 // An event as one who perceived it remembers it, under the time as that one could tell it, `when`. A note is never
 // part of it.
 function perceived(world: World, event: Event, viewer: string, when: string): string {
   const who = named(world.characters, event.who);
-  const what = event.kind === 'say' ? `${who} says: "${event.text}"`
+  const what = event.kind === 'say' ? `${who} says${toFigure(world, event)}: "${event.text}"`
     : event.kind === 'call' ? `${who} calls ${event.to === viewer ? 'you' : named(world.characters, event.to)} (${world.remote}): "${event.text}"`
       : event.kind === 'go' ? `${who} leaves towards ${named(world.places, event.to)}.`
         : event.kind === 'arrive' ? `${who} arrives.`
@@ -85,7 +94,7 @@ function perceived(world: World, event: Event, viewer: string, when: string): st
 // The first line is the action itself. `when` is the time as the character could tell it, and `span` how long the
 // action lasts as the character knows it.
 function own(world: World, event: Event, when: string, span = `${event.seconds} s`): string[] {
-  const what = event.kind === 'say' ? `You say: "${event.text}"`
+  const what = event.kind === 'say' ? `You say${toFigure(world, event)}: "${event.text}"`
     : event.kind === 'call' ? `You call ${named(world.characters, event.to)} (${world.remote}): "${event.text}"`
       : event.kind === 'go' ? `You leave towards ${named(world.places, event.to)}.`
         : event.kind === 'arrive' ? `You arrive in ${named(world.places, event.place)}.`
@@ -97,7 +106,7 @@ function own(world: World, event: Event, when: string, span = `${event.seconds} 
 
 export const begin = (world: World): State =>
   ({ people: start(world), minds: new Map(world.characters.map(character => [character.id, blank()])), seq: 0, deed: null,
-    results: new Map(world.places.map(place => [place.id, []])), lies: lying(world), laws: beginLaws(world) });
+    results: new Map(world.places.map(place => [place.id, []])), said: new Map(world.places.map(place => [place.id, []])), lies: lying(world), laws: beginLaws(world) });
 
 // One record applied to the world: the event it makes, with everyone moved on and every memory brought up to date.
 // A record that the rules could not have produced in this state is refused, and the state is then not to be used.
@@ -107,6 +116,24 @@ export function advance(world: World, state: State, record: Record): Event {
   // The time of a line as its owner can tell it where it is: the clock only when one is at hand.
   const when = (id: string, at: number) => timeFor(world, id, people.find(person => person.id === id)!.place, at);
   const deed = state.deed;
+  if (deed?.kind === 'say' || record.kind === 'reply') {
+    // A speech to a figure is followed by that figure's answer and by nothing else, and a figure answers nothing else.
+    if (!deed || record.kind !== 'reply' || record.who !== deed.who || record.at !== deed.at || record.figure !== deed.to) return refuse('is not a figure\'s answer to a speech to it just before');
+    const present = people.filter(person => person.place === deed.place).map(person => person.id);
+    const { text, changes } = record;
+    if (!isDeepStrictEqual(readReply(JSON.stringify({ reply: text, changes }), present, deed.place), { text, changes })) return refuse('holds an answer that the speech cannot have');
+    const event = reply(world, people, state.lies, deed, text, changes);
+    const figure = named(namesOf(world), record.figure), speaker = named(world.characters, deed.who), end = deed.at + deed.seconds;
+    // The speaker learns that nothing was answered; the others heard the speech and nothing after it.
+    if (text === null) remember(minds.get(deed.who)!, lineOf(seq, `${when(deed.who, end)} ${figure} does not answer.`));
+    for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, `${when(id, end)} ${figure} answers ${id === deed.who ? 'you' : speaker}: "${text}"`));
+    // The place keeps what was said to its figures and what they answered, the latest of it.
+    const kept = state.said.get(deed.place)!;
+    kept.push(lineOf(seq, `${event.clock} ${speaker} to ${figure}: "${deed.text}" ${text === null ? `${figure} did not answer.` : `${figure}: "${text}"`}`));
+    while (kept.length > 1 && kept.reduce((sum, line) => sum + line.size, 0) > SAID_WORDS) kept.shift();
+    Object.assign(state, { deed: null, seq: seq + 1 });
+    return event;
+  }
   if (deed || record.kind === 'result') {
     // A deed is followed by the world's answer and by nothing else, and the world answers nothing but a deed.
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
@@ -173,7 +200,7 @@ export function advance(world: World, state: State, record: Record): Event {
     const lines = (reason ? [`${told} ${refused(world, reason)}`] : own(world, event, told, span)).map(line => lineOf(seq, line));
     if (event.kind === 'sleep') lines[0].idle = true;
     remember(mind, ...lines);
-    if (event.kind === 'do') state.deed = event;
+    if (event.kind === 'do' || (event.kind === 'say' && event.to !== null)) state.deed = event;
   } else {
     // A sleeper wakes with its long-term memory and no line of anything it lived through, so those were folded first.
     const due = record.kind === 'wake' ? actor.asleep && idle(mind) : actor.place === null;

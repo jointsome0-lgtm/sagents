@@ -102,7 +102,8 @@ each with a place and a sheet. Every character is played by the model, `gpt-6.1-
 otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-your-own). One turn is one request
 and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note.
 `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
-what each one remembers after the night decides what happens.
+what each one remembers after the night decides what happens; `examples/seaside-cafe.json` is a café with a
+crowd and a waitress whom nobody plays, in a town whose places lie on a map.
 
 The rules of time and hearing:
 
@@ -194,6 +195,27 @@ The world answers a deed:
 - What a model tells in a `do` does not by itself make anything true: the deed is what was tried, and what came of
   it is what the world answered from the facts.
 
+People of a place whom nobody plays:
+
+- A place of a world file may have `crowd`, a text of who is around as anyone there sees them (60 words at most), and
+  `figures`, a list of `{ id, name, looks, facts }`: those of them who have a name. A figure has no sheet, no memory
+  and no turn, so it costs nothing until someone speaks to it. It stays in its place, never speaks first, wakes
+  nobody and follows nobody, and a `call` does not reach it. Its id is no place's, no character's and no other figure's.
+- A turn lists the figures of the resident's place with their looks, under `People of this place, who answer when
+  you say with \`to\`:`, and then the crowd as `Around you: …`. A figure's `facts` are for the world alone.
+- A `say` may have `to`, the id of a figure of the speaker's place; any other `to` of a `say` is dropped. Everyone
+  in the place hears the speech as any other. Then the world is asked once, through the model of `--world-model`,
+  what the figure answers: it is sent what a deed's request holds of the place and of those in it, without what is
+  hidden and without the results of deeds, with the crowd and every figure of the place with looks and facts, and
+  with what was said to the figures of that place before and answered (300 words of it).
+- It answers with `reply`, the figure's words, 65 at most, or null when the figure says nothing, and with `changes`
+  as a deed's answer has them, for a thing handed over while speaking. The answer begins when the speech ends and
+  holds the speaker and everyone who heard the speech as speech does. A sleeper is not woken by it.
+- The answer is a record of its own, right after its speech, and the journal takes nothing else there. An answer
+  that cannot be used, or one cut at the model's limit, is asked for once more; after that the figure says nothing.
+  So a speech to a figure costs one request more than a speech, and a null answer costs it too.
+- The world's request about a deed also holds the crowd and the figures of the deed's place.
+
 Bodies and belongings:
 
 - A world file may give a character `looks`, what anyone near sees and what never changes: the body and the face,
@@ -275,7 +297,7 @@ What a character knows:
 The journal and the state file:
 
 - Everything that happens is a record in an append-only journal: an action as it was read from the answer, or the
-  reason why the answer could not be used, the world's answer to a deed, an arrival, a waking or a falling asleep
+  reason why the answer could not be used, the world's answer to a deed, a figure's answer to a speech, an arrival, a waking or a falling asleep
   at the limit, a change of the weather, a memory rewrite. Each record is stored with the event the rules made of it. There is no other
   state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
   plays the world. Any beginning of a journal is a whole world at that moment.
@@ -308,9 +330,12 @@ law and the record:
 - A sleeper wakes only when its sleep ends or a deed's result wakes it.
 - Nobody acts after being awake for the world's limit: at that turn it falls asleep instead.
 - What a person has, holds and how it is placed, and the things of a place, change only by the world's answer to a
-  deed done in that place; a pose is also dropped when its owner leaves.
-- Nobody is sent what another person carries out of sight, what is hidden in a place, or the looks, pose or
-  holdings of a person in another place.
+  deed done in that place or to a speech addressed to someone of that place; a pose is also dropped when its owner
+  leaves.
+- Nobody is sent what another person carries out of sight, what is hidden in a place, the facts of the people of a
+  place whom nobody plays, or the looks, pose or holdings of a person in another place.
+- Someone of a place whom nobody plays speaks only in answer to a speech addressed to it in its place, once and
+  right after that speech.
 - A hidden thing is found only where it lies, by a search of its finder that has lasted its minutes or by a deed the
   world says went straight to it, and then it is hidden for nobody.
 - The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of
@@ -361,7 +386,10 @@ What it lacks:
 - Tiredness is one number. It does not slow anyone or change what a character can do before the limit, and a
   character who is on the way when it reaches the limit falls asleep only at its turn after the arrival.
 - A seeded series of weather knows no time of day and no season: its states must read true at any hour.
-- The world answers only a `do`. What is claimed in a speech or a note is checked by nobody.
+- A figure remembers nothing of its own: it is consistent only by its facts and by the latest of what was said to
+  the figures of its place, which all of them share. It does not hear what residents say to each other, does not
+  see what came of deeds, and a deed's request does not hold what was said to it. A crowd is a text and answers nobody.
+- The world answers only a `do` and a speech to a figure. What is claimed in a speech or a note is checked by nobody.
 - A rewrite is the model's own summary, and nothing checks that it adds no facts. What a character forgets cannot be
   looked up again: the journal keeps it, the character has no way to it.
 - The calls that wait for a sleeper or a traveller are kept until it wakes or arrives, however many they are. If
@@ -373,15 +401,13 @@ What it lacks:
 
 #### What comes next for the live world
 
-1. A crowd through the world: people of a place who have no turns of their own, for whom the world answers, while the
-   journal keeps what a resident perceived of them; coordinates for places, with travel time from distance.
-2. Things as the engine's state: items with amounts, owners and places; food with calories and tags; money.
-3. A seaside example world of four residents, houses, a sports pool, a beach and cafés.
-4. An energy balance: hunger from the day's shortfall, weight and fitness from the same count over weeks.
-5. `examine` as an action the engine answers by a table, more detailed for a resident with a doctor's skill; skills
+1. Things as the engine's state: items with amounts, owners and places; food with calories and tags; money.
+2. A seaside example world of four residents, houses, a sports pool, a beach and cafés.
+3. An energy balance: hunger from the day's shortfall, weight and fitness from the same count over weeks.
+4. `examine` as an action the engine answers by a table, more detailed for a resident with a doctor's skill; skills
    in the world file; injury and illness; a person's own reactions to kinds of food.
-6. Ordinary days that cost no model calls.
-7. After that: training, learning a skill in the story, a farm, ecology.
+5. Ordinary days that cost no model calls.
+6. After that: training, learning a skill in the story, a farm, ecology.
 
 ## The model connection
 
