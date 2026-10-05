@@ -22,12 +22,13 @@ export const LOST_SECONDS = 30;
 // what it carries out of sight. The world file gives how these begin; `things`, `pose`, `holds` and `has` then belong
 // to the run's state and change only by the world's answer to a deed. A place that is `open` lies under the open sky.
 // `hidden` is what lies in a place and is not found without a search: each thing with the `minutes` one person must
-// have searched the place to find it. The world is told it apart from `things`.
+// have searched the place to find it, or which a deed finds at once by going straight to the spot its text names.
+// The world is told it apart from `things`, under its `id`, a label that is its number in the place's list.
 // A place with a `clock` shows the time to everyone in it, and a character with one, a watch or a phone, reads it
 // anywhere. Neither changes in a run: a clock is not yet a thing that can be handed over.
 export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; hidden: Hidden[]; open: boolean; clock: boolean;
   minutesTo: { [place: string]: number } };
-export type Hidden = { text: string; minutes: number };
+export type Hidden = { id: string; text: string; minutes: number };
 export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null; looks: string | null; pose: string | null;
   holds: string | null; has: string | null; clock: boolean };
 // The most words each of these texts may hold, in the world file and in the world's answer alike.
@@ -60,10 +61,11 @@ export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(rea
 // wakes and what it changes of bodies and belongings. A `weather` is a change of the weather, which nobody does and
 // which has no place: `who` and `place` are empty, `text` is the new weather under the open sky and `indoors`, which
 // only this kind has, what of it reaches someone under a roof, or null. A result also says whether the world called
-// the deed a `search` of the place, and what hidden things were `found` by it.
+// the deed a `search` of the place, which hidden things it says the deed went straight to, `finds`, and what hidden
+// things were `found` by it either way.
 export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result' | 'weather'; who: string; place: string; to: string | null;
   text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[]; changes?: Change[];
-  indoors?: string | null; search?: boolean; found?: string[] };
+  indoors?: string | null; search?: boolean; finds?: string[]; found?: string[] };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
 // is the start of its own last action.
@@ -94,7 +96,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     if (place.hidden !== undefined && !Array.isArray(place.hidden)) return refuse(`${field}.hidden`, 'must be a list');
     const hidden = ((place.hidden ?? []) as unknown[]).map((thing, at) => {
       if (!isObject(thing)) return refuse(`${field}.hidden[${at}]`, 'must be an object');
-      return { text: boundedOf(textOf(thing.text, `${field}.hidden[${at}].text`), `${field}.hidden[${at}].text`, LIMITS.hidden) as string,
+      return { id: `h${at + 1}`, text: boundedOf(textOf(thing.text, `${field}.hidden[${at}].text`), `${field}.hidden[${at}].text`, LIMITS.hidden) as string,
         minutes: amountOf(thing.minutes ?? null, `${field}.hidden[${at}].minutes`, 0) };
     });
     const minutesTo: { [place: string]: number } = {};
@@ -192,8 +194,8 @@ export type Lying = { things: Map<string, string | null>; hidden: Map<string, Hi
 // What lies in each place when the story starts, and nobody has searched anywhere.
 export const lying = (world: World): Lying => ({ things: new Map(world.places.map(place => [place.id, place.things])),
   hidden: new Map(world.places.map(place => [place.id, place.hidden])), searched: new Map() });
-// What of the hidden things of a deed's place the deed finds if the world says it is a search, and what it leaves:
-// a thing is found when the doer's searches of the place, this deed with them, have lasted its minutes.
+// What of the hidden things of a deed's place the deed finds if the world says it is a search, and what such a
+// search leaves: a thing is found when the doer's searches of the place, this deed with them, have lasted its minutes.
 export function sought(lies: Lying, deed: Event): { found: Hidden[]; left: Hidden[] } {
   const seconds = (lies.searched.get(`${deed.who} ${deed.place}`) ?? 0) + deed.seconds, hidden = lies.hidden.get(deed.place)!;
   return { found: hidden.filter(thing => seconds >= thing.minutes * 60), left: hidden.filter(thing => seconds < thing.minutes * 60) };
@@ -328,8 +330,9 @@ export function wake(world: World, people: Person[], sleeper: Person, now: numbe
 // each once, in their order.
 // Of `changes` only those are kept that name a person in `present`, or `place` for its things; each text becomes
 // one line cut at its limit, and of two changes of one thing the later counts. `search` is true only when the answer
-// says so.
-export function readResult(answer: string, sleepers: string[], present: string[], place: string): { text: string | null; wakes: string[]; changes: Change[]; search: boolean } | null {
+// says so, and of `finds` only the labels in `hidden` are kept, each once, in their order.
+export function readResult(answer: string, sleepers: string[], present: string[], place: string, hidden: string[]): { text: string | null; wakes: string[]; changes: Change[]; search: boolean;
+  finds: string[] } | null {
   let value: unknown;
   try { value = JSON.parse(answer); } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
@@ -346,18 +349,21 @@ export function readResult(answer: string, sleepers: string[], present: string[]
     changes.set(`${what} ${of}`, { of, what, text: cut(wordsOf(change.text).join(' '), LIMITS[what]).text });
   }
   return { text: cut(wordsOf(value.result ?? '').join(' '), MAX_WORDS).text || null, wakes: sleepers.filter(id => named.includes(id)), changes: [...changes.values()],
-    search: value.search === true };
+    search: value.search === true, finds: hidden.filter(id => Array.isArray(value.finds) && value.finds.includes(id)) };
 }
 
 // The world's answer to a deed takes effect: each sleeper it wakes has its sleep end when the deed ends, at `end`.
 // The waking itself comes at that sleeper's turn, as every waking does. Those awake in the place perceive the answer.
 // Its changes replace what the people of the place have, hold and how they are placed, and the things lying there.
-// A deed the world calls a search counts towards its doer's search of the place, and what it finds is hidden no
-// longer, for anyone: it is among the things of the place, at their end and within their limit, unless the answer
-// wrote those things anew, which then says where it went.
-export function result(world: World, people: Person[], lies: Lying, deed: Event, text: string | null, wakes: string[], changes: Change[], search: boolean): Event {
+// A deed the world calls a search counts towards its doer's search of the place and finds what that search has
+// lasted long enough for; `finds` are the hidden things the world says the deed went straight to. What is found
+// either way is hidden no longer, for anyone: it is among the things of the place, at their end and within their
+// limit, unless the answer wrote those things anew, which then says where it went.
+export function result(world: World, people: Person[], lies: Lying, deed: Event, text: string | null, wakes: string[], changes: Change[], search: boolean,
+  finds: string[]): Event {
   const doer = people.find(person => person.id === deed.who)!, { things } = lies;
-  const { found, left } = search ? sought(lies, deed) : { found: [], left: lies.hidden.get(deed.place)! };
+  const timed = search ? sought(lies, deed).found : [], hidden = lies.hidden.get(deed.place)!;
+  const found = hidden.filter(thing => timed.includes(thing) || finds.includes(thing.id)), left = hidden.filter(thing => !found.includes(thing));
   if (search) lies.searched.set(`${deed.who} ${deed.place}`, (lies.searched.get(`${deed.who} ${deed.place}`) ?? 0) + deed.seconds);
   lies.hidden.set(deed.place, left);
   if (found.length && !changes.some(change => change.what === 'things')) {
@@ -369,6 +375,6 @@ export function result(world: World, people: Person[], lies: Lying, deed: Event,
   }
   for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + deed.seconds);
   return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
-    heard: text === null ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null, wakes, changes, search, found: found.map(thing => thing.text) };
+    heard: text === null ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null, wakes, changes, search, finds, found: found.map(thing => thing.text) };
 }
 

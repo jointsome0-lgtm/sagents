@@ -18,14 +18,14 @@ export class JournalError extends Error {}
 // `act`: the action as it was read from the answer, or the reason why the answer could not be used, with that turn's
 // word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
-// `at`: what came of the deed, or null, the sleepers it wakes, what it changes of bodies and belongings, and whether
-// the deed was a search of its place.
+// `at`: what came of the deed, or null, the sleepers it wakes, what it changes of bodies and belongings, whether
+// the deed was a search of its place, and the labels of the hidden things it went straight to.
 // A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
 // no answer is behind it.
 export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal }
   | { kind: 'arrive' | 'wake'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean }
-  | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[]; changes: Change[]; search: boolean }
+  | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[]; changes: Change[]; search: boolean; finds: string[] }
   | LawRecord;
 // `by` is the name of the model whose answer the record came of, and null for a record no answer is behind. The rules
 // never read it: the same records give the same world whoever answered.
@@ -111,11 +111,11 @@ export function advance(world: World, state: State, record: Record): Event {
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
     const sleepers = people.filter(person => person.asleep && person.place === deed.place).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
-    const { text, wakes, changes, search } = record;
-    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, changes, search }), sleepers, present, deed.place), { text, wakes, changes, search })) {
+    const { text, wakes, changes, search, finds } = record, hidden = state.lies.hidden.get(deed.place)!.map(thing => thing.id);
+    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, changes, search, finds }), sleepers, present, deed.place, hidden), { text, wakes, changes, search, finds })) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
-    const event = result(world, people, state.lies, deed, text, wakes, changes, search);
+    const event = result(world, people, state.lies, deed, text, wakes, changes, search, finds);
     const doer = named(world.characters, deed.who);
     remember(minds.get(deed.who)!, lineOf(seq, `${when(deed.who, event.at)} ${record.text === null ? NOTHING : `What came of it: ${record.text}`}`));
     for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} What came of what ${doer} did: ${record.text}`));

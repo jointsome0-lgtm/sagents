@@ -162,14 +162,21 @@ The world answers a deed:
   and its span. It is sent no sheet, note, memory or speech.
 - It answers with `result`, one or two sentences of what the senses give, 65 words at most, or null when there is
   nothing to notice; with `wakes`, the sleepers of that place whom the deed wakes; with `changes`, described
-  below; and with `search`, whether the deed was a search of the place. Any other id is dropped.
-- A hidden thing is found by time and not by the world's judgement. The rules keep, for each person and place, the
-  seconds of that person's deeds there that the world called a search. A thing is found by the search with which
-  they reach its `minutes`: ten minutes for the backpack in the shed of «Ночь на перевале», in one deed or in
-  several. The rules know how long a deed lasts before the world is asked, so the request lists the hidden things
-  of the place in two kinds, those this deed finds if it is a search and those it does not find whatever it is, and
-  the world counts nothing. It is told that nobody sees a hidden thing and that no result speaks of one, except of
-  one this deed finds. What is found is hidden no longer, for anyone: the rules put its text at the end of the
+  below; with `search`, whether the deed was a search of the place; and with `finds`, the labels of the hidden
+  things the deed went straight to. Any other id or label is dropped.
+- A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
+  each person and place, the seconds of that person's deeds there that the world called a search. A thing is found
+  by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «Ночь на
+  перевале», in one deed or in several. The rules know how long a deed lasts before the world is asked, so the
+  request lists the hidden things of the place in two kinds, those this deed finds if it is a search and those no
+  search finds yet, and the world counts nothing.
+- The second way is a deed that goes straight to the very spot the hidden text names, however short: someone who
+  knows that the backpack lies under the workbench behind the canisters reaches there and has it. That is a reading
+  of the deed, so the world judges it: every hidden thing is sent under a label, `h1` for the first of the place's
+  list, and the answer's `finds` names the labels the deed went straight to. A label that was not sent is dropped.
+  The world is told that a deed which names another spot, or the thing and not where it lies, is not one.
+- The world is told that nobody sees a hidden thing and that no result speaks of one until it is found. What is
+  found either way is hidden no longer, for anyone: the rules put its text at the end of the
   place's `things`, cut at their limit, unless the answer's `changes` wrote those things anew, which then says
   where it went. The time one person searched does not count for another, and it is kept when the person leaves.
 - Nobody gets to another place by a deed, and the world is told so: whoever tries is still where it was, by the
@@ -189,8 +196,8 @@ Bodies and belongings:
   and no clothes, which can be taken off (60 words at most); `pose`, how and where in its place it is (20);
   `holds`, what is in its hands or worn, clothes included (30); and `has`,
   what it carries out of sight (60). It may give a place `things`: what lies there and can be moved, taken or
-  changed (120); and `hidden`, a list of `{ text, minutes }`: what lies there and is found only by a search, each
-  text 60 words at most. `facts` are for what does not change. All are optional and in the world's language.
+  changed (120); and `hidden`, a list of `{ text, minutes }`: what lies there and is not seen until someone finds
+  it, each text 60 words at most. `facts` are for what does not change. All are optional and in the world's language.
 - `pose`, `holds`, `has` and `things` start from the world file and then belong to the world's state. They change
   only by `changes` in the world's answer to a deed: a list of `{ of, what, text }`, where `what` is `pose`, `holds`,
   `has` or `things`, `of` is the id of a person in the deed's place, awake or asleep, or for `things` the id of that
@@ -300,6 +307,8 @@ law and the record:
   deed done in that place; a pose is also dropped when its owner leaves.
 - Nobody is sent what another person carries out of sight, what is hidden in a place, or the looks, pose or
   holdings of a person in another place.
+- A hidden thing is found only where it lies, by a search of its finder that has lasted its minutes or by a deed the
+  world says went straight to it, and then it is hidden for nobody.
 - The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of
   it.
 - Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place's.
@@ -330,9 +339,9 @@ What it lacks:
 - The world answers a deed and does nothing of its own accord. What people have and hold and the things of a place
   are texts that the world's answer rewrites whole: nothing counts the items in them, so nothing checks that a thing
   given was received or that the answer agrees with the facts. The facts of the world file never change.
-- A search is whatever the world calls one, and nothing checks that. A hidden thing takes the same minutes from
-  someone who knows where it lies as from someone who does not, and nobody is told how long a search has lasted or
-  that there is anything left to find.
+- A search is whatever the world calls one, and a deed went straight to a hidden thing when the world says so:
+  nothing checks either, so a world that is generous finds a thing for someone who only guessed. Nobody is told how
+  long a search has lasted or that there is anything left to find.
 - A `go` takes along everything a person holds and has, whatever its size, and nobody sees what lies in a place
   without a deed.
 - A clock is a mark in the world file and not a thing: a watch that is handed over, lost or stopped still shows its

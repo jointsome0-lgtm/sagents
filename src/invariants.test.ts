@@ -32,8 +32,9 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
   // that a request shows whose it holds.
   places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {}, open: index % 2 === 1, clock: index % 3 === 0,
     things: `things-p${index}-0`, facts: `facts-p${index}-0`,
-    // Two things are hidden in every place: one that a few minutes of searching find, and one that takes half an hour.
-    hidden: [{ text: `hidden-p${index}-0`, minutes: 3 }, { text: `hidden-p${index}-1`, minutes: 30 }] })),
+    // Three things are hidden in every place: one that a few minutes of searching find, one that takes half an hour,
+    // and one that no search here lasts long enough for.
+    hidden: [{ text: `hidden-p${index}-0`, minutes: 3 }, { text: `hidden-p${index}-1`, minutes: 30 }, { text: `hidden-p${index}-2`, minutes: 600 }] })),
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
     facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, holds: `holds-c${index}-0`, ...(index % 4 ? { has: `has-c${index}-0` } : {}), clock: index % 5 === 0 })) });
 // The settings of sleep come from an environment, and the world file changes one of them itself.
@@ -58,6 +59,7 @@ export const LAWS = {
   spent: 'Nobody acts after being awake for the world\'s limit: at that turn it falls asleep instead.',
   body: 'What a person has, holds and how it is placed, and the things of a place, change only by the world\'s answer to a deed done in that place; a pose is also dropped when its owner leaves.',
   unseen: 'Nobody is sent what another person carries out of sight, what is hidden in a place, or the looks, pose or holdings of a person in another place.',
+  found: 'A hidden thing is found only where it lies, by a search of its finder that has lasted its minutes or by a deed the world says went straight to it, and then it is hidden for nobody.',
   weather: 'The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of it.',
   clock: 'Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place\'s.',
 };
@@ -98,13 +100,16 @@ function standIn(record: () => number) {
       // that is nobody's to change; now and then it leaves nothing.
       const here = [...body.matchAll(/\n- Person \d+ \((c\d+)\), a/g)].map(match => match[1]), spot = /^The place: Place \d+ \((p\d+)\)/.exec(request.messages[0].content)![1];
       seen.turns?.push(askedOf(request, record(), spot, true));
+      const labels = [...body.matchAll(/\nHidden here \((h\d+)\)/g)].map(match => match[1]);
       const changes = Array.from({ length: upTo(6) - 1 }, () => {
         const what = ['pose', 'holds', 'has', 'things', 'looks'][upTo(5) - 1];
         const of = what === 'things' ? (random() < 0.7 ? spot : `p${upTo(PLACES) - 1}`) : random() < 0.7 ? here[upTo(here.length) - 1] : `c${upTo(PEOPLE) - 1}`;
         return { of, what, text: random() < 0.15 ? '' : `${what}-${of}-${upTo(99_999)}` };
       });
       answer = roll < 0.1 ? 'no answer' : { result: roll < 0.4 ? null : words(upTo(90)), wakes: [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`], changes,
-        search: random() < 0.5 };
+        // It calls about half of the deeds a search, and now and then says that a deed went straight to a hidden thing
+        // of the place or to one that is not there.
+        search: random() < 0.5, finds: random() < 0.15 ? [labels[upTo(labels.length + 1) - 1] ?? 'h9'] : [] };
     } else if ('memory' in (request.schema as { properties: object }).properties) {
       seen.turns?.push(askedOf(request, record(), asker(request), false));
       answer = roll < 0.08 ? { memory: '' } : roll < 0.12 ? { memory: 'x'.repeat(5000) } : { memory: words(roll < 0.3 ? 61 + upTo(100) : upTo(60)) };
@@ -139,7 +144,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
-    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0 };
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0 };
   const sleepEnds = new Map<string, number>();
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
@@ -210,11 +215,15 @@ test('thousands of steps of any answers leave a journal in which every law of th
       }
       // A search finds what its doer's searches of the place have lasted long enough for. It lies among the things
       // from then on, unless the answer wrote the things anew.
-      if (record.search) {
-        const key = `${record.who} ${event.place}`, seconds = (searched.get(key) ?? 0) + before.seconds;
-        searched.set(key, seconds);
-        const found = hidden.get(event.place)!.filter(thing => seconds >= thing.minutes * 60);
-        hidden.set(event.place, hidden.get(event.place)!.filter(thing => !found.includes(thing)));
+      // So does a deed that the world says went straight to a thing still hidden in that place.
+      const key = `${record.who} ${event.place}`, seconds = (searched.get(key) ?? 0) + before.seconds, lay = hidden.get(event.place)!;
+      if (record.search) searched.set(key, seconds);
+      law('found', record.finds.every(id => lay.some(thing => thing.id === id)), seq);
+      const found = lay.filter(thing => (record.search && seconds >= thing.minutes * 60) || record.finds.includes(thing.id));
+      law('found', isDeepStrictEqual(event.found, found.map(thing => thing.text)), seq);
+      count.straight += found.filter(thing => !record.search || seconds < thing.minutes * 60).length;
+      if (found.length) {
+        hidden.set(event.place, lay.filter(thing => !found.includes(thing)));
         if (found.length && !record.changes.some(change => change.what === 'things')) {
           things.set(event.place, [things.get(event.place), ...found.map(thing => thing.text)].filter(text => text !== null).map(text => `${text}.`.replace('..', '.')).join(' '));
         }

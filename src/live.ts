@@ -46,8 +46,8 @@ const text = { type: ['string', 'null'] };
 const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'note'],
   properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: text,
     seconds: { type: ['integer', 'null'] }, until: text, note: text } });
-const RESULT_SCHEMA = { type: 'object', additionalProperties: false, required: ['result', 'wakes', 'changes', 'search'],
-  properties: { result: text, wakes: { type: 'array', items: { type: 'string' } }, search: { type: 'boolean' },
+const RESULT_SCHEMA = { type: 'object', additionalProperties: false, required: ['result', 'wakes', 'changes', 'search', 'finds'],
+  properties: { result: text, wakes: { type: 'array', items: { type: 'string' } }, search: { type: 'boolean' }, finds: { type: 'array', items: { type: 'string' } },
     changes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['of', 'what', 'text'],
       properties: { of: { type: 'string' }, what: { type: 'string', enum: ['pose', 'holds', 'has', 'things'] }, text: { type: 'string' } } } } } };
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
@@ -100,8 +100,9 @@ Answer with one JSON object.
 - wakes: the ids of the sleepers here whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not.
 - changes: what the deed changed of the people here and of the things of the place, or an empty list when it changed nothing. An entry has \`of\`, \`what\` and \`text\`. \`what\` is one of: pose, how and where in the place a person is (${LIMITS.pose} words at most); holds, what a person has in their hands or wears in sight (${LIMITS.holds}); has, what a person carries out of sight (${LIMITS.has}); things, what lies in the place and can be moved, taken or changed (${LIMITS.things}). \`of\` is the id of a person here, or for things the id of the place. \`text\` is the whole new text that takes the place of the old one, in the language of the world's description; an empty text when nothing is left.
 - search: true when the deed is a search of the place: someone looks through it, under and behind what is there, for one thing or for whatever there is. False for any other deed, a look around included.
+- finds: the labels of the hidden things that the deed goes straight to, or an empty list.
 
-You may be told what is hidden here. A hidden thing is seen by nobody, and no result, pose or text of things speaks of it or hints at it, whoever looks and wherever. The one exception is a thing you are told this deed finds if it is a search: when the deed is a search, the result says where it turned up and what is seen of it, and from then on it is among the things of the place. You never decide whether a search has been long enough: you are told.
+You may be told what is hidden here, each thing under a label. A hidden thing is seen by nobody, and no result, pose or text of things speaks of it or hints at it, whoever looks and wherever, until it is found. It is found in two ways. By a search that has lasted long enough: you are told which things this deed finds if it is a search, and you never decide whether a search has been long enough. Or by a deed that goes straight to the very spot the hidden text names, however short the deed is: its label then goes into \`finds\`. A deed that names another spot, or names the thing and not the spot where it lies, does not go straight to it. When a thing is found either way, the result says where it turned up and what is seen of it, and from then on it is among the things of the place.
 
 A thing never appears from nowhere and never vanishes. What one person gives, another receives. What is taken from the place is in someone's hands or pockets afterwards, and what is put down is among the things of the place: such a deed changes both texts. A thing goes with what is in it: clothes taken off or a bag put down take what is in their pockets along, out of what the person carries and into the things of the place. A deed that only looks, listens or speaks changes nothing.`;
 const worldSystemOf = (world: World) => `${WORLD_INSTRUCTIONS}
@@ -119,7 +120,7 @@ const seen = (character: { looks: string | null }, person: Person) => `${part('L
 
 // One deed as the world is asked about it: the place, the other places by name, who is there, what came of earlier
 // deeds there, and the deed. The rules know how long the deed lasts, so they say which of the hidden things of the
-// place it finds if the world calls it a search.
+// place it finds if the world calls it a search; whether the deed goes straight to one is the world's to say.
 function deedOf(world: World, state: State, deed: Event): string {
   const place = world.places.find(item => item.id === deed.place)!;
   const here = world.characters.flatMap((character, index) => {
@@ -129,8 +130,8 @@ function deedOf(world: World, state: State, deed: Event): string {
   });
   const earlier = state.results.get(place.id)!, { found, left } = sought(state.lies, deed);
   return [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Things', state.lies.things.get(place.id)!)}${part('Facts', place.facts)}`,
-    ...found.map(thing => `Hidden here. This deed finds it if it is a search of the place, and not otherwise: ${closed(thing.text)}`),
-    ...left.map(thing => `Hidden here. This deed does not find it, whatever the deed is: ${closed(thing.text)}`),
+    ...found.map(thing => `Hidden here (${thing.id}). This deed finds it if it is a search of the place, or if it goes straight to the spot named: ${closed(thing.text)}`),
+    ...left.map(thing => `Hidden here (${thing.id}). This deed finds it only if it goes straight to the spot named, and not by searching: ${closed(thing.text)}`),
     ...(world.places.length > 1 ? [`Other places, which nobody reaches by a deed: ${world.places.filter(item => item !== place).map(tagged).join(', ')}.`] : []),
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...here,
     ...(earlier.length ? ['What came of earlier deeds here:', ...earlier.map(line => line.text)] : []),
@@ -158,7 +159,7 @@ export function requestLimit(world: World): number {
   // things, what is hidden and the results the place keeps, and the weather.
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
   const deed = worldSystemOf(world).length
-    + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place) + place.hidden.reduce((sum, thing) => sum + thing.text.length + 100, 0)))
+    + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place) + place.hidden.reduce((sum, thing) => sum + thing.text.length + 140, 0)))
     + LIMITS.things * CHARS_PER_WORD
     + places.reduce((sum, item) => sum + item.length + 2, 0) + 60
     + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + LIMITS.has * CHARS_PER_WORD + 40, 0)
@@ -267,16 +268,16 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       // gets one more try; after that nothing came of the deed.
       const request = { system: worldSystem, schema: RESULT_SCHEMA, messages: [{ role: 'user' as const, content: deedOf(world, state, deed) }] };
       const present = state.people.filter(person => person.place === deed.place);
-      const sleepers = present.filter(person => person.asleep).map(person => person.id);
+      const sleepers = present.filter(person => person.asleep).map(person => person.id), hidden = state.lies.hidden.get(deed.place)!.map(thing => thing.id);
       let came = null;
       for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
         const answer = await ask(judge, request);
         if (answer === null) return outcome;
-        came = readResult(answer, sleepers, present.map(person => person.id), deed.place);
+        came = readResult(answer, sleepers, present.map(person => person.id), deed.place, hidden);
         if (!came) unusable(judge);
       }
       await happened({ kind: 'result', who: deed.who, at: deed.at, text: came?.text ?? null, wakes: came?.wakes ?? [], changes: came?.changes ?? [],
-        search: came?.search ?? false }, judge.name);
+        search: came?.search ?? false, finds: came?.finds ?? [] }, judge.name);
       continue;
     }
     const actor = next(state.people);
