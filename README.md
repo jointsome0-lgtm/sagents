@@ -95,8 +95,9 @@ call that ends in a failure, `wrong_model` included, may have handed over a part
 | `timeout`, `cancelled` | The call's own limit, or its caller, stopped it. |
 | `storage_failed` | The account file or its lock could not be read or written. An account file that cannot be read or understood is left as it is; repair or remove it by hand in `~/.config/sagents/`. |
 
-So far this code has talked to stand-ins for both services in its own checks and to nothing else. The first real
-sign-in and the first real request have not happened yet.
+In its own checks this code talks to stand-ins for both services and to nothing else. Beyond them it has been used
+with one account of a ChatGPT plan and with one chat completions server, so what another account or server does
+differently is not known.
 
 ### A live world
 
@@ -111,7 +112,9 @@ otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-
 and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note.
 `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
 what each one remembers after the night decides what happens; `examples/seaside-cafe.json` is a café with a
-crowd and a waitress whom nobody plays, in a town whose places lie on a map.
+crowd and a waitress whom nobody plays, in a town whose places lie on a map. The three examples are written in
+Russian. What the models are told is in English and asks for answers in the language of the world's description; no
+world in another language has been run with a real model.
 
 The rules of time and hearing:
 
@@ -381,8 +384,8 @@ The journal and the state file:
   a journal that does not is refused. The file belongs to one world file and its environment together, by a hash
   of the content of both, and refuses another of either, so neither can be edited or exchanged while the world is
   under way. A second run on a file that is in use is
-  refused. A new or empty file becomes a state file; an SQLite database of anything else is refused before
-  anything in it is changed.
+  refused. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
+  writes nothing to it.
 
 The laws of the world. Whatever the model answers, these hold in every journal. `npm test` plays thirty characters
 for thousands of steps with answers of every kind, checks each law from the journal alone, and a failure names the

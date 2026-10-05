@@ -183,8 +183,9 @@ function namedOf(state: State, place: Place, deed: boolean) {
 // A string that is one of a list, or any string when the list is empty: a strict schema may refuse an empty list.
 const oneOf = (list: string[]) => list.length ? { type: 'string', enum: list } : { type: 'string' };
 const entries = (properties: object) => ({ type: 'array', items: { type: 'object', additionalProperties: false, required: Object.keys(properties), properties } });
-// The schema of the world's answer is made for each request, so that a model held to it can name no label, id or
-// state that is not there. Its fields stand with the entries before the words, so that the words are written after them and cannot lead them;
+// The schema of the world's answer is made for each request, so that a model held to it names no label, id or
+// state that is not there where a list has entries; an empty list takes any string, and the rules drop or refuse
+// what the schema lets through. Its fields stand with the entries before the words, so that the words are written after them and cannot lead them;
 // both orders passed the check of 2026-10-05 on the weak local model.
 const resultSchemaOf = (state: State, place: Place) => {
   const names = namedOf(state, place, true);

@@ -60,7 +60,7 @@ export function readThings(value: unknown, field: string, labels: { next: number
     const label = `t${labels.next++}`;
     const n = item.n === undefined ? null : typeof item.n === 'number' && Number.isInteger(item.n) && item.n > 0 && item.n <= MAX_N ? item.n : refuse(`${here}.n`, 'must be a whole number from 1 to 1,000,000,000');
     const stock = flag(item.stock, `${here}.stock`), money = flag(item.money, `${here}.money`), open = flag(item.open, `${here}.open`);
-    const food = item.food === undefined ? null : typeof item.food === 'number' && item.food >= 0 ? item.food : refuse(`${here}.food`, 'must be the calories of one, zero or more');
+    const food = item.food === undefined ? null : typeof item.food === 'number' && Number.isFinite(item.food) && item.food >= 0 ? item.food : refuse(`${here}.food`, 'must be the calories of one, zero or more');
     const burns = flag(item.burns, `${here}.burns`), fixed = flag(item.fixed, `${here}.fixed`);
     if (fixed && !fixable) return refuse(`${here}.fixed`, 'is for a thing of a place itself or a thing inside a fixed one');
     const states = item.states === undefined ? null : Array.isArray(item.states) && item.states.length >= 2 && item.states.length <= MAX_STATES
@@ -80,7 +80,7 @@ export function readThings(value: unknown, field: string, labels: { next: number
     if (item.hidden !== undefined) {
       if (!top || !isObject(item.hidden)) return refuse(`${here}.hidden`, 'must be an object, on a thing of a place itself');
       const spot = boundedOf(textOf(item.hidden.spot, `${here}.hidden.spot`), `${here}.hidden.spot`, SPOT_WORDS) as string;
-      const minutes = typeof item.hidden.minutes === 'number' && item.hidden.minutes > 0 ? item.hidden.minutes : refuse(`${here}.hidden.minutes`, 'must be a number above zero');
+      const minutes = typeof item.hidden.minutes === 'number' && Number.isFinite(item.hidden.minutes) && item.hidden.minutes > 0 ? item.hidden.minutes : refuse(`${here}.hidden.minutes`, 'must be a number above zero');
       hidden = { spot, minutes };
     }
     return { label, name, n, fixed, open, stock, food, burns, fire, states, state, money, holds, hidden };
