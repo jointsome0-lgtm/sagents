@@ -610,6 +610,13 @@ What sagents sends and to whom:
   An extra field cannot replace `model`, `messages`, `max_tokens`, `max_completion_tokens`, `response_format`, `stream`
   or `n`: a setting that names one is refused.
 - The key goes in the `authorization` header. sagents does not store it.
+- A router that serves one model from several endpoints may say in a top-level `provider` of its answer which one
+  answered. When that is a string, `ask` gives it as `endpoint` and a `live` run counts the answers of each for the
+  model: `, answered by Alpha 12, Beta/fp8 3` in the model's line of the totals, which is then printed also when
+  one model played, and `endpoints` with `--json`. A name is kept when it is 40 characters at most of letters,
+  digits, space, `.`, `/`, `-` and `_`; any other string, and any name after the sixteenth of a model in one run,
+  is counted as `other`. A server that sends no such field changes nothing. The journal and the state file do not
+  hold it, and an answer that failed is counted under no endpoint.
 - The address is `https`, or plain `http` to this computer only (`localhost`, `127.0.0.1`, `::1`), with a key or
   without one: neither the key nor the text travels unencrypted. Any other address is refused before a request is
   made. Reach a rented card through an SSH tunnel to a local port or over `https`.

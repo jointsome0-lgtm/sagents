@@ -1,4 +1,4 @@
-import { ModelError } from './chatgpt.ts';
+import { ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
 import type { Request, Result } from './chatgpt.ts';
 import { advance, memoryStore, replay, RESULT_WORDS, SAID_WORDS } from './journal.ts';
 import type { Record, State, Store } from './journal.ts';
@@ -373,10 +373,14 @@ export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 
 // `refused` counts the answers of the world that could be read and that the rules of things did not take, and `void`
 // the deeds and speeches to figures that nothing came of because neither of the two answers asked for could be used
 // or taken, or because the service declined to write the one that was asked for. A run that a connection's failure ended keeps what the failure may say of itself besides its code: the
-// HTTP status, and the service's own code and field name, when it had them. Never the service's words.
+// HTTP status, and the service's own code and field name, when it had them. Never the service's words. `endpoints`
+// counts, for a model whose connection says which endpoint of a router answered, the answers of each. No record
+// keeps that: it is not of the story, and the same records give the same world whoever answered.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string;
   seconds: number; rewrites: number; lost: number; refused: number; void: number;
-  models: { [name: string]: Tally }; kinds: { [kind in Asked]: Spent } };
+  models: { [name: string]: Tally }; kinds: { [kind in Asked]: Spent }; endpoints: { [name: string]: { [endpoint: string]: number } } };
+// How many names of endpoints a run counts for one model; the answers of any further one are counted together.
+const MAX_ENDPOINTS = 16;
 
 const CUT = Symbol('cut'), DECLINED = Symbol('declined');
 const spent = (): Spent => ({ calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
@@ -390,17 +394,16 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(world), shared = sharedOf(world);
   const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
-    models: {}, kinds: { turn: spent(), memory: spent(), world: spent() } };
+    models: {}, kinds: { turn: spent(), memory: spent(), world: spent() }, endpoints: {} };
   // Who plays whom. Every request of a character, a turn or a memory, goes to its own connection under its own model.
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
   // A tally is the totals' own property under the model's name, whatever the name: one like `constructor` finds nothing that every object has.
-  const tallyOf = (player: { name: string }) => {
-    if (!Object.hasOwn(outcome.models, player.name)) {
-      Object.defineProperty(outcome.models, player.name, { value: { invalid: 0, overlong: 0, declined: 0, unreported: 0, ...spent() }, enumerable: true, writable: true, configurable: true });
-    }
-    return outcome.models[player.name];
+  const own = <Value>(under: { [name: string]: Value }, name: string, first: () => Value) => {
+    if (!Object.hasOwn(under, name)) Object.defineProperty(under, name, { value: first(), enumerable: true, writable: true, configurable: true });
+    return under[name];
   };
+  const tallyOf = (player: { name: string }) => own(outcome.models, player.name, () => ({ invalid: 0, overlong: 0, declined: 0, unreported: 0, ...spent() }));
   const unusable = (player: { name: string }) => {
     outcome.invalid += 1;
     tallyOf(player).invalid += 1;
@@ -456,6 +459,12 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       tally.inputTokens += answer.usage?.inputTokens ?? 0;
       tally.cachedInputTokens += answer.usage?.cachedInputTokens ?? 0;
       tally.outputTokens += answer.usage?.outputTokens ?? 0;
+    }
+    if (answer.endpoint !== undefined) {
+      const counts = own(outcome.endpoints, player.name, () => ({}));
+      const known = ENDPOINT.test(answer.endpoint) && (Object.hasOwn(counts, answer.endpoint) || Object.keys(counts).length < MAX_ENDPOINTS);
+      const endpoint = known ? answer.endpoint : OTHER_ENDPOINT;
+      Object.defineProperty(counts, endpoint, { value: own(counts, endpoint, () => 0) + 1, enumerable: true, writable: true, configurable: true });
     }
     return answer.text;
   };

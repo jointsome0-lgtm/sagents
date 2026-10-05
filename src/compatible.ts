@@ -1,4 +1,4 @@
-import { ModelError } from './chatgpt.ts';
+import { ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
 import type { Controls, Request, Result } from './chatgpt.ts';
 
 // Any server that speaks the OpenAI chat completions protocol: vLLM or llama.cpp on a rented card, OpenRouter. The
@@ -151,8 +151,11 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       const input = isObject(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
       const output = isObject(usage.completion_tokens_details) ? usage.completion_tokens_details : {};
       const inputTokens = count(usage.prompt_tokens), outputTokens = count(usage.completion_tokens);
+      // A router says in `provider` which of a model's endpoints answered: two answers of one model may come from two.
+      // Only a short plain name is kept, and nothing else of what the server wrote there.
+      const endpoint = typeof answer.provider !== 'string' ? {} : { endpoint: ENDPOINT.test(answer.provider) ? answer.provider : OTHER_ENDPOINT };
       return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
-        cachedInputTokens: count(input.cached_tokens), outputTokens, reasoningTokens: count(output.reasoning_tokens) } };
+        cachedInputTokens: count(input.cached_tokens), outputTokens, reasoningTokens: count(output.reasoning_tokens) }, ...endpoint };
     },
   };
 }

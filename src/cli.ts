@@ -170,13 +170,15 @@ if (command === 'ask') {
         // What a failed run may say of its failure, as `detailsOf` says it of one request.
         const failure = { ...(totals.httpStatus ? { httpStatus: totals.httpStatus } : {}), ...(totals.providerCode ? { providerCode: totals.providerCode } : {}), ...(totals.param ? { param: totals.param } : {}) };
         console.log(json ? JSON.stringify({ status: totals.status, reason: totals.reason, ...failure, minutes: played, calls: totals.calls, invalid: totals.invalid, overlong: totals.overlong, declined: totals.declined,
-          rewrites: totals.rewrites, lost: totals.lost, refused: totals.refused, void: totals.void, unreported: totals.unreported, inputTokens: totals.inputTokens, cachedInputTokens: totals.cachedInputTokens, outputTokens: totals.outputTokens, models: totals.models, kinds: totals.kinds })
+          rewrites: totals.rewrites, lost: totals.lost, refused: totals.refused, void: totals.void, unreported: totals.unreported, inputTokens: totals.inputTokens, cachedInputTokens: totals.cachedInputTokens, outputTokens: totals.outputTokens, models: totals.models, kinds: totals.kinds, endpoints: totals.endpoints })
           : `${totals.status} (${[totals.reason, ...Object.values(failure)].join(' ')}): ${played} story minutes, ${totals.calls} calls, ${totals.invalid} invalid, ${totals.overlong} of them cut at the output limit, ${totals.declined} of them declined by the service, ${totals.rewrites} memory rewrites, ${
             totals.lost} lost, ${totals.refused} answers of the world refused, ${totals.void} deeds left with nothing, ${tokens(totals)}${unreported(totals.unreported)}`);
         const models = Object.entries(totals.models);
-        if (!json && models.length > 1) {
+        // A model whose router said which of its endpoints answered has its line also when it played alone.
+        const answeredBy = (name: string) => Object.hasOwn(totals.endpoints, name) ? `, answered by ${Object.entries(totals.endpoints[name]).map(([endpoint, count]) => `${endpoint} ${count}`).join(', ')}` : '';
+        if (!json && (models.length > 1 || Object.keys(totals.endpoints).length)) {
           for (const [name, tally] of models) {
-            console.log(`  ${name}: ${tally.calls} calls, ${tally.invalid} invalid, ${tally.overlong} of them cut at the output limit, ${tally.declined} of them declined by the service, ${tokens(tally)}${unreported(tally.unreported)}`);
+            console.log(`  ${name}: ${tally.calls} calls, ${tally.invalid} invalid, ${tally.overlong} of them cut at the output limit, ${tally.declined} of them declined by the service, ${tokens(tally)}${unreported(tally.unreported)}${answeredBy(name)}`);
           }
         }
         // What the requests were for: the turns of residents, the memories written anew and the answers of the world.

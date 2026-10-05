@@ -38,6 +38,10 @@ test('an api: model goes to the server the address names, with what the caller g
   const result = await respond({ ...request, model }, { onText: (part: string) => { parts.push(part); } });
   assert.deepEqual(result, { text: '{"ok":true}', usage: { inputTokens: 120, cachedInputTokens: 100, outputTokens: 30, reasoningTokens: 0 } });
   assert.deepEqual(parts, ['{"ok":true}']);
+  // A router's name for the endpoint that answered is kept when it is a short plain name, any other string is one
+  // fixed word, and what is no string is nothing: no word of the server's goes further by this field.
+  const by = async (provider: unknown) => (await createCompatible({ env, fetch: async () => json(200, { ...await answer('{"ok":true}').json() as object, provider }) }).respond(request)).endpoint;
+  assert.deepEqual([await by('Alpha/fp8'), await by(`${WORDS}: ${STORY}`), await by('x'.repeat(41)), await by(''), await by({ name: 'Alpha' }), await by(undefined)], ['Alpha/fp8', 'other', 'other', 'other', undefined, undefined]);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(calls[0].init.method, 'POST');
@@ -147,4 +151,10 @@ test('ask prints one line with codes for a refusal that quotes the key and the r
   assert.match(live.stdout, /^failed \(provider_failed 502 bad_gateway\): 0 story minutes, 0 calls, /m);
   assert.equal(live.status, 1);
   assert.deepEqual(leaks(`${live.stdout}${live.stderr}`), []);
+  // A run whose answers came from two endpoints of one model counts them in the model's line.
+  const wait = { choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({ action: 'wait', text: null, to: null, place: null, seconds: 600, until: null, note: null }) } }] };
+  const routed = `data:text/javascript,${encodeURIComponent(`let n = 0; globalThis.fetch = async () => new Response(JSON.stringify({ ...${JSON.stringify(wait)}, provider: n++ % 3 ? 'Alpha' : 'Beta/fp8' }), { status: 200 });`)}`;
+  const two = spawnSync(process.execPath, ['--import', routed, join(import.meta.dirname, 'cli.ts'), 'live', join(import.meta.dirname, '../examples/night-station.json'), '--model', `api:${request.model}`, '--calls', '3'],
+    { encoding: 'utf8', timeout: 30_000, env: { PATH: process.env.PATH, HOME: mkdtempSync(join(tmpdir(), 'compatible-check-')), SAGENTS_API_URL: 'https://server.invalid/v1', SAGENTS_API_KEY: KEY } });
+  assert.match(two.stdout, /\n  api:google\/gemma-4-31b-it: 3 calls, [^\n]* output tokens, without 3 answers that reported no usage, answered by Beta\/fp8 1, Alpha 2\n/);
 });

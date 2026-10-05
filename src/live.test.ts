@@ -117,7 +117,7 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.deepEqual({ ...outcome, events: journal.all.length },
     { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90, events: 9,
       models: { 'stand-in': { calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90 } },
-      kinds: { turn: { calls: 8, inputTokens: 800, cachedInputTokens: 320, outputTokens: 80 }, memory: { calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, world: { calls: 1, inputTokens: 100, cachedInputTokens: 40, outputTokens: 10 } } });
+      kinds: { turn: { calls: 8, inputTokens: 800, cachedInputTokens: 320, outputTokens: 80 }, memory: { calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, world: { calls: 1, inputTokens: 100, cachedInputTokens: 40, outputTokens: 10 } }, endpoints: {} });
 
   const short = standIn({});
   const few = memoryStore();

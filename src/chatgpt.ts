@@ -64,8 +64,11 @@ export type Message = { role: 'user' | 'assistant'; content: string };
 // `model` is `<id>` or `<id>@<effort>`; `schema` is a JSON Schema the answer must follow, in OpenAI's strict form.
 export type Request = { model: string; system?: string; messages: Message[]; schema?: object };
 export type Usage = { inputTokens: number | null; cachedInputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null };
-// An answer is whole or it is a failure: one that the model's own limit cut short is `output_limit`.
-export type Result = { text: string; usage: Usage | null };
+// An answer is whole or it is a failure: one that the model's own limit cut short is `output_limit`. `endpoint` is
+// the name a router gave to whoever answered, when the connection learned one: `ENDPOINT` is all a name may be, and a
+// name that is anything else is `OTHER_ENDPOINT`.
+export type Result = { text: string; usage: Usage | null; endpoint?: string };
+export const ENDPOINT = /^[A-Za-z0-9 ./_-]{1,40}$/, OTHER_ENDPOINT = 'other';
 // `onText` is handed the text as it arrives: of the plan's stream each piece at once, before the answer is known to be
 // whole and to come from the model asked for, so a call that then fails may have handed over a part; of an `api:`
 // server the whole text once, after its checks. Only what a call returns is an answer.
