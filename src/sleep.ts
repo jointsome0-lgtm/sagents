@@ -48,7 +48,7 @@ export const sleep: Law<'sleep', 'debts'> = {
   // It falls asleep where it is. Those there see it, as they see any falling asleep.
   put(world, _parts, people, record) {
     const person = people.find(item => record.kind === 'spent' && item.id === record.who)!, place = person.place as string;
-    Object.assign(person, { asleep: true, began: record.at, freeAt: record.at + SPENT_SLEEP });
+    Object.assign(person, { asleep: true, pose: null, began: record.at, freeAt: record.at + SPENT_SLEEP });
     return { event: { at: record.at, clock: clockAt(world, record.at), kind: 'sleep', who: person.id, place, to: null, text: null, seconds: SPENT_SLEEP, cut: false,
       heard: awakeIn(people, place, person).map(witness => witness.id), note: null },
     lines: new Map([[person.id, { text: `${timeFor(world, person.id, place, record.at)} ${SPENT} (${SPENT_SLEEP} s)`, idle: true }]]) };

@@ -339,7 +339,8 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     // Whoever leaves is no longer placed as it was.
     Object.assign(actor, { place: null, heading: action.place, pose: null });
   } else if (action.action === 'wait') event.heard = [];
-  else if (action.action === 'sleep') actor.asleep = true;
+  // Whoever falls asleep is no longer placed as it was awake: a sleeper has no pose unless a deed gives it one.
+  else if (action.action === 'sleep') Object.assign(actor, { asleep: true, pose: null });
   // A `do`, and a falling asleep, are left: they are seen and interrupt nobody, and a witness learns of them at its
   // own next turn. Otherwise every gesture in a room would cost one call to the model for each person who waits there.
   actor.freeAt = now + event.seconds;

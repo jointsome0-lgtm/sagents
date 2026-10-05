@@ -273,7 +273,7 @@ test('the world answers a deed from facts, bodies, belongings and the weather, a
 Other places, which nobody reaches by a deed: Blue yard (blue).
 The weather outside: SKY-ONE. Under this roof: ROOF-ONE.
 Here:
-- Anna (anna), asleep. Looks: LOOKS-ANNA. Pose: POSE-ANNA. Holds: HOLDS-ANNA. Has out of sight: HAS-ANNA. Facts: FACT-ANNA.
+- Anna (anna), asleep. Looks: LOOKS-ANNA. Holds: HOLDS-ANNA. Has out of sight: HAS-ANNA. Facts: FACT-ANNA.
 - Boris (boris), awake. Looks: LOOKS-BORIS. Pose: POSE-BORIS. Holds: HOLDS-BORIS. Has out of sight: HAS-BORIS. Facts: FACT-BORIS.
 Now 09:00:07. Boris does, for 10 s: shakes Anna
 What comes of it?` }] });

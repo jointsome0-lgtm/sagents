@@ -63,7 +63,7 @@ export const LAWS = {
   deed: 'Every deed is followed by the world\'s answer and by nothing else.',
   waking: 'A sleeper wakes only when its sleep ends or a deed\'s result wakes it.',
   spent: 'Nobody acts after being awake for the world\'s limit: at that turn it falls asleep instead.',
-  body: 'What a person has, holds and how it is placed, and the things of a place, change only by the world\'s answer to a deed done in that place or to a speech addressed to someone of that place; a pose is also dropped when its owner leaves.',
+  body: 'What a person has, holds and how it is placed, and the things of a place, change only by the world\'s answer to a deed done in that place or to a speech addressed to someone of that place; a pose is also dropped when its owner leaves or falls asleep.',
   unseen: 'Nobody is sent what another person carries out of sight, what is hidden in a place, the facts of the people of a place whom nobody plays, or the looks, pose or holdings of a person in another place.',
   reply: 'Someone of a place whom nobody plays speaks only in answer to a speech addressed to it in its place, once and right after that speech.',
   found: 'A hidden thing is found only where it lies, by a search of its finder that has lasted its minutes or by a deed the world says went straight to it, and then it is hidden for nobody.',
@@ -309,6 +309,9 @@ test('thousands of steps of any answers leave a journal in which every law of th
       // The one who arrives reads the clock of the place it came to.
       read(event.clock);
     } else if (event.kind === 'sleep') {
+      // Nobody asleep has a pose it took before the sleep began.
+      if (bodies.get(event.who)!.pose !== null) count.unposed += 1;
+      bodies.get(event.who)!.pose = null;
       asleep.add(event.who);
       sleepEnds.set(event.who, event.at + event.seconds);
       count.sleep += 1;

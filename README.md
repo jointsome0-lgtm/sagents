@@ -229,7 +229,7 @@ Bodies and belongings:
   `has` or `things`, `of` is the id of a person in the deed's place, awake or asleep, or for `things` the id of that
   place, and `text` is the whole new text, cut at the limit of its kind; an empty text means that nothing is left.
   An entry that names anyone or anything else is dropped. The record of the answer keeps the changes as they were
-  read. A `go` drops the walker's pose. Nothing else touches any of them.
+  read. A `go` drops the walker's pose, and so does falling asleep, by a `sleep` or at the limit: a sleeper is shown as asleep and has no pose until a deed gives it one, and wakes with none. Nothing else touches any of them.
 - The world is told that a thing never appears from nowhere and never vanishes: what one gives another receives,
   what is taken from a place is in someone's hands or pockets afterwards, and a thing goes with what is in it, so
   clothes taken off take what is in their pockets out of what the person carries. Nothing checks that it kept to this.
@@ -331,7 +331,7 @@ law and the record:
 - Nobody acts after being awake for the world's limit: at that turn it falls asleep instead.
 - What a person has, holds and how it is placed, and the things of a place, change only by the world's answer to a
   deed done in that place or to a speech addressed to someone of that place; a pose is also dropped when its owner
-  leaves.
+  leaves or falls asleep.
 - Nobody is sent what another person carries out of sight, what is hidden in a place, the facts of the people of a
   place whom nobody plays, or the looks, pose or holdings of a person in another place.
 - Someone of a place whom nobody plays speaks only in answer to a speech addressed to it in its place, once and
