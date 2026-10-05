@@ -4,6 +4,7 @@ import { createChatgpt, ModelError, signIn, SignInError } from './chatgpt.ts';
 import type { Message, Request } from './chatgpt.ts';
 import { JournalError, StateError } from './journal.ts';
 import { linesOf, runLive } from './live.ts';
+import { modelFor } from './model.ts';
 import { readWorld, WorldError } from './world.ts';
 
 const USAGE = `node src/cli.ts login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
@@ -13,9 +14,10 @@ node src/cli.ts live <world.json> [--model <id>] [--minutes <n>] [--calls <n>] [
                                        the characters of a world file, each played by the model, under the story's clock;
                                        with --state the world is kept in that file and continues from it
 
-A request: {"model": "<id>" or "<id>@<effort>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}}
+A request: {"model": "<id>", "<id>@<effort>" or "api:<id>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}}
 An answer: {"status": "done", "text": "...", "usage": {...}} or {"status": "failed", "reason": "<code>"}
-A failed answer also has "httpStatus", "providerCode" and "param" when the service gave them.`;
+A failed answer also has "httpStatus", "providerCode" and "param" when the service gave them.
+"api:<id>" is a model of the chat completions server that SAGENTS_API_URL names, with SAGENTS_API_KEY if it asks for one.`;
 const DEFAULT_MODEL = 'gpt-6.1-sol';
 const LIVE_MODEL = 'gpt-6.1-sol@low';
 const MAX_REQUEST = 16_000_000;
@@ -85,7 +87,8 @@ if (command === 'ask') {
     // The time limit covers the reading of the request too.
     const started = performance.now();
     const request = await requestFrom(process.stdin, AbortSignal.timeout(Math.floor(seconds * 1000)));
-    const result = await chatgpt.respond(request, { timeoutMs: Math.max(1, seconds * 1000 - (performance.now() - started)) });
+    const { respond, model } = modelFor(request.model);
+    const result = await respond({ ...request, model }, { timeoutMs: Math.max(1, seconds * 1000 - (performance.now() - started)) });
     console.log(JSON.stringify({ status: 'done', ...result }));
   } catch (error) {
     console.log(JSON.stringify({ status: 'failed', ...detailsOf(error) }));
@@ -114,7 +117,9 @@ if (command === 'ask') {
       // The state file's module is loaded only for a run that keeps one. Such a run is a pause in the world's story.
       const state = typeof given.values.state === 'string' ? (await import('./state.ts')).openState(given.values.state, source) : undefined;
       try {
-        const { seconds, ...totals } = await runLive({ world, respond: request => chatgpt.respond(request), model: (given.values.model as string | undefined) ?? LIVE_MODEL,
+        // The model's name picks the connection, as it does for `ask`.
+        const { respond, model } = modelFor((given.values.model as string | undefined) ?? LIVE_MODEL);
+        const { seconds, ...totals } = await runLive({ world, respond: request => respond(request), model,
           minutes, calls, journal: state, pause: state !== undefined,
           onEvent: event => { for (const line of json ? [JSON.stringify(event)] : linesOf(world, event)) console.log(line); } });
         const played = Math.round(seconds / 6) / 10;

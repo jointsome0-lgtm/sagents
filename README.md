@@ -3,8 +3,9 @@
 Story agents. A coding agent gets a shell and a patch tool and works in a repository. A story agent gets an interactive
 story: its scenes, the moves that continue it, its checkpoints and its memory. sagents is the program that runs them.
 
-It is early. Today sagents signs in with ChatGPT, sends one request to a model and runs a first prototype of the live
-mode. The agent loop and the story tools come next. This page keeps the two apart.
+It is early. Today sagents sends one request to a model, through a ChatGPT plan or to a server that speaks the OpenAI
+chat completions protocol, and runs a first prototype of the live mode. The agent loop and the story tools come next.
+This page keeps the two apart.
 
 ## Two modes
 
@@ -60,7 +61,7 @@ offers.
 
 | Field | Meaning |
 | --- | --- |
-| `model` | A model id, or `<id>@<effort>` with `minimal`, `low`, `medium`, `high` or `xhigh`. |
+| `model` | A model id of the ChatGPT plan, or `<id>@<effort>` with `minimal`, `low`, `medium`, `high` or `xhigh`. `api:<id>` is a model of [your own server](#a-server-of-your-own). |
 | `messages` | `user` and `assistant` messages with text `content`. |
 | `system` | Optional instructions. |
 | `schema` | Optional JSON Schema, in OpenAI's strict form, that the answer must follow. |
@@ -75,16 +76,16 @@ limit cut short comes back as `output_limit`, without the text written by then.
 
 | `reason` | What happened |
 | --- | --- |
-| `unauthorized` | Not signed in, the session is over, or OpenAI refuses this account or registration. Run `login`. |
-| `budget_exceeded` | The plan's limit, or the share of it given to sagents, is used up. |
-| `rate_limited`, `model_unavailable`, `provider_failed` | OpenAI did not serve the request this time. |
-| `invalid_request`, `context_limit` | The request cannot be served as it is. `param` names the field when OpenAI did. |
-| `output_limit`, `incomplete_stream`, `invalid_stream`, `empty_response` | The answer did not arrive whole. |
+| `unauthorized` | Not signed in, the session is over, or OpenAI refuses this account or registration. Run `login`. For `api:`, the server refused the key or asks for one (HTTP 401 or 403). |
+| `budget_exceeded` | The plan's limit, or the share of it given to sagents, is used up. For `api:`, the balance behind the key is (HTTP 402). |
+| `rate_limited`, `model_unavailable`, `provider_failed` | The service did not serve the request this time. `provider_failed` without `httpStatus` means it could not be reached. |
+| `invalid_request`, `context_limit` | The request cannot be served as it is. `param` names the field when the service did, and for `api:` the setting or the field that sagents itself refused, before anything was sent. |
+| `output_limit`, `incomplete_stream`, `invalid_stream`, `invalid_response`, `empty_response` | The answer did not arrive whole or cannot be read. |
 | `timeout`, `cancelled` | The call's own limit, or its caller, stopped it. |
 | `storage_failed` | The account file or its lock could not be read or written. An account file that cannot be read or understood is left as it is; repair or remove it by hand in `~/.config/sagents/`. |
 
-So far this code has talked to a stand-in for OpenAI's services in its own checks and to nothing else. The first real
-sign-in has not happened yet.
+So far this code has talked to stand-ins for both services in its own checks and to nothing else. The first real
+sign-in and the first real request have not happened yet.
 
 ### A live world
 
@@ -94,7 +95,7 @@ node src/cli.ts live examples/night-station.json [--model <id>] [--minutes <n>] 
 
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
 each with a place and a sheet. Every character is played by the model, `gpt-6.1-sol@low` unless `--model` says
-otherwise. One turn is one request and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional
+otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-your-own). One turn is one request and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional
 private note. `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a
 morning, where what each one remembers after the night decides what happens.
 
@@ -192,6 +193,11 @@ What it lacks:
 
 ## The model connection
 
+There are two, and the name of the model chooses between them (`src/model.ts`). Neither tries a request a second
+time: a failure comes back as a code, and the caller decides.
+
+### ChatGPT plan
+
 sagents uses OpenAI's [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) for
 open-source and locally run tools. At the first sign-in it registers itself as a client of your account. Its requests
 go to the public Responses API and count against your ChatGPT plan, so there is no API key. OpenAI offers this to
@@ -210,6 +216,44 @@ What sagents keeps and what it sends:
   nothing else.
 - Several sagents processes may run at once. They take turns to renew the tokens through a lock next to the account
   file, because OpenAI replaces the renewing token at every use.
+
+### A server of your own
+
+A model written as `api:<id>` goes to any server that speaks the OpenAI chat completions protocol
+(`src/compatible.ts`): vLLM or llama.cpp on a card you rent, or OpenRouter. The settings come from the environment.
+
+| Variable | Meaning |
+| --- | --- |
+| `SAGENTS_API_URL` | The versioned root, such as `http://127.0.0.1:8000/v1` or `https://openrouter.ai/api/v1`. Required. |
+| `SAGENTS_API_KEY` | The key, when the server asks for one. |
+| `SAGENTS_API_MAX_TOKENS` | The output limit of one call, 2048 by default. |
+| `SAGENTS_API_EXTRA` | One JSON object of further body fields, such as `{"reasoning":{"enabled":false}}`, which keeps a model's reasoning off on OpenRouter. |
+
+```sh
+export SAGENTS_API_URL=https://openrouter.ai/api/v1 SAGENTS_API_EXTRA='{"reasoning":{"enabled":false}}'
+read -rs SAGENTS_API_KEY && export SAGENTS_API_KEY    # typed or pasted, not shown and not in the shell's history
+echo '{"model":"api:google/gemma-4-31b-it","messages":[{"role":"user","content":"Say hi"}]}' | node src/cli.ts ask
+```
+
+What sagents sends and to whom:
+
+- One `POST` to `<SAGENTS_API_URL>/chat/completions`, the server the address names, and nothing to anyone else. A
+  redirect is a failure and is not followed.
+- The body holds the model id, the messages (the instructions first, as a `system` message), `max_tokens`, the schema
+  as a strict `json_schema` `response_format`, and the fields of `SAGENTS_API_EXTRA`. sagents adds no text of its own.
+  An extra field cannot replace `model`, `messages`, `max_tokens`, `max_completion_tokens`, `response_format`, `stream`
+  or `n`: a setting that names one is refused.
+- The key goes in the `authorization` header. sagents does not store it.
+- The address is `https`, or plain `http` to this computer only (`localhost`, `127.0.0.1`, `::1`), with a key or
+  without one: neither the key nor the text travels unencrypted. Any other address is refused before a request is
+  made. Reach a rented card through an SSH tunnel to a local port or over `https`.
+- sagents writes no log of requests or answers. What the server keeps is the server's own matter: a hosted service may
+  store requests, so real stories go only to a model you run yourself.
+- A failure is a code, with the HTTP status and the server's own error code and field name when they are plain
+  identifiers. sagents never prints the server's error text, the key or the request.
+- An answer cut by `max_tokens` is `output_limit`, without the text. An `@<effort>` after the id means nothing here
+  and is refused; the server's own switch goes into `SAGENTS_API_EXTRA`.
+- HTTP 402 is `budget_exceeded`: sagents stops and tries nothing else.
 
 ## Development
 
