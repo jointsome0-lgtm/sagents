@@ -284,8 +284,12 @@ What a character knows:
   own actions and notes, and the calls that waited for it.
 - The long-term memory is one text of at most `longWords` words, 400 unless the world file says otherwise. The
   character writes it itself, through the model, from the old text and the lines being folded into it. What it
-  leaves out is forgotten. A longer answer is cut at the limit. It is asked to write in the past tense, without
-  where it is at that moment, and to give a deed a result only where the lines show one.
+  leaves out is forgotten. A longer answer is cut at the limit and its end is lost, so the character is asked to aim
+  at about 85% of the limit. It is asked to put first what later turns hang on, each with its number, name and place
+  as the lines give them (what is owed, what was promised and by when, sums, times, where a thing was put), then
+  what it knows about people, what it wants and what has changed in it, and to leave out passing chores and small
+  talk. It is asked to write in the past tense, without where it is at that moment, and to give a deed a result only
+  where the lines show one.
 - A character rewrites its memory when it wakes: everything before the sleep is folded, and the waking and the calls
   that waited begin the new lines. A sleeper who has lived through nothing since its last rewrite but falling
   asleep and waking wakes without one, and no model is asked. A character also rewrites its memory at the start of a turn while the lines hold more than

@@ -84,9 +84,12 @@ ${self.sheet}${self.looks === null ? '' : `\nHow you look: ${self.looks}`}`;
 const known = (mind: Mind, lines: Line[]) => [...(mind.long ? ['What you remember:', mind.long, ''] : []),
   ...(lines.length ? [mind.long ? 'Since then:' : 'So far:', ...lines.map(line => line.text), ''] : [])];
 // The request to write the long-term memory anew. It keeps or drops: a memory must not gain what did not happen.
+// It names a size below the limit to aim at, since a model that aims at the limit runs past it and loses the end, and
+// asks for what later turns hang on first: with a weak model the chores stayed and the sums and times went.
+const MEMORY_AIM = 0.85;
 const rewriteOf = (world: World, time: string, waking: boolean) => `${time} This is not a turn and you take no action: ${
   waking ? 'you are waking, and what you lived through before your sleep stays with you only as your memory' : 'much has happened, and its oldest part stays with you only as your memory'}.
-Write your memory anew as one text of at most ${world.longWords} words, in the language of your sheet, from what you remember and the lines above: what you know about people, what you want, what was promised and by whom, what has changed in you. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten. A longer text is cut at the limit.
+Write your memory anew as one text of about ${Math.floor(world.longWords * MEMORY_AIM)} words, in the language of your sheet, from what you remember and the lines above. The limit is ${world.longWords} words: a text past it is cut there, and its end is lost. Put first what will be needed later, each with its number, name and place as the lines give them: what is owed and to whom, what was promised and by when, sums agreed, times set, where a thing was put. Then what you know about people, what you want, what has changed in you. Leave out passing chores and small talk that nothing hangs on. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten.
 Answer with one JSON object that has the single field \`memory\`.`;
 
 // What the world is told of `changes` and of things, for a deed and for a figure's answer alike.
