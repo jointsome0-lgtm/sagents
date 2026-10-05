@@ -243,6 +243,7 @@ test('the world answers a deed from facts, bodies, belongings and the weather, a
   // The world is sent the facts of the world, the things and facts of the place, all of those in it, and the deed.
   assert.deepEqual(sent.world[1], { model: 'stand-in', system: `${WORLD_INSTRUCTIONS}\n\nThe world: Two rooms\nA house with two rooms.\nFacts: FACT-WORLD`,
     schema: sent.world[0].schema, messages: [{ role: 'user', content: `The place: Red room (red), under a roof. Red walls. Things: THINGS-RED. Facts: FACT-RED.
+Other places, which nobody reaches by a deed: Blue yard (blue).
 The weather outside: SKY-ONE. Under this roof: ROOF-ONE.
 Here:
 - Anna (anna), asleep. Looks: LOOKS-ANNA. Pose: POSE-ANNA. Holds: HOLDS-ANNA. Has out of sight: HAS-ANNA. Facts: FACT-ANNA.
@@ -264,7 +265,7 @@ What comes of it?` }] });
   assert.match(sent.boris[0].system ?? '', /\nSHEET-BORIS\nHow you look: LOOKS-BORIS$/);
   // The weather reaches each one as its place gives it. The change at 09:01 is perceived under the open sky, where it
   // ends the waiting, and not under the roof, which it does not get under; the world is told it wherever the deed is.
-  assert.match(sent.world[0].messages[0].content, /^The place: Blue yard \(blue\), under the open sky\. Blue walls\. Things: THINGS-BLUE\. Facts: FACT-BLUE\.\nThe weather: SKY-ONE\.\nHere:\n/);
+  assert.match(sent.world[0].messages[0].content, /^The place: Blue yard \(blue\), under the open sky\. Blue walls\. Things: THINGS-BLUE\. Facts: FACT-BLUE\.\nOther places, which nobody reaches by a deed: Red room \(red\)\.\nThe weather: SKY-ONE\.\nHere:\n/);
   assert.match(sent.boris[0].messages[0].content, /\nThe weather, from under the roof: ROOF-ONE\.\nYou feel rested\.\nMinutes from here/);
   assert.match(sent.clara[0].messages[0].content, /\nThe weather: SKY-ONE\.\nYou feel rested\.\nMinutes from here/);
   assert.match(sent.clara.at(-1)!.messages[0].content, /\n09:01:00 The weather changes: SKY-TWO\n[^]*\nThe weather: SKY-TWO\.\nYou feel rested\.\nMinutes from here/);

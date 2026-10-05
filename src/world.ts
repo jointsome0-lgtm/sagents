@@ -18,7 +18,7 @@ export const LOST_SECONDS = 30;
 // `facts` is what is true of the world, of a place or of a person and is not seen at once. It is for the world's own
 // answers to what people do and never for a character: no character is sent any of it.
 // `things` is what lies in a place and can be moved, taken or changed. Of a person, `looks` is what anyone near sees
-// and never changes, `pose` how and where in the place it is, `holds` what is in its hands or worn in sight, and `has`
+// and never changes, the body and the face and no clothes, `pose` how and where in the place it is, `holds` what is in its hands or worn, and `has`
 // what it carries out of sight. The world file gives how these begin; `things`, `pose`, `holds` and `has` then belong
 // to the run's state and change only by the world's answer to a deed. A place that is `open` lies under the open sky.
 export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; open: boolean; minutesTo: { [place: string]: number } };

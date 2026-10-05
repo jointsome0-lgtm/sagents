@@ -20,7 +20,7 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - say: you speak \`text\` aloud. Everyone in your place hears it.
 - call: you speak \`text\` to one person, \`to\` (that person's id), by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
 - go: you walk to another place of the list, \`place\` (its id). Moving about inside the place you are in is a do. On the way you hear and see nothing and cannot act.
-- do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it: the world tells you that.
+- do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it: the world tells you that. A do never takes you to another place: only a go does.
 - wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). The wait ends at once when someone speaks near you, comes or leaves, so a long wait loses nothing: do not wait in short steps.
 - sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}), or \`until\` a time of day. Asleep you hear and see nothing, and only someone's deed can wake you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
 - until: for do, wait and sleep, in place of \`seconds\`: a time of day like 06:30, the next moment the clock shows it. It must fall within the action's span.
@@ -89,12 +89,16 @@ export const WORLD_INSTRUCTIONS = `You are the world of a story: not a person in
 
 You are told what is there, and nothing else exists: a search for something you were not told of finds nothing of the kind. Say what is there as the world itself. Never speak of facts, of what was mentioned or listed, or of your task.
 
+You are told the weather so that you know it, not to report it. A result speaks of the weather only when the deed meets it: someone steps out into it, opens a door or a window to it, looks or listens for it.
+
+You are told which other places there are. Nobody gets to another place by a deed: whoever tries is still here, by the way out, and the result says only that. A pose never names another place.
+
 Answer with one JSON object.
 - result: what the senses give as the direct result of the deed, in one or two plain sentences, in the language of the world's description. It never retells the deed: when there is nothing to notice beyond the deed itself, it is null. Say only what is seen, heard or felt, never what anyone thinks, says or does next: people who are awake answer on their own turns.
 - wakes: the ids of the sleepers here whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not.
 - changes: what the deed changed of the people here and of the things of the place, or an empty list when it changed nothing. An entry has \`of\`, \`what\` and \`text\`. \`what\` is one of: pose, how and where in the place a person is (${LIMITS.pose} words at most); holds, what a person has in their hands or wears in sight (${LIMITS.holds}); has, what a person carries out of sight (${LIMITS.has}); things, what lies in the place and can be moved, taken or changed (${LIMITS.things}). \`of\` is the id of a person here, or for things the id of the place. \`text\` is the whole new text that takes the place of the old one, in the language of the world's description; an empty text when nothing is left.
 
-A thing never appears from nowhere and never vanishes. What one person gives, another receives. What is taken from the place is in someone's hands or pockets afterwards, and what is put down is among the things of the place: such a deed changes both texts. A deed that only looks, listens or speaks changes nothing.`;
+A thing never appears from nowhere and never vanishes. What one person gives, another receives. What is taken from the place is in someone's hands or pockets afterwards, and what is put down is among the things of the place: such a deed changes both texts. A thing goes with what is in it: clothes taken off or a bag put down take what is in their pockets along, out of what the person carries and into the things of the place. A deed that only looks, listens or speaks changes nothing.`;
 const worldSystemOf = (world: World) => `${WORLD_INSTRUCTIONS}
 
 The world: ${world.title}
@@ -104,7 +108,8 @@ const part = (name: string, value: string | null) => value === null ? '' : ` ${n
 // What anyone in a person's place sees of it. What it carries out of sight is not here.
 const seen = (character: { looks: string | null }, person: Person) => `${part('Looks', character.looks)}${part('Pose', person.pose)}${part('Holds', person.holds)}`;
 
-// One deed as the world is asked about it: the place, who is there, what came of earlier deeds there, and the deed.
+// One deed as the world is asked about it: the place, the other places by name, who is there, what came of earlier
+// deeds there, and the deed.
 function deedOf(world: World, state: State, deed: Event): string {
   const place = world.places.find(item => item.id === deed.place)!;
   const here = world.characters.flatMap((character, index) => {
@@ -114,6 +119,7 @@ function deedOf(world: World, state: State, deed: Event): string {
   });
   const earlier = state.results.get(place.id)!;
   return [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Things', state.things.get(place.id)!)}${part('Facts', place.facts)}`,
+    ...(world.places.length > 1 ? [`Other places, which nobody reaches by a deed: ${world.places.filter(item => item !== place).map(tagged).join(', ')}.`] : []),
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...here,
     ...(earlier.length ? ['What came of earlier deeds here:', ...earlier.map(line => line.text)] : []),
     `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`, 'What comes of it?'].join('\n');
@@ -141,6 +147,7 @@ export function requestLimit(world: World): number {
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
   const deed = worldSystemOf(world).length
     + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place))) + LIMITS.things * CHARS_PER_WORD
+    + places.reduce((sum, item) => sum + item.length + 2, 0) + 60
     + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + LIMITS.has * CHARS_PER_WORD + 40, 0)
     + (RESULT_WORDS + 2 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + laws + 500;
   return Math.max(resident, deed);

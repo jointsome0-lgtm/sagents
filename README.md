@@ -140,13 +140,16 @@ The world answers a deed:
 - A world file may give `facts` to the world, to a place and to a character: what is true there and is not seen at
   once, 300 words each at most. No resident is ever sent any of it.
 - After every `do` the world is asked once what came of it, through the model of `--world-model`, which is
-  `--model`'s unless given. It is sent the world's description and facts, the place with its things and facts, who
-  is there, awake or asleep, each with looks, pose, what it holds, what it carries out of sight and its facts, what
+  `--model`'s unless given. It is sent the world's description and facts, the place with its things and facts, the names
+  of the other places, who is there, awake or asleep, each with looks, pose, what it holds, what it carries out of sight and its facts, what
   came of the latest earlier deeds in that place (400 words of them), the clock, and the doer's name with the deed
   and its span. It is sent no sheet, note, memory or speech.
 - It answers with `result`, one or two sentences of what the senses give, 65 words at most, or null when there is
   nothing to notice; with `wakes`, the sleepers of that place whom the deed wakes; and with `changes`, described
   below. Any other id is dropped.
+- Nobody gets to another place by a deed, and the world is told so: whoever tries is still where it was, by the
+  way out, and a pose never names another place. Only a `go` moves anyone. The world is told the weather so that it
+  knows it, and to speak of it only when the deed meets it. Nothing checks that it kept to either.
 - The doer and everyone awake in the place read what came of it at their own next turn; it interrupts nobody. A
   sleeper it wakes has its sleep end when the deed ends, and reads who woke it and by what deed.
 - The answer is a record of its own, right after its deed: the journal takes nothing else there, so a run that
@@ -157,8 +160,9 @@ The world answers a deed:
 
 Bodies and belongings:
 
-- A world file may give a character `looks`, what anyone near sees and what never changes (60 words at most);
-  `pose`, how and where in its place it is (20); `holds`, what is in its hands or worn in sight (30); and `has`,
+- A world file may give a character `looks`, what anyone near sees and what never changes: the body and the face,
+  and no clothes, which can be taken off (60 words at most); `pose`, how and where in its place it is (20);
+  `holds`, what is in its hands or worn, clothes included (30); and `has`,
   what it carries out of sight (60). It may give a place `things`: what lies there and can be moved, taken or
   changed (120). `facts` are for what does not change. All are optional and in the world's language.
 - `pose`, `holds`, `has` and `things` start from the world file and then belong to the world's state. They change
@@ -168,7 +172,8 @@ Bodies and belongings:
   An entry that names anyone or anything else is dropped. The record of the answer keeps the changes as they were
   read. A `go` drops the walker's pose. Nothing else touches any of them.
 - The world is told that a thing never appears from nowhere and never vanishes: what one gives another receives,
-  and what is taken from a place is in someone's hands or pockets afterwards. Nothing checks that it kept to this.
+  what is taken from a place is in someone's hands or pockets afterwards, and a thing goes with what is in it, so
+  clothes taken off take what is in their pockets out of what the person carries. Nothing checks that it kept to this.
 - A character's `looks` are part of its own system text. Every turn says its own pose, what it holds and what it
   carries out of sight, and for each person in its place their looks, pose and what they hold. It is never sent
   what another person carries out of sight, anything of a person in another place, or any `things` or `facts`:
