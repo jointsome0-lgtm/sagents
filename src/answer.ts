@@ -9,8 +9,10 @@ import { LIMITS, MAX_WORDS, namesOf } from './world.ts';
 import type { Event, Person, World } from './world.ts';
 
 // The world's answer to a deed as it was read: what came of it in words, the sleepers it wakes, what it moved and
-// which states it changed, the poses it changed, whether it was a search, and the hidden things it went straight to.
-export type Answer = { text: string | null; wakes: string[]; moves: Move[]; sets: Setting[]; poses: { of: string; text: string }[]; search: boolean; finds: string[] };
+// which states it changed, the poses it changed, what it makes a body feel, whether it was a search, and the hidden
+// things it went straight to.
+export type Answer = { text: string | null; wakes: string[]; moves: Move[]; sets: Setting[]; poses: { of: string; text: string }[]; feels: { of: string; text: string }[];
+  search: boolean; finds: string[] };
 
 const parsed = (answer: string): unknown => {
   try { return JSON.parse(answer); } catch (error) {
@@ -27,13 +29,15 @@ const movesOf = (value: unknown): Move[] | null => Array.isArray(value) && value
 // the fields of its schema, or lists more moves or states than one answer may. `text` becomes one line of
 // `MAX_WORDS` words at most, and null when there is nothing in it. Of `wakes` only the ids in `sleepers` are kept
 // and of `finds` only the labels in `hidden`, each once, in their order; of `poses` only those of a person in
-// `present`, each one line cut at its limit, the later of two for one person. `search` is true only when the answer
-// says so. Whether the moves and the states can be taken is not looked at here: `refusal` says that.
+// `present`, each one line cut at its limit, the later of two for one person. Of `feels` only those of a person in
+// `present` who is not in `sleepers` are kept, cut and chosen alike, and one with no words is dropped: a sleeper is
+// told nothing, the one this deed wakes included. `search` is true only when the answer says so. Whether the moves
+// and the states can be taken is not looked at here: `refusal` says that.
 export function readResult(answer: string, sleepers: string[], present: string[], hidden: string[]): Answer | null {
   const value = parsed(answer);
-  if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || !Array.isArray(value.wakes) || !Array.isArray(value.poses)
+  if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || !Array.isArray(value.wakes) || !Array.isArray(value.poses) || !Array.isArray(value.feels)
     || !Array.isArray(value.sets) || value.sets.length > MAX_SETS) return null;
-  const moves = movesOf(value.moves), named: unknown[] = value.wakes, sets: Setting[] = [], poses = new Map<string, string>();
+  const moves = movesOf(value.moves), named: unknown[] = value.wakes, sets: Setting[] = [], poses = new Map<string, string>(), feels = new Map<string, string>();
   for (const item of value.sets as unknown[]) {
     if (!isObject(item) || typeof item.what !== 'string' || typeof item.state !== 'string') return null;
     sets.push({ what: item.what, state: item.state });
@@ -45,8 +49,15 @@ export function readResult(answer: string, sleepers: string[], present: string[]
     poses.delete(of);
     poses.set(of, line(item.text, LIMITS.pose));
   }
+  for (const item of value.feels as unknown[]) {
+    if (!isObject(item) || typeof item.text !== 'string') return null;
+    const of = present.find(id => id === item.of && !sleepers.includes(id)), text = line(item.text, LIMITS.feels);
+    if (!of || !text) continue;
+    feels.delete(of);
+    feels.set(of, text);
+  }
   return moves && { text: line(value.result, MAX_WORDS) || null, wakes: sleepers.filter(id => named.includes(id)), moves, sets,
-    poses: [...poses].map(([of, text]) => ({ of, text })), search: value.search === true, finds: hidden.filter(id => Array.isArray(value.finds) && value.finds.includes(id)) };
+    poses: [...poses].map(([of, text]) => ({ of, text })), feels: [...feels].map(([of, text]) => ({ of, text })), search: value.search === true, finds: hidden.filter(id => Array.isArray(value.finds) && value.finds.includes(id)) };
 }
 
 // The world's answer for a figure as it can be taken, or null when it cannot be used: `reply` becomes one line of
@@ -95,9 +106,10 @@ export function reply(world: World, people: Person[], things: Things, said: Even
 // of things, whole or not at all, and its poses replace those of the people of the place; an empty pose is none.
 // A deed the world calls a search counts towards its doer's search of the place. What is found is hidden no longer,
 // for anyone. Those awake in the place perceive what came of the deed when it came to words or to anything else.
+// What a body feels is not perceived in that way: the event holds it for its owner, and `heard` is as without it.
 // An answer that the rules refuse changes nothing and gives the refusal.
 export function result(world: World, people: Person[], things: Things, deed: Event, answer: Answer): Event | Refused {
-  const made = settled(world, people, things, deed, answer), { text, wakes, poses, search, finds } = answer;
+  const made = settled(world, people, things, deed, answer), { text, wakes, poses, feels, search, finds } = answer;
   if ('code' in made) return made;
   keep(things, deed.place, made);
   const doer = people.find(person => person.id === deed.who)!, { moved, set, found } = made;
@@ -106,5 +118,5 @@ export function result(world: World, people: Person[], things: Things, deed: Eve
   for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + deed.seconds);
   return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
     heard: text === null && !moved.length && !set.length && !found.length ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null,
-    wakes, search, finds, moved, set, poses, found };
+    wakes, search, finds, moved, set, poses, feels, found };
 }

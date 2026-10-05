@@ -181,15 +181,28 @@ The world answers a deed:
   and its span. It is sent no sheet, note, memory or speech.
 - It answers with `search`, whether the deed was a search of the place; `finds`, the labels of the hidden things
   the deed went straight to; `moves`, `sets` and `poses`, described under «Things» below; `wakes`, the sleepers of
-  that place whom the deed wakes; and `result`, one or two sentences of what the senses give, 65 words at most, or
-  null when there is nothing to notice. The fields stand in this order, the entries before the words, so that the
+  that place whom the deed wakes; `feels`, what the deed makes a body feel, described in the next point; and
+  `result`, one or two sentences of what anyone there could see, hear or smell, 65 words at most, or null when
+  there is nothing to notice. The fields stand in this order, the entries before the words, so that the
   words are written after the entries and cannot lead them; both orders passed the check of 2026-10-05 on the weak
   local model. The schema is made for each
   request and lists the labels, ids and states that the answer may name, so a model held to its schema names
   nothing else where a list has entries. A list that is empty takes any string, since a strict schema may refuse an
   empty list, and the states of all the things there stand in one list, so the schema does not hold a state to its
-  own thing. The rules do the rest: an id of `wakes`, `finds` or `poses` that is not of the place is dropped, and an
-  entry of `moves` or `sets` that cannot be taken refuses the answer, as «Things» says.
+  own thing. The rules do the rest: an id of `wakes`, `finds`, `poses` or `feels` that is not of the place is
+  dropped, and an entry of `moves` or `sets` that cannot be taken refuses the answer, as «Things» says.
+- `feels` is a list of `{ of, text }`: what the deed makes the body of a person there feel, such as weight, cold,
+  pain or taste, and never a thought or a wish. A deed that does something to a body gives entries, for the one
+  touched and for the one who touches; a deed that only looks, listens or speaks gives none, and one who only
+  watches gets none. An entry is one line of 20 words at most for one person, the later of two, and only its owner
+  is told it, as a line `You feel: …` after what came of the deed, also when nothing else came of it. Nobody else in
+  the place is told it and no figure is. A sleeper gets none, the one whom that deed wakes included, and so does
+  someone elsewhere; an entry with no words is dropped. It is not kept for the world: what a place keeps of its
+  earlier deeds holds the `result` and no feeling, so no later request to the world has it. The transcript of
+  `live` shows it as a `private feeling of …` line, like a note. The text of the field passed the check of
+  2026-10-05 on a strong model and on two weak ones. This is the first of three planned layers of sensation. The
+  other two are not built: what a body feels from its own state over time, such as an arm tired by an hour of
+  carrying, and a body that changes and is kept as a record.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
   each person and place, the seconds of that person's deeds there that the world called a search. A thing is found
   by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «Ночь на
@@ -399,7 +412,8 @@ turn it is a lost turn like any other, for the world's answer and a memory rewri
 and it counts as a request, with no tokens known for it. Three such answers of one model in a row, with no answer
 of that model arriving whole in between, end the run as `failed (output_limit)`. It prints
 each event as it happens. In the text output an event is one line, followed by a line for each thing it found, moved
-or put into another state, for each pose it changed and for a private note; a `wait` with no note prints nothing,
+or put into another state, for each pose it changed, for each private feeling and for a private note; a `wait` with
+no note prints nothing,
 and a memory rewrite is shown whole, over as many lines as it has, marked as private like a note. With `--json`
 every event is one JSON object on one line, the silent waits too. Then comes one line of totals: the status and its
 reason, the story minutes played, the requests, the unusable answers of every kind and how many of them were cut

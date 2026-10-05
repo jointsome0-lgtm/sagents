@@ -38,8 +38,9 @@ export type Place = { id: string; name: string; about: string; facts: string | n
   at: [number, number] | null; minutesTo: { [place: string]: number } };
 export type Character = { id: string; name: string; place: string; sheet: string; memory: string | null; facts: string | null; looks: string | null; pose: string | null;
   carries: Thing[]; clock: boolean };
-// The most words each of these texts may hold, in the world file and in the world's answer alike.
-export const LIMITS = { looks: 60, pose: 20, crowd: 60 };
+// The most words each of these texts may hold, in the world file and in the world's answer alike; `feels` is of one
+// line of what a deed makes a body feel, which only an answer holds.
+export const LIMITS = { looks: 60, pose: 20, feels: 20, crowd: 60 };
 // `remote` names the means by which people reach each other from afar; a world with null has none.
 // `walkMetresPerMinute` is the pace at which everyone walks between places that say where they lie.
 // `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `sleep` and
@@ -52,8 +53,9 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // those who perceived it when it happened, without the one who did it. A `memory` is a character's long-term text
 // written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
 // A `result` is the world's answer to the `do` before it, of the same `who`: `text` is what came of the deed, or null
-// when nothing did that could be noticed, `wakes` the sleepers the deed wakes and `poses` the poses it changed. It
-// says whether the world called the deed a `search` of the place and which hidden things it says the deed went
+// when nothing did that could be noticed, `wakes` the sleepers the deed wakes, `poses` the poses it changed and
+// `feels` what the deed makes a body feel, each line for its owner alone and never part of what those in `heard`
+// perceive. It says whether the world called the deed a `search` of the place and which hidden things it says the deed went
 // straight to, `finds`. What the rules made of the answer is in `moved`, one posting for each thing that went from
 // one holder to another or out of the world, where an `eaten` one is eaten by `who`; in `set`, the things put into
 // another state; and in `found`, the hidden things found either way. A `reply` is what a figure answers to the `say`
@@ -64,7 +66,7 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result' | 'reply' | 'weather'; who: string; place: string; to: string | null;
   text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[];
   indoors?: string | null; search?: boolean; finds?: string[]; moved?: Posting[]; set?: { what: string; name: string; state: string }[];
-  poses?: { of: string; text: string }[]; found?: { what: string; name: string; spot: string }[] };
+  poses?: { of: string; text: string }[]; feels?: { of: string; text: string }[]; found?: { what: string; name: string; spot: string }[] };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
 // is the start of its own last action. `pose` is how it is placed now.

@@ -20,7 +20,7 @@ const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', 
     { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA' }, { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN' }] });
 const act = (action: string, more: object = {}) => JSON.stringify({ action, text: null, to: null, place: null, seconds: null, until: null, note: null, ...more });
 // The world's answer to a deed, with every field of its schema.
-const came = (more: object = {}) => JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], result: null, ...more });
+const came = (more: object = {}) => JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], feels: [], result: null, ...more });
 const words = (count: number) => Array.from({ length: count }, (_, index) => `w${index + 1}`).join(' ');
 // Each character answers from its own list, then waits; the world answers from the list `world`, then that nothing came
 // of the deed. The requests are kept as they were sent, per character.
@@ -263,9 +263,10 @@ test('the world answers a deed from facts, bodies, things under labels and the w
     dan: [act('wait', { seconds: 3 })],
     // The second answer names a sleeper of the place, someone awake there and someone elsewhere: only the first is woken.
     // It moves the key from the table to Boris and four of his coins onto the table, and poses someone here and
-    // someone elsewhere: the pose elsewhere is dropped.
-    world: [came({ result: 'COLD-WORD' }), came({ result: 'RESULT-WORD', wakes: ['dan', 'boris', 'anna'], moves: [{ what: 't2', n: 1, to: 'boris' }, { what: 't7', n: 4, to: 't1' }],
-      poses: [{ of: 'anna', text: 'POSE-NEW' }, { of: 'dan', text: 'POSE-STOLEN' }] })],
+    // someone elsewhere: the pose elsewhere is dropped. Of what bodies feel, the witness of the first deed and the doer
+    // of the second are told theirs; the sleeper the deed wakes and someone elsewhere are told none.
+    world: [came({ result: 'COLD-WORD', feels: [{ of: 'dan', text: 'FEEL-DAN' }] }), came({ result: 'RESULT-WORD', wakes: ['dan', 'boris', 'anna'], moves: [{ what: 't2', n: 1, to: 'boris' }, { what: 't7', n: 4, to: 't1' }],
+      poses: [{ of: 'anna', text: 'POSE-NEW' }, { of: 'dan', text: 'POSE-STOLEN' }], feels: [{ of: 'anna', text: 'FEEL-STOLEN' }, { of: 'boris', text: 'FEEL-BORIS' }, { of: 'dan', text: 'FEEL-STOLEN' }] })],
   });
   const journal = memoryStore();
   await runLive({ world: withFacts, respond, model: 'stand-in', minutes: 3, journal, pause: true });
@@ -282,10 +283,10 @@ Here:
 - Boris (boris), awake. Looks: LOOKS-BORIS. Pose: POSE-BORIS. Carries: t6 BAG-BORIS [t7 COINS-BORIS ×9]. Facts: FACT-BORIS.
 Now 09:00:07. Boris does, for 10 s: shakes Anna
 What comes of it?` }] });
-  const lists = (sent.world[1].schema as { properties: { moves: { items: { properties: { what: object; to: object } } }; wakes: object } }).properties;
-  assert.deepEqual([lists.moves.items.properties.what, lists.moves.items.properties.to, lists.wakes], [{ type: 'string', enum: ['t2', 't4', 't5', 't6', 't7'] },
-    { type: 'string', enum: ['anna', 'boris', 'red', 't1', 't4', 't6'] }, { type: 'array', items: { type: 'string', enum: ['anna'] } }]);
-  for (const mark of ['SHEET-', 'NOTE-', 'LONG-', 'SPEECH-']) assert.equal(JSON.stringify(sent.world).includes(mark), false, `${mark} in the requests to the world`);
+  const lists = (sent.world[1].schema as { properties: { moves: { items: { properties: { what: object; to: object } } }; wakes: object; feels: { items: { properties: { of: object } } } } }).properties;
+  assert.deepEqual([lists.moves.items.properties.what, lists.moves.items.properties.to, lists.wakes, lists.feels.items.properties.of], [{ type: 'string', enum: ['t2', 't4', 't5', 't6', 't7'] },
+    { type: 'string', enum: ['anna', 'boris', 'red', 't1', 't4', 't6'] }, { type: 'array', items: { type: 'string', enum: ['anna'] } }, { type: 'string', enum: ['boris'] }]);
+  for (const mark of ['SHEET-', 'NOTE-', 'LONG-', 'SPEECH-', 'FEEL-']) assert.equal(JSON.stringify(sent.world).includes(mark), false, `${mark} in the requests to the world`);
   const { world: _, ...residents } = sent;
   // No resident is sent a fact, a label or a thing of a place that nobody moved. It is sent what it carries, with what
   // is inside, and of those in its place the looks, the pose and what they carry, without what is inside: Boris walks
@@ -315,18 +316,20 @@ What comes of it?` }] });
   assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'weather', at: 0, n: 1 }), JournalError);
   assert.throws(() => replay(withFacts, journal.all.filter(({ record }) => record.kind !== 'weather').map((entry, seq) => ({ ...entry, seq }))), JournalError);
   // The doer and a witness read what came of the deed, and after it what the rules say went where; the sleeper it woke reads who woke it and wakes when the deed ends.
-  assert.match(sent.boris[2].messages[0].content, /\n09:00:07 You do \(10 s\): shakes Anna\n09:00:07 What came of it: RESULT-WORD\n09:00:07 KEY-RED went from TABLE-RED to Boris\. COINS-BORIS ×4 went from Boris to TABLE-RED\.\n/);
-  assert.match(sent.dan[1].messages[0].content, /\n09:00:00 Clara does \(5 s\): opens the window\n09:00:00 What came of what Clara did: COLD-WORD\n/);
+  assert.match(sent.boris[2].messages[0].content, /\n09:00:07 You do \(10 s\): shakes Anna\n09:00:07 What came of it: RESULT-WORD\n09:00:07 KEY-RED went from TABLE-RED to Boris\. COINS-BORIS ×4 went from Boris to TABLE-RED\.\n09:00:07 You feel: FEEL-BORIS\n/);
+  assert.match(sent.dan[1].messages[0].content, /\n09:00:00 Clara does \(5 s\): opens the window\n09:00:00 What came of what Clara did: COLD-WORD\n09:00:00 You feel: FEEL-DAN\n/);
+  // What a body feels is in the requests of its owner and of nobody else.
+  assert.deepEqual([sent.anna, sent.boris, sent.clara, sent.dan].map(requests => [...new Set(JSON.stringify(requests).match(/FEEL-[A-Z]+/g))]), [[], ['FEEL-BORIS'], [], ['FEEL-DAN']]);
   assert.match(sent.anna[3].messages[0].content, /\nSince then:\n09:00:17 Boris woke you by this: shakes Anna\n09:00:17 You wake\.\n\nNow 09:00:17\./);
   // The answer is the record right after its deed, and the journal takes it nowhere else and nothing else there.
   const deed = journal.all.findIndex(({ event }) => event.kind === 'do' && event.who === 'boris');
   assert.deepEqual(journal.all[deed + 1].record, { kind: 'result', who: 'boris', at: 7, text: 'RESULT-WORD', wakes: ['anna'], moves: [{ what: 't2', n: 1, to: 'boris' }, { what: 't7', n: 4, to: 't1' }],
-    sets: [], poses: [{ of: 'anna', text: 'POSE-NEW' }], search: false, finds: [] });
+    sets: [], poses: [{ of: 'anna', text: 'POSE-NEW' }], feels: [{ of: 'boris', text: 'FEEL-BORIS' }], search: false, finds: [] });
   // The event holds what the rules made of the moves: a whole thing under its label, and a part of a count as a new record.
   assert.deepEqual(journal.all[deed + 1].event.moved, [{ what: 't2', name: 'KEY-RED', n: null, from: 't1', to: 'boris', as: 't2', stock: false, out: 'TABLE-RED', into: 'Boris' },
     { what: 't7', name: 'COINS-BORIS', n: 4, from: 't6', to: 't1', as: 't10', stock: false, out: 'Boris', into: 'TABLE-RED' }]);
   assert.throws(() => replay(withFacts, journal.all.filter((_entry, index) => index !== deed + 1).map((entry, seq) => ({ ...entry, seq }))), JournalError);
-  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [], moves: [], sets: [], poses: [], search: false, finds: [] }), JournalError);
+  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [], moves: [], sets: [], poses: [], feels: [], search: false, finds: [] }), JournalError);
   // A person under the id of its place would share one list of things with it, so a world file that gives one is refused.
   assert.throws(() => readWorld({ title: 'T', about: 'A.', clock: '09:00', places: [{ id: 'red', name: 'Red', about: 'Red.' }], characters: [{ id: 'red', name: 'Anna', place: 'red', sheet: 'S' }] }), /`characters\[0\]\.id` repeats an id/);
 });

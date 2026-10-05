@@ -26,8 +26,8 @@ export class JournalError extends Error {}
 // word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
 // `at`: what came of the deed, or null, the sleepers it wakes, what it moved by label and where to, the states and
-// the poses it changed, whether the deed was a search of its place, and the labels of the hidden things it went
-// straight to. `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`:
+// the poses it changed, what it makes a body feel, each line with its owner, whether the deed was a search of its
+// place, and the labels of the hidden things it went straight to. `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`:
 // its words, or null, and what changed hands with them. Neither is ever an answer that the rules of things refuse.
 // A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
 // no answer is behind it.
@@ -157,19 +157,24 @@ export function advance(world: World, state: State, record: Record): Event {
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
     const sleepers = people.filter(person => person.asleep && person.place === deed.place).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
-    const { text, wakes, moves, sets, poses, search, finds } = record, answer = { text, wakes, moves, sets, poses, search, finds };
+    const { text, wakes, moves, sets, poses, feels, search, finds } = record, answer = { text, wakes, moves, sets, poses, feels, search, finds };
     const hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
-    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, search, finds }), sleepers, present, hidden), answer)) {
+    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, search, finds }), sleepers, present, hidden), answer)) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
     const event = result(world, people, state.things, deed, answer);
     if ('code' in event) return refuse('holds an answer that the rules of things refuse');
     const doer = named(world.characters, deed.who), moved = told(event, doer);
     // What the answer says came of the deed, and after it what the rules say went where, for the doer and for those there.
-    const lines = [...(text === null ? moved ? [] : [NOTHING] : [`What came of it: ${text}`]), ...(moved ? [moved] : [])];
+    // What a body feels is told to its owner alone, last, and also when nothing came of the deed for anyone else:
+    // it is in no line of another person and in nothing that the place keeps for the world.
+    const felt = (id: string) => feels.filter(entry => entry.of === id).map(entry => `You feel: ${entry.text}`);
+    const lines = [...(text === null ? moved || felt(deed.who).length ? [] : [NOTHING] : [`What came of it: ${text}`]), ...(moved ? [moved] : []), ...felt(deed.who)];
     remember(minds.get(deed.who)!, ...lines.map(line => lineOf(seq, `${when(deed.who, event.at)} ${line}`)));
-    for (const id of event.heard) {
-      remember(minds.get(id)!, ...[...(text === null ? [] : [`What came of what ${doer} did: ${text}`]), ...(moved ? [moved] : [])].map(line => lineOf(seq, `${when(id, event.at)} ${line}`)));
+    for (const { id } of people) {
+      if (id === deed.who) continue;
+      const lines = [...(event.heard.includes(id) ? [...(text === null ? [] : [`What came of what ${doer} did: ${text}`]), ...(moved ? [moved] : [])] : []), ...felt(id)];
+      remember(minds.get(id)!, ...lines.map(line => lineOf(seq, `${when(id, event.at)} ${line}`)));
     }
     for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${doer} woke you by this: ${deed.text}`));
     if (record.text !== null) {

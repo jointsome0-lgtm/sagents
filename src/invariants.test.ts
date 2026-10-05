@@ -89,6 +89,7 @@ export const LAWS = {
   found: 'A hidden thing is found only where it lies, by a search of its finder that has lasted its minutes or by a deed the world says went straight to it, and then it is hidden for nobody.',
   weather: 'The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of it.',
   clock: 'Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place\'s.',
+  felt: 'Nobody is told what another\'s body feels, the world included, and nobody asleep or away is told a feeling.',
 };
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
@@ -103,17 +104,21 @@ const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.
 // `deep` those that say a thing would lie deeper than four, and `same` those that say nothing moved.
 // `sky` holds the words of the weather in the whole request, and `now` those after its history, where a turn says
 // the weather of the moment. `reply` marks a request to the world for a figure's answer. `clocks` holds every time of the clock in the request, as the engine writes one.
-type Asked = { record: number; who: string; turn: boolean; reply?: boolean; marks: string[]; labelled: boolean; records: string[]; sky: string[]; now: string[]; clocks: string[] };
-const SKY = /\b(?:sky|roof)-\d+-0/g, CLOCK = /(?:day \d+ )?\d\d:\d\d:\d\d/g;
+// `feels` holds the words of what bodies feel in the request: the stand-in gives each as one word that names its owner.
+// `seen.feels` keeps, for the number of records the journal held, what the latest answer of the world gave of them.
+type Asked = { record: number; who: string; turn: boolean; reply?: boolean; marks: string[]; labelled: boolean; records: string[]; sky: string[]; now: string[]; clocks: string[]; feels: string[] };
+type Feeling = { of: string; text: string };
+const SKY = /\b(?:sky|roof)-\d+-0/g, CLOCK = /(?:day \d+ )?\d\d:\d\d:\d\d/g, FEELS = /\bfeels-c\d+-\d+/g;
 const asker = (request: Request) => /\nYou are Person \d+ \((c\d+)\)\./.exec(request.system!)![1];
 const askedOf = (request: Request, record: number, who: string, turn: boolean): Asked => {
   const content = request.messages[0].content, body = `${request.system}${content}`;
   return { record, who, turn, marks: body.match(MARK) ?? [], labelled: /\bt\d+\b/.test(content), records: (content.match(/\bt\d+ [^,;[\]\n]*/g) ?? []).map(found => found.replace(/\..*$/, '').trim()), sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [],
-    clocks: body.match(CLOCK) ?? [] };
+    clocks: body.match(CLOCK) ?? [], feels: body.match(FEELS) ?? [] };
 };
 const MARK = /\b(?:looks|pose|facts|crowd|hidden|inside|secret)-[cpf]\d+(?:-\d+)?/g;
 function standIn(record: () => number) {
-  const seen: { largest: number; record: number; again: number; full: number; deep: number; same: number; turns: Asked[] | null } = { largest: 0, record: 0, again: 0, full: 0, deep: 0, same: 0, turns: [] };
+  const seen: { largest: number; record: number; again: number; full: number; deep: number; same: number; turns: Asked[] | null; feels: Map<number, Feeling[]> } =
+    { largest: 0, record: 0, again: 0, full: 0, deep: 0, same: 0, turns: [], feels: new Map() };
   const respond = async (request: Request) => {
     const body = `${request.system}${request.messages.map(message => message.content).join('')}`;
     if (body.length > seen.largest) Object.assign(seen, { largest: body.length, record: record() });
@@ -176,12 +181,20 @@ function standIn(record: () => number) {
         const of = random() < 0.8 ? pick(here) : `c${upTo(PEOPLE) - 1}`;
         return { of, text: random() < 0.15 ? '' : `pose-${of}-${upTo(99_999)}` };
       });
+      // It says what the bodies of those awake here feel, and now and then that of a sleeper here or of someone who
+      // may be elsewhere, and now and then an entry has no words.
+      const awake = here.filter(id => !sleepers.includes(id));
+      const feels = 'reply' in asks ? [] : Array.from({ length: upTo(4) - 1 }, () => {
+        const of = random() < 0.6 ? pick(awake) : sleepers.length && random() < 0.6 ? pick(sleepers) : `c${upTo(PEOPLE) - 1}`;
+        return { of, text: random() < 0.2 ? '' : `feels-${of}-${upTo(99_999)}` };
+      });
+      if (seen.turns) seen.feels.set(record(), feels);
       // For a figure it gives words, too many now and then, or none.
       answer = roll < 0.1 ? 'no answer' : 'reply' in asks ? { reply: roll < 0.35 ? null : words(upTo(90)), moves }
         // It calls about half of the deeds a search, and now and then says that a deed went straight to a hidden thing
         // of the place or to one that is not there.
         : { search: random() < 0.5, finds: random() < 0.15 ? [labels[upTo(labels.length + 1) - 1] ?? 't0'] : [], moves, sets, poses,
-          wakes: [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`], result: roll < 0.4 ? null : words(upTo(90)) };
+          wakes: [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`], feels, result: roll < 0.4 ? null : words(upTo(90)) };
     } else if ('memory' in (request.schema as { properties: object }).properties) {
       seen.turns?.push(askedOf(request, record(), asker(request), false));
       answer = roll < 0.08 ? { memory: '' } : roll < 0.12 ? { memory: 'x'.repeat(5000) } : { memory: words(roll < 0.3 ? 61 + upTo(100) : upTo(60)) };
@@ -222,7 +235,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
     json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, result: 0, nothing: 0, woken: 0, spent: 0, posed: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0, reply: 0, silent: 0,
-    moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0 };
+    moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0, felt: 0, feltAsleep: 0, feltAway: 0, feltEmpty: 0 };
   const sleepEnds = new Map<string, number>();
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
@@ -264,6 +277,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const clocks = new Set(world.places.filter(item => item.clock).map(item => item.id));
   const reads = ({ id, clock }: { id: string; clock: boolean }) => clock || (!away.has(id) && clocks.has(place.get(id)!));
   const read = (...times: string[]) => { for (const character of world.characters) if (reads(character)) for (const time of times) timed.get(character.id)!.add(time); };
+  // The words of what bodies feel that a result has given so far, and those of them that a request has shown since.
+  const bodily = new Set<string>(), met = new Set<string>();
   let at = 0, asked = 0, sky = 0;
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
@@ -275,6 +290,12 @@ test('thousands of steps of any answers leave a journal in which every law of th
     // a turn, its pose, holdings and what it carries, with what is seen of those in its place.
     for (; asked < turns.length && turns[asked].record === seq; asked += 1) {
       const { who, turn, marks } = turns[asked], spot = who.startsWith('p') ? who : place.get(who);
+      // A word of what a body feels is in a request of its owner alone, and only after the result that gave it.
+      for (const word of turns[asked].feels) {
+        law('felt', who !== spot && word.startsWith(`feels-${who}-`) && bodily.has(word), seq);
+        if (!met.has(word)) count.felt += 1;
+        met.add(word);
+      }
       if (who !== spot) {
         for (const time of turns[asked].clocks) law('clock', timed.get(who)!.has(time), seq);
         if (turn) count[turns[asked].clocks.includes(event.clock) ? 'clocked' : 'clockless'] += 1;
@@ -364,6 +385,19 @@ test('thousands of steps of any answers leave a journal in which every law of th
         law('body', place.get(pose.of) === event.place && !away.has(pose.of), seq);
         poses.set(pose.of, pose.text || null);
         count.posed += 1;
+      }
+      // What a body feels goes to one awake in the place of the deed. Of an answer that was taken, which shows by
+      // anything else it left, every such entry is kept, the later of two for one person, and the others are dropped.
+      const gave = seen.feels.get(seq) ?? [], owned = (of: string) => place.get(of) === event.place && !away.has(of), due = new Map<string, string>();
+      for (const { of, text } of record.feels) {
+        law('felt', owned(of) && !asleep.has(of) && text !== '', seq);
+        bodily.add(text);
+      }
+      if (event.heard.length || record.feels.length || record.poses.length || record.wakes.length || record.finds.length || record.search) {
+        for (const { of, text } of gave) {
+          if (text && owned(of) && !asleep.has(of)) { due.delete(of); due.set(of, text); } else count[!text ? 'feltEmpty' : owned(of) ? 'feltAsleep' : 'feltAway'] += 1;
+        }
+        law('felt', isDeepStrictEqual(record.feels, [...due].map(([of, text]) => ({ of, text }))) && isDeepStrictEqual(event.feels, record.feels), seq);
       }
       count.set += event.set!.length;
       count.result += 1;
