@@ -41,7 +41,7 @@ test('an api: model goes to the server the address names, with what the caller g
   // A router's name for the endpoint that answered is kept when it is a short plain name, any other string is one
   // fixed word, and what is no string is nothing: no word of the server's goes further by this field.
   const by = async (provider: unknown) => (await createCompatible({ env, fetch: async () => json(200, { ...await answer('{"ok":true}').json() as object, provider }) }).respond(request)).endpoint;
-  assert.deepEqual([await by('Alpha/fp8'), await by(`${WORDS}: ${STORY}`), await by('x'.repeat(41)), await by(''), await by({ name: 'Alpha' }), await by(undefined)], ['Alpha/fp8', 'other', 'other', 'other', undefined, undefined]);
+  assert.deepEqual([await by('Alpha/fp8'), await by(`${WORDS}: ${STORY}`), await by('Alpha\nBeta'), await by('x'.repeat(41)), await by(''), await by({ name: 'Alpha' }), await by(undefined)], ['Alpha/fp8', 'other', 'other', 'other', 'other', undefined, undefined]);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(calls[0].init.method, 'POST');

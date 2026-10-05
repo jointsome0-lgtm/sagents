@@ -19,7 +19,7 @@ node src/cli.ts live <world.json> [--model <id>] [--cast <character>=<id>]... [-
                                        with --state the world is kept in that file and continues from it
 
 A request: {"model": "<id>", "<id>@<effort>" or "api:<id>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}}
-An answer: {"status": "done", "text": "...", "usage": {...}} or {"status": "failed", "reason": "<code>"}
+An answer: {"status": "done", "text": "...", "usage": {...}}, with "endpoint" when a router named who answered, or {"status": "failed", "reason": "<code>"}
 A failed answer also has "httpStatus", "providerCode" and "param" when the service gave them.
 "api:<id>" is a model of the chat completions server that SAGENTS_API_URL names, with SAGENTS_API_KEY if it asks for one.`;
 const DEFAULT_MODEL = 'gpt-6.1-sol';

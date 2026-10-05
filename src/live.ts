@@ -462,7 +462,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     }
     if (answer.endpoint !== undefined) {
       const counts = own(outcome.endpoints, player.name, () => ({}));
-      const known = ENDPOINT.test(answer.endpoint) && (Object.hasOwn(counts, answer.endpoint) || Object.keys(counts).length < MAX_ENDPOINTS);
+      const known = ENDPOINT.test(answer.endpoint) && (Object.hasOwn(counts, answer.endpoint) || Object.keys(counts).filter(name => name !== OTHER_ENDPOINT).length < MAX_ENDPOINTS);
       const endpoint = known ? answer.endpoint : OTHER_ENDPOINT;
       Object.defineProperty(counts, endpoint, { value: own(counts, endpoint, () => 0) + 1, enumerable: true, writable: true, configurable: true });
     }
