@@ -4,8 +4,9 @@ Story agents. A coding agent gets a shell and a patch tool and works in a reposi
 story: its scenes, the moves that continue it, its checkpoints and its memory. sagents is the program that runs them.
 
 It is early. Today sagents sends one request to a model, through a ChatGPT plan or to a server that speaks the OpenAI
-chat completions protocol, and runs a first prototype of the live mode. The agent loop and the story tools come next.
-This page keeps the two apart.
+chat completions protocol, and runs a first prototype of the live mode. The agent loop and the story tools come next;
+for the live world, [what comes next](#what-comes-next-for-the-live-world) is listed below. This page keeps what works
+and what is planned apart.
 
 ## Two modes
 
@@ -91,7 +92,7 @@ sign-in and the first real request have not happened yet.
 
 ```sh
 node src/cli.ts live examples/night-station.json [--model <id>] [--cast <character>=<id>]... [--world-model <id>] \
-  [--minutes <n>] [--calls <n>] [--state <file>] [--json]
+  [--minutes <n>] [--calls <n>] [--state <file>] [--environment <name>] [--json]
 ```
 
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
@@ -119,7 +120,7 @@ The rules of time and hearing:
   and are told that it is asleep when they are told who is with them.
 - Everyone has a sleep debt. It grows by a second for each second awake, on the way included, and falls by two for
   each second asleep, never below zero. At the story's start it is the time since the world's `dayStart`, `07:00`
-  unless the world file says otherwise. A turn never says the count. It says how the body feels, in four steps:
+  unless the world file or its environment says otherwise. A turn never says the count. It says how the body feels, in four steps:
   rested; awake a long while, from half of `tiredHours`; tired, with the warning that the character will fall asleep
   where it is, from `tiredHours`, 16 by default; hardly able to stay awake, in the last quarter of the way from there
   to `spentHours`. From the tired step on the others in the place are told so with who is with them. At `spentHours`,
@@ -174,7 +175,7 @@ Bodies and belongings:
 The weather:
 
 - A place of a world file with `"open": true` lies under the open sky; any other is under a roof.
-- A world file may give `weather`, in one of two forms. A schedule is `start`, the weather when the story starts,
+- A world file or its environment may give `weather`, in one of two forms. A schedule is `start`, the weather when the story starts,
   and `changes`, each with a `day`, counted as the clock counts days, and a time of day `at`. A seeded series is a
   `seed`, a list of `states`, two at least, and `minutes`, the least and the most minutes a state lasts: which
   state comes n-th and how long it lasts follow from the seed and n alone, and no state comes twice running. A
@@ -189,6 +190,22 @@ The weather:
   nothing when that is null. The world's request always holds the weather and says whether the deed's place is
   under the open sky or under a roof.
 - The weather changes no other rule yet: nobody is slowed, chilled or woken by it.
+
+Environments, and the form of a law:
+
+- Sleep debt and the weather are laws that the clock drives, each in a module of its own, `src/sleep.ts` and
+  `src/weather.ts`, behind one form (`src/laws.ts`): its settings and their check; its part of the world's state;
+  the record the rules put when the clock reaches its moment, which a journal holds there and nowhere else; the line
+  it adds to a resident's turn; and the most characters it adds to a request. Three more parts of the form are used
+  by one law each: the weather adds a line to the world's request, and sleep adds its mark to what others are told
+  of a person and keeps its count when someone falls asleep or wakes.
+- `environments/<name>.json` holds settings of the laws and nothing else: `dayStart`, `tiredHours` and `spentHours`
+  for sleep, and `weather`. A world file names one with `"environment": "<name>"` and may give any of these
+  settings itself, which then takes the place of the environment's. `--environment <name>` takes the place of the
+  world file's choice. A world file that names none and gives none has the defaults and no weather.
+- There are three: `mountain-winter`, which «Ночь на перевале» lives in, `sea-summer` and `village-summer`. Their
+  texts are synthetic and in Russian, as the example worlds are.
+- The core reads no file: the command line reads the environment and hands it over with the world file.
 
 What a character knows:
 
@@ -223,8 +240,9 @@ The journal and the state file:
 - With `--state <file>` the journal is a SQLite file, written one record at a time, and `live` continues the world
   it finds there. `--minutes` then count from where the world stands, and the end of a run is a pause: nobody is
   told how much is left. When the file is opened, every record is replayed and must give the event stored with it;
-  a journal that does not is refused. The file belongs to one world file, by a hash of its content, and refuses
-  another, so a world file cannot be edited while its world is under way. A second run on a file that is in use is
+  a journal that does not is refused. The file belongs to one world file and its environment together, by a hash
+  of the content of both, and refuses another of either, so neither can be edited or exchanged while the world is
+  under way. A second run on a file that is in use is
   refused.
 
 The laws of the world. Whatever the model answers, these hold in every journal. `npm test` plays thirty characters
@@ -282,6 +300,7 @@ What it lacks:
   without a deed.
 - Tiredness is one number. It does not slow anyone or change what a character can do before the limit, and a
   character who is on the way when it reaches the limit falls asleep only at its turn after the arrival.
+- A seeded series of weather knows no time of day and no season: its states must read true at any hour.
 - The world answers only a `do`. What is claimed in a speech or a note is checked by nobody.
 - A rewrite is the model's own summary, and nothing checks that it adds no facts. What a character forgets cannot be
   looked up again: the journal keeps it, the character has no way to it.
@@ -291,6 +310,18 @@ What it lacks:
 - The journal does not branch yet. A story that forks from a checkpoint needs a copy of the journal up to there.
 - The state file does not keep the totals of earlier runs, and Node prints a warning that its SQLite is experimental.
 - Its own checks talk only to a scripted stand-in for the model.
+
+#### What comes next for the live world
+
+1. A crowd through the world: people of a place who have no turns of their own, for whom the world answers, while the
+   journal keeps what a resident perceived of them; coordinates for places, with travel time from distance; and a
+   seaside example world of four residents, houses, a sports pool, a beach and cafés.
+2. Things as the engine's state: items with amounts, owners and places; food with calories and tags; money.
+3. An energy balance: hunger from the day's shortfall, weight and fitness from the same count over weeks.
+4. `examine` as an action the engine answers by a table, more detailed for a resident with a doctor's skill; skills
+   in the world file; injury and illness; a person's own reactions to kinds of food.
+5. Ordinary days that cost no model calls.
+6. After that: training, learning a skill in the story, a farm, ecology.
 
 ## The model connection
 

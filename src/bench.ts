@@ -14,7 +14,7 @@ import type { Request } from './chatgpt.ts';
 import { memoryStore } from './journal.ts';
 import { requestLimit, runLive } from './live.ts';
 import { openState } from './state.ts';
-import { readWorld } from './world.ts';
+import { readWorld } from './laws.ts';
 
 const inMemory = process.argv.includes('--memory');
 const [people = 1000, places = 100, turns = 50] = process.argv.slice(2).filter(argument => argument !== '--memory').map(Number);

@@ -2,8 +2,8 @@
 // seconds since the story's start. There is no map and nobody judges outcomes: the rules say only how long an action
 // takes, who perceives it and when each character is free to act again.
 import { boundedOf, amountOf, countOf, cut, isObject, listOf, refuse, secondsOfDay, textOf, TIME, wordsOf } from './reading.ts';
-import { begin as beginWeather, readWeather } from './weather.ts';
-import type { Skies, Weather } from './weather.ts';
+import type { Sleep } from './sleep.ts';
+import type { Weather } from './weather.ts';
 
 export { CHARS_PER_WORD, cut, sizeOf, wordsOf, WorldError } from './reading.ts';
 
@@ -31,12 +31,10 @@ export const LIMITS = { looks: 60, pose: 20, holds: 30, has: 60, things: 120 };
 export type Change = { of: string; what: 'pose' | 'holds' | 'has' | 'things'; text: string };
 const CHANGES = ['pose', 'holds', 'has', 'things'] as const;
 // `remote` names the means by which people reach each other from afar; a world with null has none.
-// `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `dayStart` is the
-// time of day everyone last woke before the story; after `tiredHours` awake a person is told it is tired, and after
-// `spentHours` it falls asleep where it is. `weather` is what the sky does and when, or null for a world without any.
+// `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `sleep` and
+// `weather` are the settings of the laws the clock drives (`laws.ts`), as the world file and its environment give them.
 export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null;
-  travelMinutes: number; shortWords: number; longWords: number; dayStart: string; tiredHours: number; spentHours: number; weather: Weather | null;
-  places: Place[]; characters: Character[] };
+  travelMinutes: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // One answer of a character, as the schema asks for it: every field is there and an unused one is null.
@@ -62,10 +60,9 @@ export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' 
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
 // is the start of its own last action.
-// `debt` is its sleep debt in seconds as it stood at `since`: `debtAt` gives it for a later moment. `pose`, `holds` and
-// `has` are its body and belongings as they are now.
+// `pose`, `holds` and `has` are its body and belongings as they are now.
 export type Person = { id: string; place: string | null; heading: string | null; asleep: boolean; freeAt: number; began: number | null;
-  speaking: number; listening: number; debt: number; since: number; pose: string | null; holds: string | null; has: string | null };
+  speaking: number; listening: number; pose: string | null; holds: string | null; has: string | null };
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const factsOf = (value: unknown, field: string) => boundedOf(value, field, MAX_FACTS);
@@ -74,14 +71,11 @@ function idOf(value: unknown, field: string, taken: string[]): string {
   return taken.includes(value) ? refuse(field, 'repeats an id') : value;
 }
 
-// A world file as it was parsed from JSON, checked whole. The first thing wrong is one sentence that names the field.
-export function readWorld(value: unknown): World {
+// A world file as it was parsed from JSON, without the settings of the laws, which `readWorld` of `laws.ts` adds.
+// The first thing wrong is one sentence that names the field.
+export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   if (!isObject(value)) return refuse('the file', 'must be a JSON object');
   if (typeof value.clock !== 'string' || !TIME.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
-  const dayStart = value.dayStart ?? '07:00';
-  if (typeof dayStart !== 'string' || !TIME.test(dayStart)) return refuse('dayStart', 'must be a time of day like `07:00`');
-  const tiredHours = amountOf(value.tiredHours, 'tiredHours', 16), spentHours = amountOf(value.spentHours, 'spentHours', 24);
-  if (spentHours < tiredHours) return refuse('spentHours', 'must not be less than `tiredHours`');
   if (value.remote !== undefined && value.remote !== null) textOf(value.remote, 'remote');
   const places: Place[] = [];
   for (const [index, place] of listOf(value.places, 'places').entries()) {
@@ -111,8 +105,8 @@ export function readWorld(value: unknown): World {
   }
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
-    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), shortWords: countOf(value.shortWords, 'shortWords', 2000), dayStart, tiredHours, spentHours,
-    longWords: countOf(value.longWords, 'longWords', 400), weather: readWeather(value.weather, value.clock), places, characters };
+    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), shortWords: countOf(value.shortWords, 'shortWords', 2000),
+    longWords: countOf(value.longWords, 'longWords', 400), places, characters };
 }
 
 // The story's clock at so many seconds from its start, as a time of day. From the second day on it names the day.
@@ -133,21 +127,11 @@ export function travelSeconds(world: World, from: string, to: string): number {
   return Math.max(1, Math.round((minutesTo(from, to) ?? minutesTo(to, from) ?? world.travelMinutes) * 60));
 }
 
-// What lies in each place and what the sky is like when the story starts.
+// What lies in each place when the story starts.
 export const lying = (world: World) => new Map(world.places.map(place => [place.id, place.things]));
-export const sky = (world: World): Skies | null => world.weather && beginWeather(world.weather);
-// Everyone begins awake since the world's `dayStart`, placed, holding and carrying what the world file says.
+// Everyone begins awake, placed, holding and carrying what the world file says.
 export const start = (world: World): Person[] => world.characters.map(({ id, place, pose, holds, has }) =>
-  ({ id, place, pose, holds, has, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0, debt: 86_400 - secondsUntil(world, 0, world.dayStart),
-    since: 0 }));
-
-// The sleep a person who stayed awake to the world's limit falls into.
-export const SPENT_SLEEP = 28_800;
-// A person's sleep debt at `now`, in seconds: it grows by one for each second awake, on the way included, and falls by
-// two for each second asleep, never below zero.
-export const debtAt = (person: Person, now: number) => person.asleep ? Math.max(0, person.debt - 2 * (now - person.since)) : person.debt + now - person.since;
-export const spentAt = (world: World, person: Person, now: number) => debtAt(person, now) >= world.spentHours * 3600;
-const settle = (person: Person, now: number) => Object.assign(person, { debt: debtAt(person, now), since: now });
+  ({ id, place, pose, holds, has, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0 }));
 
 // The next to play: the one free first, then the one whose own last action began earliest, then the world file's order.
 export const next = (people: Person[]): Person => people.reduce((first, person) =>
@@ -205,10 +189,10 @@ export function readAction(world: World, actor: Person, answer: string): Action 
 
 // Someone spoke, came or left near this character, or the weather changed over it: its wait or its activity ends. It is free now, or when its own
 // speech and the speech it is hearing have ended.
-const attend = (person: Person, now: number) => { person.freeAt = Math.max(now, person.speaking, person.listening); };
+export const attend = (person: Person, now: number) => { person.freeAt = Math.max(now, person.speaking, person.listening); };
 
 // Those who perceive what happens in a place: everyone there who is awake.
-const awakeIn = (people: Person[], place: string, but: Person) => people.filter(person => person !== but && person.place === place && !person.asleep);
+export const awakeIn = (people: Person[], place: string, but: Person) => people.filter(person => person !== but && person.place === place && !person.asleep);
 
 // One action of a character in a place, at `now`: the event, with the actor and those who perceive it moved on.
 // `limit` is the number of words a speech may hold this turn; a longer one is cut there.
@@ -243,7 +227,7 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     // Whoever leaves is no longer placed as it was.
     Object.assign(actor, { place: null, heading: action.place, pose: null });
   } else if (action.action === 'wait') event.heard = [];
-  else if (action.action === 'sleep') settle(actor, now).asleep = true;
+  else if (action.action === 'sleep') actor.asleep = true;
   // A `do`, and a falling asleep, are left: they are seen and interrupt nobody, and a witness learns of them at its
   // own next turn. Otherwise every gesture in a room would cost one call to the model for each person who waits there.
   actor.freeAt = now + event.seconds;
@@ -264,7 +248,7 @@ export function arrive(world: World, people: Person[], traveller: Person, now: n
 // A sleeper whose sleep has run out wakes where it lay. Those there see it and nobody is interrupted.
 export function wake(world: World, people: Person[], sleeper: Person, now: number): Event {
   const place = sleeper.place as string;
-  settle(sleeper, now).asleep = false;
+  sleeper.asleep = false;
   return { at: now, clock: clockAt(world, now), kind: 'wake', who: sleeper.id, place, to: null, text: null, seconds: 0, cut: false,
     heard: awakeIn(people, place, sleeper).map(person => person.id), note: null };
 }
@@ -307,28 +291,3 @@ export function result(world: World, people: Person[], things: Map<string, strin
     heard: text === null ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null, wakes, changes };
 }
 
-// A person who has been awake to the world's limit falls asleep where it is, at its turn, whatever it meant to do.
-// Those there see it, as they see any falling asleep.
-export function drop(world: World, people: Person[], person: Person, now: number): Event {
-  const place = person.place as string;
-  Object.assign(settle(person, now), { asleep: true, began: now, freeAt: now + SPENT_SLEEP });
-  return { at: now, clock: clockAt(world, now), kind: 'sleep', who: person.id, place, to: null, text: null, seconds: SPENT_SLEEP, cut: false,
-    heard: awakeIn(people, place, person).map(witness => witness.id), note: null };
-}
-
-// How a body feels by its sleep debt, in four steps: rested, awake a long while, tired, and hardly able to stay awake
-// in the last quarter of the way from tired to the limit. From the third on it shows.
-export function weariness(world: World, person: Person, now: number): 0 | 1 | 2 | 3 {
-  const awake = debtAt(person, now), tired = world.tiredHours * 3600, spent = world.spentHours * 3600;
-  return awake >= tired + (spent - tired) * 0.75 ? 3 : awake >= tired ? 2 : awake >= tired / 2 ? 1 : 0;
-}
-
-// The weather changes. Everyone awake in a place that the new weather reaches perceives it, and their waiting ends as
-// it does at an arrival; a sleeper and a traveller perceive nothing.
-export function turnOfWeather(world: World, people: Person[], now: number, text: string, indoors: string | null): Event {
-  const roofed = new Set(world.places.filter(place => !place.open).map(place => place.id));
-  const here = people.filter(person => person.place !== null && !person.asleep && (indoors !== null || !roofed.has(person.place)));
-  for (const witness of here) attend(witness, now);
-  return { at: now, clock: clockAt(world, now), kind: 'weather', who: '', place: '', to: null, text, seconds: 0, cut: false,
-    heard: here.map(person => person.id), note: null, indoors };
-}

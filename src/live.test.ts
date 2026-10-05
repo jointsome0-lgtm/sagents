@@ -9,7 +9,8 @@ import type { Request } from './chatgpt.ts';
 import { advance, begin, JournalError, memoryStore, replay } from './journal.ts';
 import type { Record } from './journal.ts';
 import { INSTRUCTIONS, runLive, WORLD_INSTRUCTIONS } from './live.ts';
-import { readAction, readWorld } from './world.ts';
+import { readWorld } from './laws.ts';
+import { readAction } from './world.ts';
 
 // Sixty words a minute: one word is one second.
 const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
@@ -258,19 +259,19 @@ What comes of it?` }] });
   assert.deepEqual(marks(sent.anna), ['HAS-ANNA', 'HOLDS-ANNA', 'HOLDS-BORIS', 'HOLDS-NEW', 'LOOKS-ANNA', 'LOOKS-BORIS', 'POSE-ANNA', 'POSE-BORIS', 'POSE-NEW']);
   assert.deepEqual(marks(sent.clara), ['HAS-CLARA', 'HOLDS-CLARA', 'HOLDS-DAN', 'HOLDS-NEW', 'LOOKS-BORIS', 'LOOKS-CLARA', 'LOOKS-DAN', 'POSE-CLARA', 'POSE-DAN']);
   // The changes the world named for the red room took the place of the old texts; a walker has no pose.
-  assert.match(sent.boris[2].messages[0].content, / Here with you:\n- Anna \(anna\)\. Looks: LOOKS-ANNA\. Pose: POSE-NEW\. Holds: HOLDS-ANNA\.\nYou feel rested\. Your pose: POSE-BORIS\. You hold: HOLDS-NEW\. You carry out of sight: nothing\.\n/);
-  assert.match(sent.boris[3].messages[0].content, /\n- Dan \(dan\)\. Looks: LOOKS-DAN\. Pose: POSE-DAN\. Holds: HOLDS-DAN\.\nYou feel rested\. You hold: HOLDS-NEW\. You carry out of sight: nothing\.\n/);
+  assert.match(sent.boris[2].messages[0].content, / Here with you:\n- Anna \(anna\)\. Looks: LOOKS-ANNA\. Pose: POSE-NEW\. Holds: HOLDS-ANNA\.\nYour pose: POSE-BORIS\. You hold: HOLDS-NEW\. You carry out of sight: nothing\.\nThe weather, from under the roof: ROOF-ONE\.\nYou feel rested\.\n/);
+  assert.match(sent.boris[3].messages[0].content, /\n- Dan \(dan\)\. Looks: LOOKS-DAN\. Pose: POSE-DAN\. Holds: HOLDS-DAN\.\nYou hold: HOLDS-NEW\. You carry out of sight: nothing\.\nThe weather: SKY-TWO\.\nYou feel rested\.\n/);
   assert.match(sent.boris[0].system ?? '', /\nSHEET-BORIS\nHow you look: LOOKS-BORIS$/);
   // The weather reaches each one as its place gives it. The change at 09:01 is perceived under the open sky, where it
   // ends the waiting, and not under the roof, which it does not get under; the world is told it wherever the deed is.
   assert.match(sent.world[0].messages[0].content, /^The place: Blue yard \(blue\), under the open sky\. Blue walls\. Things: THINGS-BLUE\. Facts: FACT-BLUE\.\nThe weather: SKY-ONE\.\nHere:\n/);
-  assert.match(sent.boris[0].messages[0].content, /\nThe weather, from under the roof: ROOF-ONE\.\nMinutes from here/);
-  assert.match(sent.clara[0].messages[0].content, /\nThe weather: SKY-ONE\.\nMinutes from here/);
-  assert.match(sent.clara.at(-1)!.messages[0].content, /\n09:01:00 The weather changes: SKY-TWO\n[^]*\nThe weather: SKY-TWO\.\nMinutes from here/);
-  assert.match(sent.boris[3].messages[0].content, /\nNow 09:01:17\. [^]*\nThe weather: SKY-TWO\.\nMinutes from here/);
+  assert.match(sent.boris[0].messages[0].content, /\nThe weather, from under the roof: ROOF-ONE\.\nYou feel rested\.\nMinutes from here/);
+  assert.match(sent.clara[0].messages[0].content, /\nThe weather: SKY-ONE\.\nYou feel rested\.\nMinutes from here/);
+  assert.match(sent.clara.at(-1)!.messages[0].content, /\n09:01:00 The weather changes: SKY-TWO\n[^]*\nThe weather: SKY-TWO\.\nYou feel rested\.\nMinutes from here/);
+  assert.match(sent.boris[3].messages[0].content, /\nNow 09:01:17\. [^]*\nThe weather: SKY-TWO\.\nYou feel rested\.\nMinutes from here/);
   assert.equal(JSON.stringify([sent.anna, sent.boris.slice(0, 3)]).includes('SKY-'), false);
   assert.equal(JSON.stringify([sent.clara, sent.dan]).includes('ROOF-'), false);
-  assert.match(sent.anna.at(-1)!.messages[0].content, /\nNow 09:01:07\. [^]*\nYou feel rested\.[^\n]*\nMinutes from here/);
+  assert.match(sent.anna.at(-1)!.messages[0].content, /\nNow 09:01:07\. [^]*\nYour pose: POSE-NEW\. You hold: HOLDS-ANNA\. You carry out of sight: HAS-ANNA\.\nYou feel rested\.\nMinutes from here/);
   const turned = journal.all.find(({ record }) => record.kind === 'weather')!;
   assert.deepEqual([turned.record, turned.event.heard, turned.by], [{ kind: 'weather', at: 60, n: 1 }, ['clara', 'dan'], null]);
   assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'weather', at: 0, n: 1 }), JournalError);

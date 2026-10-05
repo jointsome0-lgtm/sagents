@@ -6,12 +6,14 @@ import { JournalError, StateError } from './journal.ts';
 import { linesOf, runLive } from './live.ts';
 import type { Player } from './live.ts';
 import { modelFor } from './model.ts';
-import { readWorld, WorldError } from './world.ts';
+import { environmentOf, isEnvironmentName, readWorld } from './laws.ts';
+import { WorldError } from './world.ts';
 
 const USAGE = `node src/cli.ts login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
 node src/cli.ts status [<model>]       whether this computer is signed in, and whether the plan offers the model
 node src/cli.ts ask [--timeout <s>]    one request as JSON on stdin, one JSON line on stdout
-node src/cli.ts live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>] [--state <file>] [--json]
+node src/cli.ts live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>] [--state <file>]
+                          [--environment <name>] [--json]
                                        the characters of a world file, each played by the model, under the story's clock;
                                        --cast gives one character a model of its own; --world-model answers what comes of a deed;
                                        with --state the world is kept in that file and continues from it
@@ -101,7 +103,7 @@ if (command === 'ask') {
 } else if (command === 'live') {
   try {
     const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, 'world-model': { type: 'string' }, minutes: { type: 'string' }, calls: { type: 'string' },
-      state: { type: 'string' }, json: { type: 'boolean' } }, 1);
+      state: { type: 'string' }, environment: { type: 'string' }, json: { type: 'boolean' } }, 1);
     const minutes = Number(given?.values.minutes ?? 30);
     const calls = Number(given?.values.calls ?? 60);
     if (!given || given.positionals.length !== 1 || !(minutes > 0 && minutes <= 1440) || !(Number.isInteger(calls) && calls >= 1)) {
@@ -116,7 +118,23 @@ if (command === 'ask') {
         if (!(error instanceof SyntaxError) && !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
         throw new WorldError('The world file cannot be read as JSON.');
       }
-      const world = readWorld(parsed);
+      // The environment is the one `--environment` names, or else the one the world file names, or none. Its file is
+      // one of this program's own, `environments/<name>.json`.
+      const chosen = given.values.environment as string | undefined;
+      if (chosen !== undefined && !isEnvironmentName(chosen)) throw new OptionError('`--environment` must be a name of lower-case letters, digits and `-`.');
+      const name = chosen ?? environmentOf(parsed);
+      let environmentSource: string | undefined, environment: unknown;
+      if (name !== null) {
+        try {
+          environmentSource = readFileSync(new URL(`../environments/${name}.json`, import.meta.url), 'utf8');
+          environment = JSON.parse(environmentSource);
+        } catch (error) {
+          if (!(error instanceof SyntaxError) && !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
+          const sentence = `The environment \`${name}\` cannot be read as JSON from \`environments/${name}.json\`.`;
+          throw chosen === undefined ? new WorldError(sentence) : new OptionError(sentence);
+        }
+      }
+      const world = readWorld(parsed, environment);
       const json = given.values.json === true;
       // Who is played by a model of its own. What is wrong with a `--cast` is said before anything is opened or sent.
       const names = new Map<string, string>();
@@ -128,7 +146,7 @@ if (command === 'ask') {
         names.set(id, name);
       }
       // The state file's module is loaded only for a run that keeps one. Such a run is a pause in the world's story.
-      const state = typeof given.values.state === 'string' ? (await import('./state.ts')).openState(given.values.state, source) : undefined;
+      const state = typeof given.values.state === 'string' ? (await import('./state.ts')).openState(given.values.state, source, environmentSource) : undefined;
       try {
         // The model's name picks the connection, as it does for `ask`.
         // One connection for each name, however many characters it plays.

@@ -1,7 +1,9 @@
-// The weather of a live world: what the sky is like now and when it changes next, as the world file gives it. Nothing
-// here is asked of a model and nothing is drawn by chance at run time: the same world file always has the same
-// weather at the same moment. No model and no disk here.
-import { boundedOf, countOf, isObject, listOf, refuse, secondsOfDay, textOf, TIME } from './reading.ts';
+// The weather, a law of a live world in the form of `laws.ts`: what the sky is like now and when it changes next, as
+// the world file or its environment gives it. Nothing here is asked of a model and nothing is drawn by chance at run
+// time: the same settings always give the same weather at the same moment. No model and no disk here.
+import type { Law } from './laws.ts';
+import { boundedOf, CHARS_PER_WORD, closed, countOf, isObject, listOf, refuse, secondsOfDay, textOf, TIME } from './reading.ts';
+import { attend, clockAt } from './world.ts';
 
 // The most words either text of one state may hold, so that a request has a largest size.
 export const SKY_WORDS = 40;
@@ -24,7 +26,7 @@ function skyOf(value: unknown, field: string): Sky {
 
 // `weather` of a world file, checked whole. `clock` is the time of day at the story's start, and a change's `day` is
 // counted as the story's clock counts it: the story starts on day 1.
-export function readWeather(value: unknown, clock: string): Weather | null {
+function readWeather(value: unknown, clock: string): Weather | null {
   if (value === undefined || value === null) return null;
   if (!isObject(value)) return refuse('weather', 'must be an object');
   if (value.seed !== undefined) {
@@ -62,18 +64,52 @@ const lasts = (weather: { seed: number; minutes: [number, number] }, n: number) 
   (weather.minutes[0] + drawn(weather.seed, n, 0) % (weather.minutes[1] - weather.minutes[0] + 1)) * 60;
 
 // The weather at the story's start.
-export function begin(weather: Weather): Skies {
+function first(weather: Weather): Skies {
   if ('start' in weather) return { n: 0, index: 0, until: weather.changes[0]?.at ?? null };
   return { n: 0, index: drawn(weather.seed, 0, 1) % weather.states.length, until: lasts(weather, 0) };
 }
 // The state that follows `skies` and begins when it ends.
-export function following(weather: Weather, skies: Skies): Skies {
+function following(weather: Weather, skies: Skies): Skies {
   const n = skies.n + 1;
   if ('start' in weather) return { n, index: n, until: weather.changes[n]?.at ?? null };
   // One of the other states, so that a change is always a change.
   const index = (skies.index + 1 + drawn(weather.seed, n, 1) % (weather.states.length - 1)) % weather.states.length;
   return { n, index, until: (skies.until as number) + lasts(weather, n) };
 }
-export const skyAt = (weather: Weather, skies: Skies): Sky => 'start' in weather ? skies.n ? weather.changes[skies.n - 1] : weather.start : weather.states[skies.index];
+const skyAt = (weather: Weather, skies: Skies): Sky => 'start' in weather ? skies.n ? weather.changes[skies.n - 1] : weather.start : weather.states[skies.index];
 // What of a state reaches someone in a place: its text under the open sky, and under a roof what gets in, or null.
-export const reaches = (sky: Sky, open: boolean) => open ? sky.text : sky.indoors;
+const reaches = (sky: Sky, open: boolean) => open ? sky.text : sky.indoors;
+const WEATHER = 'The weather changes:';
+
+export const weather: Law<'weather', 'skies'> = {
+  kind: 'weather',
+  fields: ['weather'],
+  read: (file, clock) => ({ weather: readWeather(file.weather, clock) }),
+  begin: world => ({ skies: world.weather && first(world.weather) }),
+  // The weather changes when the clock reaches the moment its settings give, before anyone acts at that moment.
+  due: (_world, { skies }, actor) => skies && skies.until !== null && skies.until <= actor.freeAt ? { kind: 'weather', at: skies.until, n: skies.n + 1 } : null,
+  // Everyone awake in a place that the new weather reaches perceives it, and their waiting ends as it does at an
+  // arrival. A sleeper and a traveller perceive nothing.
+  put(world, parts, people, record) {
+    const settings = world.weather as Weather, skies = following(settings, parts.skies as Skies), sky = skyAt(settings, skies);
+    parts.skies = skies;
+    const open = new Set(world.places.filter(place => place.open).map(place => place.id)), clock = clockAt(world, record.at);
+    const here = people.filter(person => person.place !== null && !person.asleep && reaches(sky, open.has(person.place)) !== null);
+    for (const witness of here) attend(witness, record.at);
+    return { event: { at: record.at, clock, kind: 'weather', who: '', place: '', to: null, text: sky.text, seconds: 0, cut: false, heard: here.map(person => person.id),
+      note: null, indoors: sky.indoors },
+    lines: new Map(here.map(person => [person.id, { text: `${clock} ${WEATHER} ${reaches(sky, open.has(person.place as string))}`, idle: false }])) };
+  },
+  // A turn says the weather as the place gives it, and nothing when none of it gets under the roof.
+  turn(world, { skies }, actor) {
+    const open = world.places.find(place => place.id === actor.place)!.open, text = world.weather && skies ? reaches(skyAt(world.weather, skies), open) : null;
+    return text === null ? null : `${open ? 'The weather' : 'The weather, from under the roof'}: ${closed(text)}`;
+  },
+  // The world is always told the weather, and what of it gets under the roof of a place that has one.
+  world(world, { skies }, place) {
+    if (!world.weather || !skies) return null;
+    const sky = skyAt(world.weather, skies);
+    return place.open ? `The weather: ${closed(sky.text)}` : `The weather outside: ${closed(sky.text)}${sky.indoors === null ? '' : ` Under this roof: ${closed(sky.indoors)}`}`;
+  },
+  size: () => 2 * SKY_WORDS * CHARS_PER_WORD + 100,
+};

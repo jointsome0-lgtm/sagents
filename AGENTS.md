@@ -9,9 +9,11 @@ sagents runs story agents: models with tools for an interactive story where a co
 (`src/chatgpt.ts` for a ChatGPT plan, `src/compatible.ts` for a chat completions server), the choice between them by
 the model's name (`src/model.ts`), a prototype of the live mode and the command line (`src/cli.ts`). The live mode is
 `src/world.ts` for the rules of time, place and perception, `src/reading.ts` for the checks a world file is read
-with, `src/weather.ts` for the weather, `src/memory.ts` for what a character remembers, `src/journal.ts` for the
-records that are its only state, `src/state.ts` for the file that keeps them and `src/live.ts` for the run and the
-prompts. All but the last two hold no model call and no disk access, and only `state.ts` touches the disk.
+with, `src/laws.ts` for the form of a law that the clock drives, with `src/sleep.ts` and `src/weather.ts` in that
+form, `src/memory.ts` for what a character remembers, `src/journal.ts` for the records that are its only state,
+`src/state.ts` for the file that keeps them and `src/live.ts` for the run and the prompts. All but the last two hold
+no model call and no disk access, and only `state.ts` touches the disk; `src/cli.ts` reads the world file and its
+environment from `environments/`.
 
 ## The code
 

@@ -6,16 +6,17 @@ import { DatabaseSync } from 'node:sqlite';
 import { StateError } from './journal.ts';
 import type { Entry, Store } from './journal.ts';
 
-const FORMAT = '6';
+const FORMAT = '7';
 // SQLite's own result codes for a file another connection holds, and for a file that is not a database.
 const BUSY = 5, NOT_A_DATABASE = 26;
 const sqliteCode = (error: unknown) => error instanceof Error && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode & 0xff : null;
 
-// Opens the journal of the world whose file holds `world`, or begins one. The file is held until `close` or the end
+// Opens the journal of the world whose file holds `world` and whose environment's file holds `environment`, or begins
+// one. A journal belongs to the two together: under another environment the same records would not be the same world. The file is held until `close` or the end
 // of the process, so that two runs cannot write one journal: the second is refused. A step is one transaction, and
 // the file is synced at each, so a run that was killed leaves a beginning of its journal, which is a whole world.
-export function openState(path: string, world: string): Store & { close(): void } {
-  const hash = createHash('sha256').update(world).digest('hex');
+export function openState(path: string, world: string, environment = ''): Store & { close(): void } {
+  const hash = createHash('sha256').update(JSON.stringify([world, environment])).digest('hex');
   let database: DatabaseSync;
   try {
     database = new DatabaseSync(path, { timeout: 0 });

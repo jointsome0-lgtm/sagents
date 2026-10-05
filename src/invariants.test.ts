@@ -14,7 +14,8 @@ import { JournalError, memoryStore, replay, StateError } from './journal.ts';
 import type { Entry } from './journal.ts';
 import { requestLimit, runLive } from './live.ts';
 import { openState } from './state.ts';
-import { readWorld, sizeOf } from './world.ts';
+import { readWorld } from './laws.ts';
+import { sizeOf } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
 // The weather changes every ten minutes of the story, from the fifth on; every third change does not get under a roof.
@@ -23,7 +24,7 @@ const SKIES = Array.from({ length: 2000 }, (_, index) => ({ at: 300 + index * 60
 const START = 20 * 3600;
 const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '20:00', remote: 'radio', travelMinutes: 3, shortWords: 300, longWords: 60,
   // Thirteen hours awake at the start, and the limit a quarter of an hour on, so that some reach it.
-  dayStart: '07:00', tiredHours: 13.1, spentHours: 13.25,
+  tiredHours: 13.1,
   weather: { start: { text: 'sky-0-0', indoors: 'roof-0-0' }, changes: SKIES.map(({ at, text, indoors }) => ({ text, indoors, day: Math.floor((START + at) / 86_400) + 1,
     at: [Math.floor((START + at) % 86_400 / 3600), Math.floor((START + at) / 60) % 60].map(part => String(part).padStart(2, '0')).join(':') })) },
   // Every text of a body, of belongings, of things and of facts is one word that names its kind and its owner, so
@@ -32,7 +33,9 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
     things: `things-p${index}-0`, facts: `facts-p${index}-0` })),
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
     facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, holds: `holds-c${index}-0`, ...(index % 4 ? { has: `has-c${index}-0` } : {}) })) });
-const world = readWorld(JSON.parse(source));
+// The settings of sleep come from an environment, and the world file changes one of them itself.
+const ENVIRONMENT = JSON.stringify({ dayStart: '07:00', tiredHours: 2, spentHours: 13.25 });
+const world = readWorld(JSON.parse(source), JSON.parse(ENVIRONMENT));
 
 // The laws of a live world, each one sentence. A run that breaks one fails with that sentence and the record's number.
 export const LAWS = {
@@ -135,7 +138,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
   const debtOf = (id: string, now: number) => { const { debt, since } = debts.get(id)!; return asleep.has(id) ? Math.max(0, debt - 2 * (now - since)) : debt + now - since; };
-  const limit = world.spentHours * 3600;
+  const limit = world.sleep.spentHours * 3600;
   // Bodies, belongings and things, counted here from the world file and the records alone.
   const bodies = new Map(world.characters.map(({ id, pose, holds, has }) => [id, { pose, holds, has }]));
   const things = new Map(world.places.map(({ id, things: lying }) => [id, lying]));
@@ -271,18 +274,21 @@ test('thousands of steps of any answers leave a journal in which every law of th
     // one is two calls long: an answer that cannot be used is asked for once more, and a run of one call stops there.
     const stops: string[] = [];
     for (const calls of [300, ...Array.from({ length: 60 }, (_, index) => 1 + index % 2), 250, 310]) {
-      const state = openState(path, source);
+      const state = openState(path, source, ENVIRONMENT);
       try {
         // Two runs cannot write one file, and a file does not take another world.
-        assert.throws(() => openState(path, source), StateError);
+        assert.throws(() => openState(path, source, ENVIRONMENT), StateError);
         let last = '';
         await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, onEvent: event => { last = event.kind; } });
         stops.push(last);
       } finally { state.close(); }
     }
     assert.ok(stops.includes('do'), 'no run stopped between a deed and its result');
-    assert.throws(() => openState(path, `${source} `), StateError);
-    const state = openState(path, source);
+    // A file takes neither another world file nor its own under another environment.
+    assert.throws(() => openState(path, `${source} `, ENVIRONMENT), StateError);
+    assert.throws(() => openState(path, source, `${ENVIRONMENT} `), StateError);
+    assert.throws(() => openState(path, source), StateError);
+    const state = openState(path, source, ENVIRONMENT);
     try {
       const continued = [...state.entries()];
       const differs = continued.findIndex((entry, index) => !isDeepStrictEqual(entry, journal.all[index]));
