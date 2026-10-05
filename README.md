@@ -119,8 +119,10 @@ The rules of time and hearing:
   and are told that it is asleep when they are told who is with them.
 - Everyone has a sleep debt. It grows by a second for each second awake, on the way included, and falls by two for
   each second asleep, never below zero. At the story's start it is the time since the world's `dayStart`, `07:00`
-  unless the world file says otherwise. Every turn says how long the character has been awake by that count. From
-  `tiredHours` on, 16 by default, it also says that the character is tired and should sleep soon. At `spentHours`,
+  unless the world file says otherwise. A turn never says the count. It says how the body feels, in four steps:
+  rested; awake a long while, from half of `tiredHours`; tired, with the warning that the character will fall asleep
+  where it is, from `tiredHours`, 16 by default; hardly able to stay awake, in the last quarter of the way from there
+  to `spentHours`. From the tired step on the others in the place are told so with who is with them. At `spentHours`,
   24 by default, the rules put the character to sleep at its turn, where it is, for 8 hours: no model is asked, the
   journal keeps it as a record of its own, and the others there see it fall asleep.
 - A leaving and an arrival are seen by everyone awake in the place and end their waiting. A `do`, a falling asleep
@@ -135,11 +137,13 @@ The world answers a deed:
 - A world file may give `facts` to the world, to a place and to a character: what is true there and is not seen at
   once, 300 words each at most. No resident is ever sent any of it.
 - After every `do` the world is asked once what came of it, through the model of `--world-model`, which is
-  `--model`'s unless given. It is sent the world's description and facts, the place with its facts, who is there,
-  awake or asleep, with their facts, what came of the latest earlier deeds in that place (400 words of them), the
-  clock, and the doer's name with the deed and its span. It is sent no sheet, note, memory or speech.
+  `--model`'s unless given. It is sent the world's description and facts, the place with its things and facts, who
+  is there, awake or asleep, each with looks, pose, what it holds, what it carries out of sight and its facts, what
+  came of the latest earlier deeds in that place (400 words of them), the clock, and the doer's name with the deed
+  and its span. It is sent no sheet, note, memory or speech.
 - It answers with `result`, one or two sentences of what the senses give, 65 words at most, or null when there is
-  nothing to notice; and with `wakes`, the sleepers of that place whom the deed wakes. Any other id is dropped.
+  nothing to notice; with `wakes`, the sleepers of that place whom the deed wakes; and with `changes`, described
+  below. Any other id is dropped.
 - The doer and everyone awake in the place read what came of it at their own next turn; it interrupts nobody. A
   sleeper it wakes has its sleep end when the deed ends, and reads who woke it and by what deed.
 - The answer is a record of its own, right after its deed: the journal takes nothing else there, so a run that
@@ -147,6 +151,25 @@ The world answers a deed:
   more; after that nothing came of the deed, and the answer counts as unusable.
 - What a model tells in a `do` does not by itself make anything true: the deed is what was tried, and what came of
   it is what the world answered from the facts.
+
+Bodies and belongings:
+
+- A world file may give a character `looks`, what anyone near sees and what never changes (60 words at most);
+  `pose`, how and where in its place it is (20); `holds`, what is in its hands or worn in sight (30); and `has`,
+  what it carries out of sight (60). It may give a place `things`: what lies there and can be moved, taken or
+  changed (120). `facts` are for what does not change. All are optional and in the world's language.
+- `pose`, `holds`, `has` and `things` start from the world file and then belong to the world's state. They change
+  only by `changes` in the world's answer to a deed: a list of `{ of, what, text }`, where `what` is `pose`, `holds`,
+  `has` or `things`, `of` is the id of a person in the deed's place, awake or asleep, or for `things` the id of that
+  place, and `text` is the whole new text, cut at the limit of its kind; an empty text means that nothing is left.
+  An entry that names anyone or anything else is dropped. The record of the answer keeps the changes as they were
+  read. A `go` drops the walker's pose. Nothing else touches any of them.
+- The world is told that a thing never appears from nowhere and never vanishes: what one gives another receives,
+  and what is taken from a place is in someone's hands or pockets afterwards. Nothing checks that it kept to this.
+- A character's `looks` are part of its own system text. Every turn says its own pose, what it holds and what it
+  carries out of sight, and for each person in its place their looks, pose and what they hold. It is never sent
+  what another person carries out of sight, anything of a person in another place, or any `things` or `facts`:
+  what lies in a place a character learns by a deed and the world's answer to it.
 
 What a character knows:
 
@@ -203,6 +226,10 @@ law and the record:
 - Every deed is followed by the world's answer and by nothing else.
 - A sleeper wakes only when its sleep ends or a deed's result wakes it.
 - Nobody acts after being awake for the world's limit: at that turn it falls asleep instead.
+- What a person has, holds and how it is placed, and the things of a place, change only by the world's answer to a
+  deed done in that place; a pose is also dropped when its owner leaves.
+- Nobody is sent what another person carries out of sight, or the looks, pose or holdings of a person in another
+  place.
 
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again. It prints
@@ -227,9 +254,11 @@ large the requests were; `node src/bench.ts 1000 100 50` is 1000 characters in 1
 What it lacks:
 
 - There is no author above the characters. Nothing happens in the world unless a character does it.
-- The world answers a deed and does nothing of its own accord. The facts of the world file never change: that a
-  thing was taken or broken is known to the world only from the latest results it is shown for that place, and
-  nothing checks its answer against the facts.
+- The world answers a deed and does nothing of its own accord. What people have and hold and the things of a place
+  are texts that the world's answer rewrites whole: nothing counts the items in them, so nothing checks that a thing
+  given was received or that the answer agrees with the facts. The facts of the world file never change.
+- A `go` takes along everything a person holds and has, whatever its size, and nobody sees what lies in a place
+  without a deed.
 - Tiredness is one number. It does not slow anyone or change what a character can do before the limit, and a
   character who is on the way when it reaches the limit falls asleep only at its turn after the arrival.
 - The world answers only a `do`. What is claimed in a speech or a note is checked by nobody.
@@ -240,7 +269,7 @@ What it lacks:
   another, so the request stays within its size.
 - The journal does not branch yet. A story that forks from a checkpoint needs a copy of the journal up to there.
 - The state file does not keep the totals of earlier runs, and Node prints a warning that its SQLite is experimental.
-- It has run only against a scripted stand-in for the model. No real model has played a world yet.
+- Its own checks talk only to a scripted stand-in for the model.
 
 ## The model connection
 

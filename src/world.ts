@@ -17,8 +17,19 @@ export class WorldError extends Error {}
 
 // `facts` is what is true of the world, of a place or of a person and is not seen at once. It is for the world's own
 // answers to what people do and never for a character: no character is sent any of it.
-export type Place = { id: string; name: string; about: string; facts: string | null; minutesTo: { [place: string]: number } };
-export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null };
+// `things` is what lies in a place and can be moved, taken or changed. Of a person, `looks` is what anyone near sees
+// and never changes, `pose` how and where in the place it is, `holds` what is in its hands or worn in sight, and `has`
+// what it carries out of sight. The world file gives how these begin; `things`, `pose`, `holds` and `has` then belong
+// to the run's state and change only by the world's answer to a deed.
+export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; minutesTo: { [place: string]: number } };
+export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null; looks: string | null; pose: string | null;
+  holds: string | null; has: string | null };
+// The most words each of these texts may hold, in the world file and in the world's answer alike.
+export const LIMITS = { looks: 60, pose: 20, holds: 30, has: 60, things: 120 };
+// One change the world's answer makes: the whole new text of what a person of the deed's place has, holds or how it
+// is placed, or of the things of that place. An empty text means that nothing is left.
+export type Change = { of: string; what: 'pose' | 'holds' | 'has' | 'things'; text: string };
+const CHANGES = ['pose', 'holds', 'has', 'things'] as const;
 // `remote` names the means by which people reach each other from afar; a world with null has none.
 // `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `dayStart` is the
 // time of day everyone last woke before the story; after `tiredHours` awake a person is told it is tired, and after
@@ -41,15 +52,17 @@ export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(rea
 // those who perceived it when it happened, without the one who did it. A `memory` is a character's long-term text
 // written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
 // A `result` is the world's answer to the `do` before it, of the same `who`: `text` is what came of the deed, or null
-// when nothing did that could be noticed, and `wakes`, which only a result has, the sleepers the deed wakes.
+// when nothing did that could be noticed, and `wakes` and `changes`, which only a result has, the sleepers the deed
+// wakes and what it changes of bodies and belongings.
 export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result'; who: string; place: string; to: string | null;
-  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[] };
+  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[]; changes?: Change[] };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
 // is the start of its own last action.
-// `debt` is its sleep debt in seconds as it stood at `since`: `debtAt` gives it for a later moment.
+// `debt` is its sleep debt in seconds as it stood at `since`: `debtAt` gives it for a later moment. `pose`, `holds` and
+// `has` are its body and belongings as they are now.
 export type Person = { id: string; place: string | null; heading: string | null; asleep: boolean; freeAt: number; began: number | null;
-  speaking: number; listening: number; debt: number; since: number };
+  speaking: number; listening: number; debt: number; since: number; pose: string | null; holds: string | null; has: string | null };
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const isObject = (value: unknown): value is { readonly [field: string]: unknown } => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -60,11 +73,12 @@ const amountOf = (value: unknown, field: string, absent: number): number => valu
 const countOf = (value: unknown, field: string, absent: number): number => value === undefined ? absent
   : typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : refuse(field, 'must be a whole number above zero');
 const listOf = (value: unknown, field: string): unknown[] => Array.isArray(value) && value.length ? value : refuse(field, 'must be a list that is not empty');
-function factsOf(value: unknown, field: string): string | null {
+function boundedOf(value: unknown, field: string, limit: number): string | null {
   if (value === undefined || value === null) return null;
-  const facts = textOf(value, field);
-  return sizeOf(facts) <= MAX_FACTS ? facts : refuse(field, `must hold ${MAX_FACTS} words at most`);
+  const text = textOf(value, field);
+  return sizeOf(text) <= limit ? text : refuse(field, `must hold ${limit} words at most`);
 }
+const factsOf = (value: unknown, field: string) => boundedOf(value, field, MAX_FACTS);
 function idOf(value: unknown, field: string, taken: string[]): string {
   if (typeof value !== 'string' || !ID.test(value)) return refuse(field, 'must be a short id of Latin letters, digits, `_` and `-`');
   return taken.includes(value) ? refuse(field, 'repeats an id') : value;
@@ -88,7 +102,8 @@ export function readWorld(value: unknown): World {
     const minutesTo: { [place: string]: number } = {};
     for (const [to, minutes] of Object.entries(place.minutesTo ?? {})) minutesTo[to] = amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0);
     places.push({ id: idOf(place.id, `${field}.id`, places.map(known => known.id)), name: textOf(place.name, `${field}.name`),
-      about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`), minutesTo });
+      about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
+      things: boundedOf(place.things, `${field}.things`, LIMITS.things), minutesTo });
   }
   for (const [index, place] of places.entries()) {
     const unknown = Object.keys(place.minutesTo).find(to => to === place.id || !places.some(known => known.id === to));
@@ -100,7 +115,9 @@ export function readWorld(value: unknown): World {
     if (!isObject(character)) return refuse(field, 'must be an object');
     if (!places.some(place => place.id === character.place)) return refuse(`${field}.place`, 'must name a place of the list');
     characters.push({ id: idOf(character.id, `${field}.id`, characters.map(known => known.id)), name: textOf(character.name, `${field}.name`),
-      place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), facts: factsOf(character.facts, `${field}.facts`) });
+      place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), facts: factsOf(character.facts, `${field}.facts`),
+      looks: boundedOf(character.looks, `${field}.looks`, LIMITS.looks), pose: boundedOf(character.pose, `${field}.pose`, LIMITS.pose),
+      holds: boundedOf(character.holds, `${field}.holds`, LIMITS.holds), has: boundedOf(character.has, `${field}.has`, LIMITS.has) });
   }
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
@@ -141,9 +158,10 @@ export function travelSeconds(world: World, from: string, to: string): number {
   return Math.max(1, Math.round((minutesTo(from, to) ?? minutesTo(to, from) ?? world.travelMinutes) * 60));
 }
 
-// Everyone begins awake since the world's `dayStart`.
-export const start = (world: World): Person[] => world.characters.map(({ id, place }) =>
-  ({ id, place, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0, debt: 86_400 - secondsUntil(world, 0, world.dayStart),
+// Everyone begins awake since the world's `dayStart`, placed, holding and carrying what the world file says.
+export const lying = (world: World) => new Map(world.places.map(place => [place.id, place.things]));
+export const start = (world: World): Person[] => world.characters.map(({ id, place, pose, holds, has }) =>
+  ({ id, place, pose, holds, has, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0, debt: 86_400 - secondsUntil(world, 0, world.dayStart),
     since: 0 }));
 
 // The sleep a person who stayed awake to the world's limit falls into.
@@ -246,7 +264,8 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     event.to = action.place;
     event.seconds = travelSeconds(world, place, action.place as string);
     for (const witness of here) attend(witness, now);
-    Object.assign(actor, { place: null, heading: action.place });
+    // Whoever leaves is no longer placed as it was.
+    Object.assign(actor, { place: null, heading: action.place, pose: null });
   } else if (action.action === 'wait') event.heard = [];
   else if (action.action === 'sleep') settle(actor, now).asleep = true;
   // A `do`, and a falling asleep, are left: they are seen and interrupt nobody, and a witness learns of them at its
@@ -277,24 +296,39 @@ export function wake(world: World, people: Person[], sleeper: Person, now: numbe
 // The world's answer to a deed as it can be taken, or null when it cannot be used. `text` becomes one line of
 // `MAX_WORDS` words at most, and null when there is nothing in it; of `wakes` only the ids in `sleepers` are kept,
 // each once, in their order.
-export function readResult(answer: string, sleepers: string[]): { text: string | null; wakes: string[] } | null {
+// Of `changes` only those are kept that name a person in `present`, or `place` for its things; each text becomes
+// one line cut at its limit, and of two changes of one thing the later counts.
+export function readResult(answer: string, sleepers: string[], present: string[], place: string): { text: string | null; wakes: string[]; changes: Change[] } | null {
   let value: unknown;
   try { value = JSON.parse(answer); } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
     return null;
   }
-  if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || !Array.isArray(value.wakes)) return null;
-  const named: unknown[] = value.wakes;
-  return { text: cut(wordsOf(value.result ?? '').join(' '), MAX_WORDS).text || null, wakes: sleepers.filter(id => named.includes(id)) };
+  if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || !Array.isArray(value.wakes) || !Array.isArray(value.changes)) return null;
+  const named: unknown[] = value.wakes, given: unknown[] = value.changes;
+  const changes = new Map<string, Change>();
+  for (const change of given) {
+    if (!isObject(change) || typeof change.text !== 'string') continue;
+    const what = CHANGES.find(kind => kind === change.what), of = (what === 'things' ? [place] : present).find(id => id === change.of);
+    if (!what || !of) continue;
+    changes.delete(`${what} ${of}`);
+    changes.set(`${what} ${of}`, { of, what, text: cut(wordsOf(change.text).join(' '), LIMITS[what]).text });
+  }
+  return { text: cut(wordsOf(value.result ?? '').join(' '), MAX_WORDS).text || null, wakes: sleepers.filter(id => named.includes(id)), changes: [...changes.values()] };
 }
 
 // The world's answer to a deed takes effect: each sleeper it wakes has its sleep end when the deed ends, at `end`.
 // The waking itself comes at that sleeper's turn, as every waking does. Those awake in the place perceive the answer.
-export function result(world: World, people: Person[], deed: Event, text: string | null, wakes: string[]): Event {
+// Its changes replace what the people of the place have, hold and how they are placed, and the things lying there.
+export function result(world: World, people: Person[], things: Map<string, string | null>, deed: Event, text: string | null, wakes: string[], changes: Change[]): Event {
   const doer = people.find(person => person.id === deed.who)!;
+  for (const change of changes) {
+    if (change.what === 'things') things.set(change.of, change.text || null);
+    else people.find(person => person.id === change.of)![change.what] = change.text || null;
+  }
   for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + deed.seconds);
   return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
-    heard: text === null ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null, wakes };
+    heard: text === null ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null, wakes, changes };
 }
 
 // A person who has been awake to the world's limit falls asleep where it is, at its turn, whatever it meant to do.
@@ -304,4 +338,11 @@ export function drop(world: World, people: Person[], person: Person, now: number
   Object.assign(settle(person, now), { asleep: true, began: now, freeAt: now + SPENT_SLEEP });
   return { at: now, clock: clockAt(world, now), kind: 'sleep', who: person.id, place, to: null, text: null, seconds: SPENT_SLEEP, cut: false,
     heard: awakeIn(people, place, person).map(witness => witness.id), note: null };
+}
+
+// How a body feels by its sleep debt, in four steps: rested, awake a long while, tired, and hardly able to stay awake
+// in the last quarter of the way from tired to the limit. From the third on it shows.
+export function weariness(world: World, person: Person, now: number): 0 | 1 | 2 | 3 {
+  const awake = debtAt(person, now), tired = world.tiredHours * 3600, spent = world.spentHours * 3600;
+  return awake >= tired + (spent - tired) * 0.75 ? 3 : awake >= tired ? 2 : awake >= tired / 2 ? 1 : 0;
 }

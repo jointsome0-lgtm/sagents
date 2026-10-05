@@ -20,8 +20,12 @@ const PLACES = 6, PEOPLE = 30;
 const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '20:00', remote: 'radio', travelMinutes: 3, shortWords: 300, longWords: 60,
   // Thirteen hours awake at the start, and the limit a quarter of an hour on, so that some reach it.
   dayStart: '07:00', tiredHours: 13.1, spentHours: 13.25,
-  places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {} })),
-  characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.` })) });
+  // Every text of a body, of belongings, of things and of facts is one word that names its kind and its owner, so
+  // that a request shows whose it holds.
+  places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {},
+    things: `things-p${index}-0`, facts: `facts-p${index}-0` })),
+  characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
+    facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, holds: `holds-c${index}-0`, ...(index % 4 ? { has: `has-c${index}-0` } : {}) })) });
 const world = readWorld(JSON.parse(source));
 
 // The laws of a live world, each one sentence. A run that breaks one fails with that sentence and the record's number.
@@ -40,14 +44,21 @@ export const LAWS = {
   deed: 'Every deed is followed by the world\'s answer and by nothing else.',
   waking: 'A sleeper wakes only when its sleep ends or a deed\'s result wakes it.',
   spent: 'Nobody acts after being awake for the world\'s limit: at that turn it falls asleep instead.',
+  body: 'What a person has, holds and how it is placed, and the things of a place, change only by the world\'s answer to a deed done in that place; a pose is also dropped when its owner leaves.',
+  unseen: 'Nobody is sent what another person carries out of sight, or the looks, pose or holdings of a person in another place.',
 };
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
 // The same request always gets the same answer, so the same world always gets the same journal. The answers are of
 // every kind: the oversized, a time of day in place of seconds, and the unusable for each of its reasons.
-// `record` says how many records the journal held at a request, so that the largest request can be placed.
+// `record` says how many records the journal held at a request, so that the largest request can be placed. While
+// `seen.turns` is a list, it gains for every request who was asked, a resident or for the world the deed's place, at
+// which record, whether for a turn, and the words of bodies, belongings, things and facts that the request held.
+type Asked = { record: number; who: string; turn: boolean; marks: string[] };
+const asker = (request: Request) => /\nYou are Person \d+ \((c\d+)\)\./.exec(request.system!)![1];
+const MARK = /\b(?:looks|pose|holds|has|things|facts)-[cp]\d+-\d+/g;
 function standIn(record: () => number) {
-  const seen = { largest: 0, record: 0 };
+  const seen: { largest: number; record: number; turns: Asked[] | null } = { largest: 0, record: 0, turns: [] };
   const respond = async (request: Request) => {
     const body = `${request.system}${request.messages.map(message => message.content).join('')}`;
     if (body.length > seen.largest) Object.assign(seen, { largest: body.length, record: record() });
@@ -61,10 +72,21 @@ function standIn(record: () => number) {
     if ('result' in (request.schema as { properties: object }).properties) {
       // The world: sometimes no answer, sometimes nothing to notice, and it wakes some of the sleepers and names others.
       const sleepers = [...body.matchAll(/\((c\d+)\), asleep/g)].map(match => match[1]);
-      answer = roll < 0.1 ? 'no answer' : { result: roll < 0.4 ? null : words(upTo(90)), wakes: [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`] };
+      // It changes what it likes of those here and of the place, and names people and places elsewhere and a text
+      // that is nobody's to change; now and then it leaves nothing.
+      const here = [...body.matchAll(/\n- Person \d+ \((c\d+)\), a/g)].map(match => match[1]), spot = /^The place: Place \d+ \((p\d+)\)/.exec(request.messages[0].content)![1];
+      seen.turns?.push({ record: record(), who: spot, turn: true, marks: body.match(MARK) ?? [] });
+      const changes = Array.from({ length: upTo(6) - 1 }, () => {
+        const what = ['pose', 'holds', 'has', 'things', 'looks'][upTo(5) - 1];
+        const of = what === 'things' ? (random() < 0.7 ? spot : `p${upTo(PLACES) - 1}`) : random() < 0.7 ? here[upTo(here.length) - 1] : `c${upTo(PEOPLE) - 1}`;
+        return { of, what, text: random() < 0.15 ? '' : `${what}-${of}-${upTo(99_999)}` };
+      });
+      answer = roll < 0.1 ? 'no answer' : { result: roll < 0.4 ? null : words(upTo(90)), wakes: [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`], changes };
     } else if ('memory' in (request.schema as { properties: object }).properties) {
+      seen.turns?.push({ record: record(), who: asker(request), turn: false, marks: body.match(MARK) ?? [] });
       answer = roll < 0.08 ? { memory: '' } : roll < 0.12 ? { memory: 'x'.repeat(5000) } : { memory: words(roll < 0.3 ? 61 + upTo(100) : upTo(60)) };
     } else {
+      seen.turns?.push({ record: record(), who: asker(request), turn: true, marks: body.match(MARK) ?? [] });
       const none = { text: null, to: null, place: null, seconds: null, until: null, note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
       // A time of day at random: for a wait it is mostly out of reach, for a sleep about half the time.
       const until = `${String(upTo(24) - 1).padStart(2, '0')}:${String(upTo(60) - 1).padStart(2, '0')}`;
@@ -88,25 +110,51 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const { seen, respond } = standIn(() => journal.all.length);
   const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 4000, journal, pause: true });
   assert.deepEqual([whole.status, whole.reason, whole.calls], ['done', 'calls', 4000]);
+  const turns = seen.turns!;
+  seen.turns = null;
 
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
-    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0 };
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0 };
   const sleepEnds = new Map<string, number>();
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
   const debtOf = (id: string, now: number) => { const { debt, since } = debts.get(id)!; return asleep.has(id) ? Math.max(0, debt - 2 * (now - since)) : debt + now - since; };
   const limit = world.spentHours * 3600;
-  let at = 0;
+  // Bodies, belongings and things, counted here from the world file and the records alone.
+  const bodies = new Map(world.characters.map(({ id, pose, holds, has }) => [id, { pose, holds, has }]));
+  const things = new Map(world.places.map(({ id, things: lying }) => [id, lying]));
+  let at = 0, asked = 0;
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
+    // A request made when the journal held this many records shows bodies, belongings and things as they stood then.
+    // The world is sent everything of the deed's place and of those in it. A resident is sent its own looks and, for
+    // a turn, its pose, holdings and what it carries, with what is seen of those in its place.
+    for (; asked < turns.length && turns[asked].record === seq; asked += 1) {
+      const { who, turn, marks } = turns[asked], spot = who.startsWith('p') ? who : place.get(who);
+      const near = turn ? world.characters.filter(({ id }) => id !== who && !away.has(id) && place.get(id) === spot) : [];
+      const seen = (id: string) => [`looks-${id}-0`, bodies.get(id)!.pose, bodies.get(id)!.holds];
+      const due = new Set((who === spot ? [things.get(who)!, `facts-${who}-0`, ...near.flatMap(({ id }) => [...seen(id), bodies.get(id)!.has, `facts-${id}-0`])]
+        : [`looks-${who}-0`, ...(turn ? [...seen(who), bodies.get(who)!.has] : []), ...near.flatMap(({ id }) => seen(id))]).filter(mark => mark !== null));
+      // A word that is not due is another's secret or a text of another place, or else a text that is no longer so.
+      const open = new RegExp(`^(looks|pose|holds)-(${[who, ...near.map(({ id }) => id)].join('|')})-`);
+      for (const mark of marks) law(who === spot || open.test(mark) ? 'body' : 'unseen', due.has(mark), seq);
+      law('body', due.size === new Set(marks).size, seq);
+    }
     const before = journal.all[seq - 1]?.event;
     law('deed', (before?.kind === 'do') === (record.kind === 'result') && (record.kind !== 'result' || (before.who === record.who && before.at === record.at)), seq);
     if (record.kind === 'result') {
       for (const id of record.wakes) {
         law('waking', asleep.has(id) && place.get(id) === event.place, seq);
         sleepEnds.set(id, Math.min(sleepEnds.get(id)!, before.at + before.seconds));
+      }
+      for (const change of record.changes) {
+        law('body', change.what === 'things' ? change.of === event.place : place.get(change.of) === event.place && !away.has(change.of), seq);
+        if (change.what === 'things') things.set(change.of, change.text || null);
+        else bodies.get(change.of)![change.what] = change.text || null;
+        count.changed += 1;
+        if (!change.text) count.emptied += 1;
       }
       count.result += 1;
       count.woken += record.wakes.length;
@@ -134,6 +182,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
       if (event.kind === 'call' && !event.heard.includes(event.to as string)) count.waited += 1;
     } else if (event.kind === 'go') {
       away.set(event.who, event.to as string);
+      if (bodies.get(event.who)!.pose !== null) count.unposed += 1;
+      bodies.get(event.who)!.pose = null;
       count.go += 1;
     } else if (event.kind === 'arrive') {
       law('arrival', away.get(event.who) === event.place, seq);

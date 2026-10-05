@@ -25,7 +25,7 @@ function standIn(script: { [id: string]: (string | Error)[] }) {
   const respond = async (request: Request) => {
     const id = /\nYou are \w+ \((\w+)\)\.\n/.exec(request.system ?? '')?.[1] ?? 'world';
     (sent[id] ??= []).push(structuredClone(request));
-    const answer = script[id]?.shift() ?? (id === 'world' ? JSON.stringify({ result: null, wakes: [] }) : act('wait', { seconds: 600 }));
+    const answer = script[id]?.shift() ?? (id === 'world' ? JSON.stringify({ result: null, wakes: [], changes: [] }) : act('wait', { seconds: 600 }));
     if (answer instanceof Error) throw answer;
     return { text: answer, usage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 } };
   };
@@ -71,8 +71,9 @@ test('a character is sent its own sheet and what it perceived, and nothing else'
   const first = `So far:
 09:00:00 Anna says: "RED-WORD is here"
 
-Now 09:00:03. You are in Red room (red). Here with you: Anna (anna).
-You have been awake for 2 h 0 min.
+Now 09:00:03. You are in Red room (red). Here with you:
+- Anna (anna).
+You feel rested.
 Minutes from here: Blue room (blue) 1.
 This turn the \`text\` of a say or a call may hold 57 words at most. 0 min 57 s of the story are left.`;
   assert.equal(sent.boris.length, 1);
@@ -139,7 +140,7 @@ test('a sleeper perceives nothing and wakes with the memory it wrote and the cal
   const outcome = await runLive({ world, respond, model: 'stand-in', minutes: 11, journal, pause: true });
   assert.deepEqual([outcome.status, outcome.rewrites, outcome.lost], ['done', 2, 1]);
   // Boris sees her asleep, and what he says then reaches nobody.
-  assert.match(sent.boris[1].messages[0].content, /\n09:00:03 Anna falls asleep\.\n\nNow 09:00:33\. You are in Red room \(red\)\. Here with you: Anna \(anna\), asleep\.\n/);
+  assert.match(sent.boris[1].messages[0].content, /\n09:00:03 Anna falls asleep\.\n\nNow 09:00:33\. You are in Red room \(red\)\. Here with you:\n- Anna \(anna\), asleep\.\n/);
   assert.deepEqual(journal.all.find(({ event }) => event.text === 'NIGHT-WORD')?.event.heard, []);
   assert.equal(JSON.stringify(sent.anna).includes('NIGHT-WORD'), false);
   // At the waking she writes her memory from everything before the sleep, with her own system text and one field.
@@ -155,8 +156,9 @@ Since then:
 09:01:00 Clara called you (telephone) while you were asleep: "WAITING-WORD"
 09:10:03 You wake.
 
-Now 09:10:03. You are in Red room (red). Here with you: Boris (boris).
-You have been awake for 1 h 40 min.
+Now 09:10:03. You are in Red room (red). Here with you:
+- Boris (boris).
+You feel rested.
 Minutes from here: Blue room (blue) 1.
 This turn the \`text\` of a say or a call may hold 65 words at most.` }]);
   // Dan's two answers could not be used: the journal says the rewrite was lost, and he wakes knowing only that he woke.
@@ -212,39 +214,58 @@ test('a character with a model of its own is asked through that connection under
   assert.equal(outcome.models.common.calls, outcome.calls - 6);
 });
 
-test('the world answers a deed from facts no resident is sent, knowing no sheet, note, memory or speech, and its answer has one place in the journal', async () => {
-  const withFacts = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', facts: 'FACT-WORLD', clock: '09:00', wordsPerMinute: 60, remote: 'telephone',
-    places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED' }, { id: 'blue', name: 'Blue room', about: 'Blue walls.', facts: 'FACT-BLUE' }],
-    characters: [{ id: 'anna', name: 'Anna', place: 'red', sheet: 'SHEET-ANNA', facts: 'FACT-ANNA' }, { id: 'boris', name: 'Boris', place: 'red', sheet: 'SHEET-BORIS', facts: 'FACT-BORIS' },
-      { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA' }, { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN', facts: 'FACT-DAN' }] });
+test('the world answers a deed from facts, bodies and belongings, a resident is sent its own and what it sees of those with it, and the answer has one place in the journal', async () => {
+  const withFacts = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', facts: 'FACT-WORLD', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
+    places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED', things: 'THINGS-RED' },
+      { id: 'blue', name: 'Blue room', about: 'Blue walls.', facts: 'FACT-BLUE', things: 'THINGS-BLUE' }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'red', sheet: 'SHEET-ANNA', facts: 'FACT-ANNA', looks: 'LOOKS-ANNA', pose: 'POSE-ANNA', holds: 'HOLDS-ANNA', has: 'HAS-ANNA' },
+      { id: 'boris', name: 'Boris', place: 'red', sheet: 'SHEET-BORIS', facts: 'FACT-BORIS', looks: 'LOOKS-BORIS', pose: 'POSE-BORIS', holds: 'HOLDS-BORIS', has: 'HAS-BORIS' },
+      { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA', looks: 'LOOKS-CLARA', pose: 'POSE-CLARA', holds: 'HOLDS-CLARA', has: 'HAS-CLARA' },
+      { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN', facts: 'FACT-DAN', looks: 'LOOKS-DAN', pose: 'POSE-DAN', holds: 'HOLDS-DAN', has: 'HAS-DAN' }] });
   const { sent, respond } = standIn({
     anna: [act('say', { text: 'SPEECH-WORD', note: 'NOTE-ANNA' }), act('sleep', { seconds: 600 }), JSON.stringify({ memory: 'LONG-ANNA' })],
-    boris: [act('wait', { seconds: 5 }), act('do', { text: 'shakes Anna', seconds: 10 })],
+    boris: [act('wait', { seconds: 5 }), act('do', { text: 'shakes Anna', seconds: 10 }), act('go', { place: 'blue' }), act('wait', { seconds: 5 })],
     clara: [act('do', { text: 'opens the window', seconds: 5 })],
     dan: [act('wait', { seconds: 3 })],
     // The second answer names a sleeper of the place, someone awake there and someone elsewhere: only the first is woken.
-    world: [JSON.stringify({ result: 'COLD-WORD', wakes: [] }), JSON.stringify({ result: 'RESULT-WORD', wakes: ['dan', 'boris', 'anna'] })],
+    // Its changes name people and the things of the place, and also a person and a place elsewhere: those are dropped.
+    world: [JSON.stringify({ result: 'COLD-WORD', wakes: [], changes: [] }), JSON.stringify({ result: 'RESULT-WORD', wakes: ['dan', 'boris', 'anna'], changes: [
+      { of: 'boris', what: 'holds', text: 'HOLDS-NEW' }, { of: 'boris', what: 'has', text: '' }, { of: 'anna', what: 'pose', text: 'POSE-NEW' },
+      { of: 'red', what: 'things', text: 'THINGS-NEW' }, { of: 'dan', what: 'has', text: 'HAS-STOLEN' }, { of: 'blue', what: 'things', text: 'THINGS-STOLEN' },
+      { of: 'anna', what: 'looks', text: 'LOOKS-NEW' }] })],
   });
   const journal = memoryStore();
-  await runLive({ world: withFacts, respond, model: 'stand-in', minutes: 1, journal, pause: true });
-  // The world is sent the facts of the world, of the place and of those in it, and the deed.
+  await runLive({ world: withFacts, respond, model: 'stand-in', minutes: 3, journal, pause: true });
+  // The world is sent the facts of the world, the things and facts of the place, all of those in it, and the deed.
   assert.deepEqual(sent.world[1], { model: 'stand-in', system: `${WORLD_INSTRUCTIONS}\n\nThe world: Two rooms\nA house with two rooms.\nFacts: FACT-WORLD`,
-    schema: sent.world[0].schema, messages: [{ role: 'user', content: `The place: Red room (red). Red walls. Facts: FACT-RED
+    schema: sent.world[0].schema, messages: [{ role: 'user', content: `The place: Red room (red). Red walls. Things: THINGS-RED. Facts: FACT-RED.
 Here:
-- Anna (anna), asleep. Facts: FACT-ANNA
-- Boris (boris), awake. Facts: FACT-BORIS
+- Anna (anna), asleep. Looks: LOOKS-ANNA. Pose: POSE-ANNA. Holds: HOLDS-ANNA. Has out of sight: HAS-ANNA. Facts: FACT-ANNA.
+- Boris (boris), awake. Looks: LOOKS-BORIS. Pose: POSE-BORIS. Holds: HOLDS-BORIS. Has out of sight: HAS-BORIS. Facts: FACT-BORIS.
 Now 09:00:07. Boris does, for 10 s: shakes Anna
 What comes of it?` }] });
   for (const mark of ['SHEET-', 'NOTE-', 'LONG-', 'SPEECH-']) assert.equal(JSON.stringify(sent.world).includes(mark), false, `${mark} in the requests to the world`);
   const { world: _, ...residents } = sent;
-  assert.equal(JSON.stringify(residents).includes('FACT-'), false);
+  // No resident is sent a fact or the things of a place. It is sent what it carries out of sight and nobody else's,
+  // and the looks, pose and holdings of itself and of those in its place: Boris walks from the red room to the blue.
+  for (const mark of ['FACT-', 'THINGS-', 'STOLEN', 'LOOKS-NEW']) assert.equal(JSON.stringify(residents).includes(mark), false, `${mark} in a resident's request`);
+  const marks = (requests: { system?: string; messages: { content: string }[] }[]) =>
+    [...new Set(requests.flatMap(request => `${request.system}\n${request.messages[0].content}`.match(/(LOOKS|POSE|HOLDS|HAS)-[A-Z]+/g) ?? []))].sort();
+  assert.deepEqual(marks(sent.anna), ['HAS-ANNA', 'HOLDS-ANNA', 'HOLDS-BORIS', 'HOLDS-NEW', 'LOOKS-ANNA', 'LOOKS-BORIS', 'POSE-ANNA', 'POSE-BORIS', 'POSE-NEW']);
+  assert.deepEqual(marks(sent.clara), ['HAS-CLARA', 'HOLDS-CLARA', 'HOLDS-DAN', 'HOLDS-NEW', 'LOOKS-BORIS', 'LOOKS-CLARA', 'LOOKS-DAN', 'POSE-CLARA', 'POSE-DAN']);
+  // The changes the world named for the red room took the place of the old texts; a walker has no pose.
+  assert.match(sent.boris[2].messages[0].content, / Here with you:\n- Anna \(anna\)\. Looks: LOOKS-ANNA\. Pose: POSE-NEW\. Holds: HOLDS-ANNA\.\nYou feel rested\. Your pose: POSE-BORIS\. You hold: HOLDS-NEW\. You carry out of sight: nothing\.\n/);
+  assert.match(sent.boris[3].messages[0].content, /\n- Dan \(dan\)\. Looks: LOOKS-DAN\. Pose: POSE-DAN\. Holds: HOLDS-DAN\.\nYou feel rested\. You hold: HOLDS-NEW\. You carry out of sight: nothing\.\n/);
+  assert.match(sent.boris[0].system ?? '', /\nSHEET-BORIS\nHow you look: LOOKS-BORIS$/);
   // The doer and a witness read what came of the deed; the sleeper it woke reads who woke it and wakes when the deed ends.
   assert.match(sent.boris[2].messages[0].content, /\n09:00:07 You do \(10 s\): shakes Anna\n09:00:07 What came of it: RESULT-WORD\n/);
   assert.match(sent.dan[1].messages[0].content, /\n09:00:00 Clara does \(5 s\): opens the window\n09:00:00 What came of what Clara did: COLD-WORD\n/);
   assert.match(sent.anna[3].messages[0].content, /\nSince then:\n09:00:17 Boris woke you by this: shakes Anna\n09:00:17 You wake\.\n\nNow 09:00:17\./);
   // The answer is the record right after its deed, and the journal takes it nowhere else and nothing else there.
   const deed = journal.all.findIndex(({ event }) => event.kind === 'do' && event.who === 'boris');
-  assert.deepEqual(journal.all[deed + 1].record, { kind: 'result', who: 'boris', at: 7, text: 'RESULT-WORD', wakes: ['anna'] });
+  assert.deepEqual(journal.all[deed + 1].record, { kind: 'result', who: 'boris', at: 7, text: 'RESULT-WORD', wakes: ['anna'], changes: [
+    { of: 'boris', what: 'holds', text: 'HOLDS-NEW' }, { of: 'boris', what: 'has', text: '' }, { of: 'anna', what: 'pose', text: 'POSE-NEW' },
+    { of: 'red', what: 'things', text: 'THINGS-NEW' }] });
   assert.throws(() => replay(withFacts, journal.all.filter((_entry, index) => index !== deed + 1).map((entry, seq) => ({ ...entry, seq }))), JournalError);
-  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [] }), JournalError);
+  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [], changes: [] }), JournalError);
 });

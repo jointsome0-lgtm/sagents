@@ -4,8 +4,8 @@ import { advance, memoryStore, replay, RESULT_WORDS } from './journal.ts';
 import type { Record, State, Store } from './journal.ts';
 import { idle, oldest, readMemory } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
-import { CHARS_PER_WORD, clockAt, debtAt, spentAt, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, travelSeconds, wordLimit } from './world.ts';
-import type { Event, World } from './world.ts';
+import { CHARS_PER_WORD, clockAt, LIMITS, spentAt, weariness, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, travelSeconds, wordLimit } from './world.ts';
+import type { Event, Person, World } from './world.ts';
 
 // The `live` mode: every character of a world is played by a model, one call for one action, under the story's clock.
 // A character is sent its own sheet, what it remembers and what it perceived since, and nothing else: no other
@@ -26,7 +26,9 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 
 Speak the way people speak: briefly, one thought at a time, and leave room for an answer. Words cost the story's time: each takes part of a second, and those who listen are held until you finish. Each turn says how many words \`text\` may hold; a longer speech is cut there. A note, and the \`text\` of a do, keep their first ${MAX_WORDS} words.
 
-Each turn says how long you have been awake. People need sleep: an hour of it makes up for two awake, and one who stays awake too long falls asleep on the spot.
+Each turn says how your body feels. People need sleep: an hour of it makes up for two awake, and one who stays awake too long falls asleep on the spot.
+
+Each turn also says how you are placed, what you hold in sight and what you carry out of sight, and what you see of those who are with you. None of it changes by itself or by words: to take, give, put down or hide a thing, to sit or lie down, do it, and the world tells you what came of it.
 
 You know only your sheet, what you remember and what you perceived since, which is what a turn lists. Nothing else is known to you. You may keep things to yourself, and you need not say what you want.
 
@@ -40,8 +42,10 @@ const text = { type: ['string', 'null'] };
 const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'note'],
   properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: text,
     seconds: { type: ['integer', 'null'] }, until: text, note: text } });
-const RESULT_SCHEMA = { type: 'object', additionalProperties: false, required: ['result', 'wakes'],
-  properties: { result: text, wakes: { type: 'array', items: { type: 'string' } } } };
+const RESULT_SCHEMA = { type: 'object', additionalProperties: false, required: ['result', 'wakes', 'changes'],
+  properties: { result: text, wakes: { type: 'array', items: { type: 'string' } },
+    changes: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['of', 'what', 'text'],
+      properties: { of: { type: 'string' }, what: { type: 'string', enum: ['pose', 'holds', 'has', 'things'] }, text: { type: 'string' } } } } } };
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
@@ -65,7 +69,7 @@ const systemOf = (world: World, shared: string, id: string) => {
   return `${shared}
 
 You are ${tagged(self)}.
-${self.sheet}`;
+${self.sheet}${self.looks === null ? '' : `\nHow you look: ${self.looks}`}`;
 };
 
 // What a character knows beyond its sheet, as a request opens with it: the long-term text, then the given lines.
@@ -77,27 +81,43 @@ const rewriteOf = (world: World, clock: string, waking: boolean) => `Now ${clock
 Write your memory anew as one text of at most ${world.longWords} words, in the language of your sheet, from what you remember and the lines above: what you know about people, what you want, what was promised and by whom, what has changed in you. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten. A longer text is cut at the limit.
 Answer with one JSON object that has the single field \`memory\`.`;
 
-// What the world is told to be when it is asked what came of a deed. It is sent facts and no person's sheet, note,
-// memory or speech, and what it answers is held to the people and the place the rules know.
+// What the world is told to be when it is asked what came of a deed. It is sent facts, bodies and belongings and no
+// person's sheet, note, memory or speech, and what it answers is held to the people and the place the rules know.
 export const WORLD_INSTRUCTIONS = `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.
 
 You are told what is there, and nothing else exists: a search for something you were not told of finds nothing of the kind. Say what is there as the world itself. Never speak of facts, of what was mentioned or listed, or of your task.
 
 Answer with one JSON object.
 - result: what the senses give as the direct result of the deed, in one or two plain sentences, in the language of the world's description. It never retells the deed: when there is nothing to notice beyond the deed itself, it is null. Say only what is seen, heard or felt, never what anyone thinks, says or does next: people who are awake answer on their own turns.
-- wakes: the ids of the sleepers here whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not.`;
+- wakes: the ids of the sleepers here whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not.
+- changes: what the deed changed of the people here and of the things of the place, or an empty list when it changed nothing. An entry has \`of\`, \`what\` and \`text\`. \`what\` is one of: pose, how and where in the place a person is (${LIMITS.pose} words at most); holds, what a person has in their hands or wears in sight (${LIMITS.holds}); has, what a person carries out of sight (${LIMITS.has}); things, what lies in the place and can be moved, taken or changed (${LIMITS.things}). \`of\` is the id of a person here, or for things the id of the place. \`text\` is the whole new text that takes the place of the old one, in the language of the world's description; an empty text when nothing is left.
+
+A thing never appears from nowhere and never vanishes. What one person gives, another receives. What is taken from the place is in someone's hands or pockets afterwards, and what is put down is among the things of the place: such a deed changes both texts. A deed that only looks, listens or speaks changes nothing.`;
 const worldSystemOf = (world: World) => `${WORLD_INSTRUCTIONS}
 
 The world: ${world.title}
 ${world.about}${world.facts === null ? '' : `\nFacts: ${world.facts}`}`;
+// One text under its name, closed as a sentence, or nothing when there is none.
+const part = (name: string, value: string | null) => value === null ? '' : ` ${name}: ${value}${/[.!?…]$/.test(value) ? '' : '.'}`;
+// What anyone in a person's place sees of it. What it carries out of sight is not here.
+const seen = (character: { looks: string | null }, person: Person) => `${part('Looks', character.looks)}${part('Pose', person.pose)}${part('Holds', person.holds)}`;
+// How a body feels, said to its owner, by the step of `weariness`. The hours stay with the rules.
+const FEELS = ['You feel rested.', 'You have been awake a long while.',
+  'You are tired and should sleep soon: stay awake much longer and you fall asleep where you are.',
+  'You can hardly stay awake: sleep now, or you fall asleep where you are.'];
+// What the others of the place see of it, from the tired step on.
+const SHOWS = ['', '', ', looks tired', ', can hardly stay awake'];
+
 // One deed as the world is asked about it: the place, who is there, what came of earlier deeds there, and the deed.
 function deedOf(world: World, state: State, deed: Event): string {
   const place = world.places.find(item => item.id === deed.place)!;
-  const facts = (item: { facts: string | null }) => item.facts === null ? '' : ` Facts: ${item.facts}`;
-  const here = world.characters.flatMap((character, index) => state.people[index].place !== place.id ? []
-    : [`- ${tagged(character)}, ${state.people[index].asleep ? 'asleep' : 'awake'}.${facts(character)}`]);
+  const here = world.characters.flatMap((character, index) => {
+    const person = state.people[index];
+    return person.place !== place.id ? [] : [`- ${tagged(character)}, ${person.asleep ? 'asleep' : 'awake'}.${seen(character, person)}${
+      part('Has out of sight', person.has)}${part('Facts', character.facts)}`];
+  });
   const earlier = state.results.get(place.id)!;
-  return [`The place: ${tagged(place)}. ${place.about}${facts(place)}`, 'Here:', ...here,
+  return [`The place: ${tagged(place)}. ${place.about}${part('Things', state.things.get(place.id)!)}${part('Facts', place.facts)}`, 'Here:', ...here,
     ...(earlier.length ? ['What came of earlier deeds here:', ...earlier.map(line => line.text)] : []),
     `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`, 'What comes of it?'].join('\n');
 }
@@ -105,19 +125,24 @@ function deedOf(world: World, state: State, deed: Event): string {
 // No request of a world is longer than this many characters, system text and message together, however long the
 // world has run. A line holds a speech, a note or a deed of `MAX_WORDS` words under a head of names and a clock, a
 // character's own action is four lines at most with what came of it, and the lines of one request are `shortWords` and one such action.
+// A body's text is as long as its limit of words lets it be, since the world's answer may make it so.
 export function requestLimit(world: World): number {
   const longest = (texts: string[]) => Math.max(...texts.map(item => item.length));
   const people = world.characters.map(tagged), places = world.places.map(tagged);
-  const system = sharedOf(world).length + longest(people) + longest(world.characters.map(character => character.sheet)) + 20;
+  const looks = (character: { looks: string | null }) => (character.looks?.length ?? 0) + 20;
+  const system = sharedOf(world).length + longest(people) + longest(world.characters.map(character => character.sheet)) + Math.max(...world.characters.map(looks)) + 40;
   const head = 2 * longest(world.characters.map(character => character.name)) + longest(world.places.map(place => place.name)) + (world.remote?.length ?? 0) + 120;
   const lines = (world.shortWords + 4 * (head + MAX_WORDS)) * (CHARS_PER_WORD + 1);
-  const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + 600;
+  const visible = (LIMITS.pose + LIMITS.holds) * CHARS_PER_WORD + 60;
+  const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + 800
+    + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + LIMITS.has * CHARS_PER_WORD;
   const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
-  // The world's request: every person could be in one place, each with facts, under the results the place keeps.
+  // The world's request: every person could be in one place, each with its body, belongings and facts, under the
+  // things and the results the place keeps.
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
   const deed = worldSystemOf(world).length
-    + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place)))
-    + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character), 0)
+    + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place))) + LIMITS.things * CHARS_PER_WORD
+    + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + LIMITS.has * CHARS_PER_WORD + 40, 0)
     + (RESULT_WORDS + 2 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + 400;
   return Math.max(resident, deed);
 }
@@ -139,6 +164,7 @@ export function linesOf(world: World, event: Event): string[] {
                   event.wakes?.length ? ` (wakes ${event.wakes.map(id => named(world.characters, id)).join(', ')})` : ''}`
                   : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}` : `${who} waits (${event.seconds} s)`;
   return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} [${named(world.places, event.place)}] ${what}`]),
+    ...(event.changes ?? []).map(change => `         ${change.what} of ${named(change.what === 'things' ? world.places : world.characters, change.of)}: ${change.text || 'nothing'}`),
     ...(event.note ? [`         private note of ${who}: ${event.note}`] : [])];
 }
 
@@ -219,15 +245,16 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       // A deed waits for the world's answer, and nothing else can happen before it. An answer that cannot be used
       // gets one more try; after that nothing came of the deed.
       const request = { system: worldSystem, schema: RESULT_SCHEMA, messages: [{ role: 'user' as const, content: deedOf(world, state, deed) }] };
-      const sleepers = state.people.filter(person => person.asleep && person.place === deed.place).map(person => person.id);
+      const present = state.people.filter(person => person.place === deed.place);
+      const sleepers = present.filter(person => person.asleep).map(person => person.id);
       let came = null;
       for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
         const answer = await ask(judge, request);
         if (answer === null) return outcome;
-        came = readResult(answer, sleepers);
+        came = readResult(answer, sleepers, present.map(person => person.id), deed.place);
         if (!came) unusable(judge);
       }
-      await happened({ kind: 'result', who: deed.who, at: deed.at, text: came?.text ?? null, wakes: came?.wakes ?? [] }, judge.name);
+      await happened({ kind: 'result', who: deed.who, at: deed.at, text: came?.text ?? null, wakes: came?.wakes ?? [], changes: came?.changes ?? [] }, judge.name);
       continue;
     }
     const actor = next(state.people);
@@ -271,15 +298,19 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     // The people of a state stand in the world file's order.
     const others = world.characters.flatMap((character, index) => {
       const person = state.people[index];
-      return person !== actor && person.place === place ? [`${tagged(character)}${person.asleep ? ', asleep' : ''}`] : [];
+      return person !== actor && person.place === place
+        ? [`- ${tagged(character)}${person.asleep ? ', asleep' : SHOWS[weariness(world, person, now)]}.${seen(character, person)}`] : [];
     });
-    const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now), awake = debtAt(actor, now);
+    const self = world.characters.find(character => character.id === who)!;
+    // What was given in the world file and is gone is said as nothing; what never was is not spoken of.
+    const own = (name: string, value: string | null, given: string | null) => value === null && given === null ? '' : part(name, value ?? 'nothing');
+    const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now);
     const answer = await ask(player, { system, schema, messages: [{ role: 'user', content: [
       ...known(mind, mind.lines),
-      `Now ${clockAt(world, now)}. You are in ${tagged(world.places.find(item => item.id === place)!)}. ${
-        others.length ? `Here with you: ${others.join('; ')}.` : 'Nobody else is here.'}`,
-      `You have been awake for ${Math.floor(awake / 3600)} h ${Math.floor(awake / 60) % 60} min.${awake < world.tiredHours * 3600 ? ''
-        : ` You are tired and should sleep soon: at ${world.spentHours} h awake you fall asleep where you are.`}`,
+      `Now ${clockAt(world, now)}. You are in ${tagged(world.places.find(item => item.id === place)!)}. ${others.length ? 'Here with you:' : 'Nobody else is here.'}`,
+      ...others,
+      `${FEELS[weariness(world, actor, now)]}${part('Your pose', actor.pose)}${own('You hold', actor.holds, self.holds)}${
+        own('You carry out of sight', actor.has, self.has)}`,
       `Minutes from here: ${world.places.filter(item => item.id !== place).map(item => `${tagged(item)} ${travelSeconds(world, place, item.id) / 60}`).join(', ') || 'there is no other place'}.`,
       `This turn the \`text\` of a say or a call may hold ${limit} words at most.${
         pause ? '' : ` ${Math.floor((horizon - now) / 60)} min ${(horizon - now) % 60} s of the story are left.`}`,
