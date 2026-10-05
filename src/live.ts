@@ -16,11 +16,12 @@ export const INSTRUCTIONS = `You are one person in a story that several people l
 
 Each turn you take exactly one action and answer with one JSON object. Every field is there; a field the action does not use is null.
 - say: you speak \`text\` aloud. Everyone in your place hears it.
-- call: you speak \`text\` to the person \`to\` (an id) by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
-- go: you walk to \`place\` (an id). On the way you hear and see nothing and cannot act.
+- call: you speak \`text\` to one person, \`to\` (that person's id), by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
+- go: you walk to another place of the list, \`place\` (its id). Moving about inside the place you are in is a do. On the way you hear and see nothing and cannot act.
 - do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it.
 - wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). Speech near you, or someone coming or leaving, ends the wait early.
-- sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}). Asleep you hear and see nothing, and nothing and nobody wakes you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
+- sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}), or \`until\` a time of day. Asleep you hear and see nothing, and nothing and nobody wakes you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
+- until: for do, wait and sleep, in place of \`seconds\`: a time of day like 06:30, the next moment the clock shows it. It must fall within the action's span.
 - note: with any action, a private line you keep for yourself. Nobody else ever reads it. Null when you have none.
 
 Speak the way people speak: briefly, one thought at a time, and leave room for an answer. Words cost the story's time: each takes part of a second, and those who listen are held until you finish. Each turn says how many words \`text\` may hold; a longer speech is cut there. A note, and the \`text\` of a do, keep their first ${MAX_WORDS} words.
@@ -34,9 +35,9 @@ Do not describe what other people do, feel or answer, and do not decide for them
 Write \`text\`, \`note\` and your memory in the language of your sheet.`;
 
 const text = { type: ['string', 'null'] };
-const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'note'],
+const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'note'],
   properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: text,
-    seconds: { type: ['integer', 'null'] }, note: text } });
+    seconds: { type: ['integer', 'null'] }, until: text, note: text } });
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
@@ -69,7 +70,7 @@ const known = (mind: Mind, lines: Line[]) => [...(mind.long ? ['What you remembe
 // The request to write the long-term memory anew. It keeps or drops: a memory must not gain what did not happen.
 const rewriteOf = (world: World, clock: string, waking: boolean) => `Now ${clock}. This is not a turn and you take no action: ${
   waking ? 'you are waking, and what you lived through before your sleep stays with you only as your memory' : 'much has happened, and its oldest part stays with you only as your memory'}.
-Write your memory anew as one text of at most ${world.longWords} words, in the language of your sheet, from what you remember and the lines above: what you know about people, what you want, what was promised and by whom, what has changed in you. Keep or drop, and add nothing that is not above. What you leave out is forgotten. A longer text is cut at the limit.
+Write your memory anew as one text of at most ${world.longWords} words, in the language of your sheet, from what you remember and the lines above: what you know about people, what you want, what was promised and by whom, what has changed in you. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten. A longer text is cut at the limit.
 Answer with one JSON object that has the single field \`memory\`.`;
 
 // No request of a world is longer than this many characters, system text and message together, however long the
@@ -98,7 +99,7 @@ export function linesOf(world: World, event: Event): string[] {
             : event.kind === 'wake' ? `${who} wakes`
               : event.kind === 'memory' ? `private memory of ${who}${event.cut ? ' (cut)' : ''}: ${
                 event.text?.replaceAll('\n', '\n         ') ?? 'the rewrite was lost, and what it was to hold is forgotten'}`
-                : event.kind === 'do' ? `${who} does: ${event.text} (${event.seconds} s)` : `${who} waits (${event.seconds} s)`;
+                : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}` : `${who} waits (${event.seconds} s)`;
   return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} [${named(world.places, event.place)}] ${what}`]),
     ...(event.note ? [`         private note of ${who}: ${event.note}`] : [])];
 }
@@ -202,7 +203,7 @@ export async function runLive({ world, respond, model, minutes = 30, calls: most
     ].join('\n') }] });
     if (answer === null) return outcome;
     const action = readAction(world, actor, answer);
-    if (!action) outcome.invalid += 1;
+    if (typeof action === 'string') outcome.invalid += 1;
     await happened({ kind: 'act', who, at: now, limit, action });
   }
 }

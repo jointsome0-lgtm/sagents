@@ -6,16 +6,17 @@ import { test } from 'node:test';
 
 import { ModelError } from './chatgpt.ts';
 import type { Request } from './chatgpt.ts';
-import { memoryStore } from './journal.ts';
+import { advance, begin, JournalError, memoryStore } from './journal.ts';
+import type { Record } from './journal.ts';
 import { INSTRUCTIONS, runLive } from './live.ts';
-import { readWorld } from './world.ts';
+import { readAction, readWorld } from './world.ts';
 
 // Sixty words a minute: one word is one second.
 const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
   places: [{ id: 'red', name: 'Red room', about: 'Red walls.' }, { id: 'blue', name: 'Blue room', about: 'Blue walls.' }],
   characters: [{ id: 'anna', name: 'Anna', place: 'red', sheet: 'SHEET-ANNA' }, { id: 'boris', name: 'Boris', place: 'red', sheet: 'SHEET-BORIS' },
     { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA' }, { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN' }] });
-const act = (action: string, more: object = {}) => JSON.stringify({ action, text: null, to: null, place: null, seconds: null, note: null, ...more });
+const act = (action: string, more: object = {}) => JSON.stringify({ action, text: null, to: null, place: null, seconds: null, until: null, note: null, ...more });
 const words = (count: number) => Array.from({ length: count }, (_, index) => `w${index + 1}`).join(' ');
 // Each character answers from its own list, then waits. The requests are kept as they were sent, per character.
 function standIn(script: { [id: string]: (string | Error)[] }) {
@@ -99,9 +100,9 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.deepEqual([anna[1].at, anna[1].seconds, anna[1].cut, anna[1].text], [10, 65, true, words(65)]);
   assert.deepEqual([boris[1].kind, boris[1].at], ['wait', 75]);
   assert.match(sent.anna[2].messages[0].content, /\n09:00:10 Your speech was longer than the limit: the others heard only its first words\.\n\nNow 09:01:15\./);
-  // An answer that cannot be used is a wait of thirty seconds, and the next turn says so.
+  // An answer that cannot be used is a wait of thirty seconds, and the next turn says so and what to do instead.
   assert.deepEqual([anna[2].kind, anna[2].at, anna[2].seconds], ['wait', 75, 30]);
-  assert.match(sent.anna[3].messages[0].content, /\n09:01:15 Your answer could not be used and counted as a wait of 30 seconds\.\n\nNow 09:01:45\./);
+  assert.match(sent.anna[3].messages[0].content, /\n09:01:15 Your answer could not be used and counted as a wait of 30 seconds\. Answer with one JSON object and nothing else, with one of the listed actions\.\n\nNow 09:01:45\./);
   assert.match(sent.anna[3].messages[0].content, /may hold 65 words at most\. 1 min 15 s of the story are left\.$/);
   // Nobody is free before the horizon any more: the run ends without another call.
   assert.deepEqual({ ...outcome, events: journal.all.length },
@@ -158,4 +159,32 @@ This turn the \`text\` of a say or a call may hold 65 words at most.` }]);
   const lost = journal.all.find(({ record }) => record.kind === 'memory' && record.who === 'dan');
   assert.deepEqual([lost?.event.kind, lost?.event.text, sent.dan.length], ['memory', null, 4]);
   assert.match(sent.dan[3].messages[0].content, /^So far:\n09:01:40 You wake\.\n\nNow 09:01:40\./);
+});
+
+test('a time of day is the next moment the clock shows it, within the span the action allows, and the journal takes nothing else', () => {
+  // The clock began at 09:00, so 53,400 seconds on it is 23:50.
+  const late = 53_400;
+  const read = (more: object, at = late) => {
+    const state = begin(world);
+    for (const person of state.people) person.freeAt = at;
+    const action = readAction(world, state.people[0], act('x', more));
+    return typeof action === 'string' ? action : [action.seconds, action.until, advance(world, state, { kind: 'act', who: 'anna', at, limit: 65, action }).seconds];
+  };
+  // Across midnight, and to the last second of each span; one minute more is refused, and so is the minute it is now.
+  assert.deepEqual(read({ action: 'wait', until: '00:10' }), [null, '00:10', 1200]);
+  assert.deepEqual(read({ action: 'do', text: 'reads', until: '0:50', seconds: 5 }), [null, '00:50', 3600]);
+  assert.equal(read({ action: 'wait', until: '00:51' }), 'time');
+  assert.deepEqual(read({ action: 'sleep', until: '11:50' }), [null, '11:50', 43_200]);
+  assert.equal(read({ action: 'sleep', until: '11:51' }), 'time');
+  assert.equal(read({ action: 'sleep', until: '23:50' }), 'time');
+  assert.deepEqual(read({ action: 'wait', until: '23:51' }, late + 59), [null, '23:51', 1]);
+  assert.equal(read({ action: 'sleep', until: 'six' }), 'time');
+  assert.deepEqual(read({ action: 'sleep', seconds: 43_200 }), [43_200, null, 43_200]);
+  assert.equal(read({ action: 'sleep', seconds: 43_201 }), 'time');
+  // A record keeps one of the two, and a reason of the list or an action: the journal refuses the rest.
+  const wait = { action: 'wait' as const, text: null, to: null, place: null, seconds: 600, until: null, note: null };
+  const taken = (action: unknown) => advance(world, begin(world), { kind: 'act', who: 'anna', at: 0, limit: 65, action } as Record);
+  assert.equal(taken(wait).seconds, 600);
+  assert.equal(taken('here').seconds, 30);
+  for (const action of [{ ...wait, until: '10:00' }, 'tired', null]) assert.throws(() => taken(action), JournalError);
 });

@@ -39,7 +39,7 @@ export const LAWS = {
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
 // The same request always gets the same answer, so the same world always gets the same journal. The answers are of
-// every kind, the unusable and the oversized among them.
+// every kind: the oversized, a time of day in place of seconds, and the unusable for each of its reasons.
 // `record` says how many records the journal held at a request, so that the largest request can be placed.
 function standIn(record: () => number) {
   const seen = { largest: 0, record: 0 };
@@ -56,13 +56,18 @@ function standIn(record: () => number) {
     if ('memory' in (request.schema as { properties: object }).properties) {
       answer = roll < 0.08 ? { memory: '' } : roll < 0.12 ? { memory: 'x'.repeat(5000) } : { memory: words(roll < 0.3 ? 61 + upTo(100) : upTo(60)) };
     } else {
-      const none = { text: null, to: null, place: null, seconds: null, note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
-      answer = roll < 0.03 ? 'not an action'
-        : roll < 0.4 ? { ...none, action: 'say', text: roll < 0.05 ? 'y'.repeat(3000) : words(upTo(90)) }
+      const none = { text: null, to: null, place: null, seconds: null, until: null, note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
+      // A time of day at random: for a wait it is mostly out of reach, for a sleep about half the time.
+      const until = `${String(upTo(24) - 1).padStart(2, '0')}:${String(upTo(60) - 1).padStart(2, '0')}`;
+      answer = roll < 0.02 ? 'not an action' : roll < 0.03 ? { ...none, action: 'fly' } : roll < 0.04 ? { ...none, action: 'say' }
+        : roll < 0.05 ? { ...none, action: 'call', to: 'all', text: 'anyone' } : roll < 0.06 ? { ...none, action: 'go', place: 'gates' }
+        : roll < 0.4 ? { ...none, action: 'say', text: roll < 0.08 ? 'y'.repeat(3000) : words(upTo(90)) }
           : roll < 0.55 ? { ...none, action: 'call', to: `c${upTo(PEOPLE) - 1}`, text: words(upTo(40)) }
             : roll < 0.7 ? { ...none, action: 'go', place: `p${upTo(PLACES) - 1}` }
               : roll < 0.8 ? { ...none, action: 'do', text: words(upTo(120)), seconds: upTo(600) }
-                : roll < 0.92 ? { ...none, action: 'wait', seconds: upTo(300) } : { ...none, action: 'sleep', seconds: upTo(roll < 0.93 ? 43_200 : 1800) };
+                : roll < 0.86 ? { ...none, action: 'wait', seconds: upTo(300) }
+                  : roll < 0.9 ? { ...none, action: 'wait', until, seconds: 5 }
+                    : roll < 0.95 ? { ...none, action: 'sleep', until } : { ...none, action: 'sleep', seconds: upTo(roll < 0.96 ? 43_200 : 1800) };
     }
     return { text: typeof answer === 'string' ? answer : JSON.stringify(answer), usage: null };
   };
@@ -77,7 +82,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
 
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
-  const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, unusable: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0 };
+  const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0 };
   let at = 0;
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
@@ -85,7 +91,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
     if (record.kind === 'act') {
       law('absent', !away.has(record.who) && !asleep.has(record.who), seq);
       law('speech', record.at >= (held.get(record.who) ?? 0), seq);
-      if (!record.action) count.unusable += 1;
+      if (typeof record.action === 'string') count[record.action] += 1;
+      else if (record.action.until !== null) count.until += 1;
     }
     for (const id of event.heard) {
       law('absent', !away.has(id) && !asleep.has(id), seq);

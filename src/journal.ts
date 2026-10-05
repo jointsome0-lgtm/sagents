@@ -7,16 +7,16 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { blank, lineOf, remember, rewrite } from './memory.ts';
 import type { Mind } from './memory.ts';
-import { apply, arrive, clockAt, LOST_SECONDS, MAX_WORDS, next, readAction, sizeOf, start, wake } from './world.ts';
-import type { Action, Event, Person, World } from './world.ts';
+import { apply, arrive, clockAt, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, sizeOf, start, wake } from './world.ts';
+import type { Action, Event, Person, Refusal, World } from './world.ts';
 
 // The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
 export class JournalError extends Error {}
 
-// `act`: the action as it was read from the answer, or null for an answer that could not be used, with that turn's
+// `act`: the action as it was read from the answer, or the reason why the answer could not be used, with that turn's
 // word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
 // short-term lines were folded into it.
-export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | null }
+export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal }
   | { kind: 'arrive' | 'wake'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean };
 export type Entry = { seq: number; record: Record; event: Event };
@@ -34,6 +34,18 @@ export const memoryStore = (): Store & { all: Entry[] } => {
 
 // The fixed sentences a character's own lines may hold.
 export const UNUSABLE = `Your answer could not be used and counted as a wait of ${LOST_SECONDS} seconds.`;
+// What follows it, for each reason. The model that plays the character reads it, so it says what to do instead.
+const INSTEAD = {
+  json: 'Answer with one JSON object and nothing else, with one of the listed actions.',
+  action: '`action` must be one of the listed actions.',
+  text: 'That action needs a `text`.',
+  to: 'A call reaches one person: `to` must be the id of one other person from the list of people.',
+  here: 'You are already in that place. `go` leads only to another place of the list; moving about inside a place is a `do`.',
+  place: '`place` must be the id of a place from the list of places.',
+  time: `A \`do\` or a \`wait\` lasts 1 to ${MAX_SECONDS} seconds and a \`sleep\` 1 to ${MAX_SLEEP}, given as \`seconds\` or as \`until\`, a time of day like 06:30.`,
+};
+const NO_REMOTE = 'There is no means of remote contact here: to reach someone, go where they are.';
+export const refused = (world: World, reason: Refusal) => `${UNUSABLE} ${reason === 'to' && world.remote === null ? NO_REMOTE : INSTEAD[reason]}`;
 export const CUT = 'Your speech was longer than the limit: the others heard only its first words.';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
@@ -46,7 +58,7 @@ function perceived(world: World, event: Event, viewer: string): string {
       : event.kind === 'go' ? `${who} leaves towards ${named(world.places, event.to)}.`
         : event.kind === 'arrive' ? `${who} arrives.`
           : event.kind === 'sleep' ? `${who} falls asleep.`
-            : event.kind === 'wake' ? `${who} wakes.` : `${who} does: ${event.text} (${event.seconds} s)`;
+            : event.kind === 'wake' ? `${who} wakes.` : `${who} does (${event.seconds} s): ${event.text}`;
   return `${event.clock} ${what}`;
 }
 
@@ -58,7 +70,7 @@ function own(world: World, event: Event): string[] {
         : event.kind === 'arrive' ? `You arrive in ${named(world.places, event.place)}.`
           : event.kind === 'sleep' ? `You lie down to sleep (${event.seconds} s).`
             : event.kind === 'wake' ? 'You wake.'
-              : event.kind === 'do' ? `You do: ${event.text} (${event.seconds} s)` : `You wait (${event.seconds} s).`;
+              : event.kind === 'do' ? `You do (${event.seconds} s): ${event.text}` : `You wait (${event.seconds} s).`;
   return [what, ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : [])].map(line => `${event.clock} ${line}`);
 }
 
@@ -86,9 +98,14 @@ export function advance(world: World, state: State, record: Record): Event {
     if (actor.asleep || actor.place === null) return refuse('is an action of someone asleep or on the way');
     if (mind.size > world.shortWords) return refuse('is an action of someone whose memory was not folded first');
     if (!Number.isInteger(record.limit) || record.limit < 1 || record.limit > MAX_WORDS) return refuse('holds a word limit that no turn has');
-    if (record.action && !isDeepStrictEqual(readAction(world, actor, JSON.stringify(record.action)), record.action)) return refuse('holds an action its character cannot take');
-    event = apply(world, people, actor, record.action ?? { action: 'wait', text: null, to: null, place: null, seconds: LOST_SECONDS, note: null }, record.at, record.limit);
-    remember(mind, ...(record.action ? own(world, event) : [`${event.clock} ${UNUSABLE}`]).map(line => lineOf(seq, line)));
+    // An answer that could not be used is kept as its reason, which must be one of the list; an action must read as itself.
+    const reason = typeof record.action === 'string' ? record.action : null;
+    if (reason ? !isRefusal(reason) : !isDeepStrictEqual(readAction(world, actor, JSON.stringify(record.action)), record.action)) {
+      return refuse('holds an action its character cannot take');
+    }
+    const action = typeof record.action === 'string' ? { action: 'wait' as const, text: null, to: null, place: null, seconds: LOST_SECONDS, until: null, note: null } : record.action;
+    event = apply(world, people, actor, action, record.at, record.limit);
+    remember(mind, ...(reason ? [`${event.clock} ${refused(world, reason)}`] : own(world, event)).map(line => lineOf(seq, line)));
   } else {
     // A sleeper wakes with nothing but its long-term memory, so its lines were folded first.
     const due = record.kind === 'wake' ? actor.asleep && !mind.lines.length : record.kind === 'arrive' && actor.place === null;

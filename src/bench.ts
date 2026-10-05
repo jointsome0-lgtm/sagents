@@ -27,7 +27,7 @@ let seed = 42;
 const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
 const speech = Array.from({ length: 20 }, (_, index) => `слово${index}`).join(' ');
 const memory = JSON.stringify({ memory: Array.from({ length: Math.ceil(world.longWords * 0.8) }, (_, index) => `память${index}`).join(' ') });
-const none = { text: null, to: null, place: null, seconds: null, note: null };
+const none = { text: null, to: null, place: null, seconds: null, until: null, note: null };
 // The marks at a quarter, a half and the whole of the calls: the requests up to each, and the memory then.
 const marks = [calls / 4, calls / 2, calls].map(until => ({ until, characters: 0, largest: 0, rssMB: 0 }));
 let count = 0, rewrites = 0;

@@ -22,7 +22,14 @@ export type World = { title: string; about: string; clock: string; wordsPerMinut
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // One answer of a character, as the schema asks for it: every field is there and an unused one is null.
-export type Action = { action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; note: string | null };
+// `do`, `wait` and `sleep` last `seconds`, or `until` the next moment the clock shows that time of day, `HH:MM`.
+export type Action = { action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; until: string | null;
+  note: string | null };
+// Why an answer could not be used as an action: it was not a JSON object, named no action, lacked its text, called
+// nobody who can be called, led to the place the character is in or to no place, or lasted no time the action allows.
+export const REFUSALS = ['json', 'action', 'text', 'to', 'here', 'place', 'time'] as const;
+export type Refusal = typeof REFUSALS[number];
+export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(reason => reason === value);
 // `place` is where it happened; `to` is the character called, or the place a `go` leads to; `heard` holds the ids of
 // those who perceived it when it happened, without the one who did it. A `memory` is a character's long-term text
 // written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
@@ -121,36 +128,55 @@ export const start = (world: World): Person[] => world.characters.map(({ id, pla
 export const next = (people: Person[]): Person => people.reduce((first, person) =>
   person.freeAt < first.freeAt || (person.freeAt === first.freeAt && (person.began ?? -1) < (first.began ?? -1)) ? person : first);
 
-// A character's answer as an action it can take now, or null when it cannot be used. A field the action does not
-// use is dropped whatever it held. A text becomes one line; a note and what a `do` describes keep their first
-// `MAX_WORDS` words, and a speech is cut when it is made, at that turn's limit.
-export function readAction(world: World, actor: Person, answer: string): Action | null {
+// The moment of the story `at` seconds from its start, as seconds since the midnight before the start.
+const sinceMidnight = (world: World, at: number) => { const [hours, minutes] = world.clock.split(':').map(Number); return hours * 3600 + minutes * 60 + at; };
+// The seconds from `at` to the next moment the story's clock shows the time of day `until`, a whole day when it shows it now.
+export function secondsUntil(world: World, at: number, until: string): number {
+  const [hours, minutes] = until.split(':').map(Number);
+  return (hours * 3600 + minutes * 60 - sinceMidnight(world, at) % 86_400 + 86_400 - 1) % 86_400 + 1;
+}
+
+// A character's answer as an action it can take now, or the reason why it cannot be used. A field the action does not
+// use is dropped whatever it held, and of `until` and `seconds` only one is kept: `until` when it was given. A text
+// becomes one line; a note and what a `do` describes keep their first `MAX_WORDS` words, and a speech is cut when it
+// is made, at that turn's limit. The actor's `freeAt` is the moment of the turn.
+export function readAction(world: World, actor: Person, answer: string): Action | Refusal {
   let value: unknown;
   try { value = JSON.parse(answer); } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
-    return null;
+    return 'json';
   }
-  if (!isObject(value)) return null;
+  if (!isObject(value)) return 'json';
   const line = (field: unknown) => typeof field === 'string' && field.trim() ? wordsOf(field).join(' ') : null;
   const short = (field: unknown) => { const whole = line(field); return whole === null ? null : cut(whole, MAX_WORDS).text || null; };
   const text = line(value.text);
-  const within = (most: number) => typeof value.seconds === 'number' && Number.isInteger(value.seconds) && value.seconds >= 1 && value.seconds <= most ? value.seconds : null;
-  const seconds = within(MAX_SECONDS);
-  const none = { text: null, to: null, place: null, seconds: null, note: short(value.note) };
-  if (value.action === 'say') return text ? { ...none, action: 'say', text } : null;
+  const none = { text: null, to: null, place: null, seconds: null, until: null, note: short(value.note) };
+  // How long the action lasts, as the field that says it, or null when that is no span of 1 to `most` seconds.
+  const span = (most: number): { seconds: number | null; until: string | null } | null => {
+    const within = (seconds: unknown) => typeof seconds === 'number' && Number.isInteger(seconds) && seconds >= 1 && seconds <= most;
+    if (value.until === undefined || value.until === null || (typeof value.until === 'string' && !value.until.trim())) return within(value.seconds) ? { seconds: value.seconds as number, until: null } : null;
+    const time = typeof value.until === 'string' ? /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.until.trim()) : null;
+    const until = time ? `${time[1].padStart(2, '0')}:${time[2]}` : null;
+    return until && within(secondsUntil(world, actor.freeAt, until)) ? { seconds: null, until } : null;
+  };
+  if (value.action === 'say') return text ? { ...none, action: 'say', text } : 'text';
   if (value.action === 'call') {
     const known = world.remote !== null && value.to !== actor.id && world.characters.some(character => character.id === value.to);
-    return known && text ? { ...none, action: 'call', text, to: value.to as string } : null;
+    return !known ? 'to' : text ? { ...none, action: 'call', text, to: value.to as string } : 'text';
   }
   if (value.action === 'go') {
-    const known = value.place !== actor.place && world.places.some(place => place.id === value.place);
-    return known ? { ...none, action: 'go', place: value.place as string } : null;
+    if (value.place === actor.place) return 'here';
+    return world.places.some(place => place.id === value.place) ? { ...none, action: 'go', place: value.place as string } : 'place';
   }
-  const done = short(text), night = within(MAX_SLEEP);
-  if (value.action === 'do') return done && seconds ? { ...none, action: 'do', text: done, seconds } : null;
-  if (value.action === 'wait') return seconds ? { ...none, action: 'wait', seconds } : null;
-  if (value.action === 'sleep') return night ? { ...none, action: 'sleep', seconds: night } : null;
-  return null;
+  if (value.action === 'do') {
+    const done = short(text), lasts = span(MAX_SECONDS);
+    return !done ? 'text' : lasts ? { ...none, ...lasts, action: 'do', text: done } : 'time';
+  }
+  if (value.action === 'wait' || value.action === 'sleep') {
+    const lasts = span(value.action === 'wait' ? MAX_SECONDS : MAX_SLEEP);
+    return lasts ? { ...none, ...lasts, action: value.action } : 'time';
+  }
+  return 'action';
 }
 
 // Someone spoke, came or left near this character: its wait or its activity ends. It is free now, or when its own
@@ -166,7 +192,8 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
   const place = actor.place as string;
   const here = awakeIn(people, place, actor);
   const event: Event = { at: now, clock: clockAt(world, now), kind: action.action, who: actor.id, place, to: null, text: action.text,
-    seconds: action.seconds ?? 0, cut: false, heard: here.map(person => person.id), note: action.note };
+    seconds: action.until === null ? action.seconds ?? 0 : secondsUntil(world, now, action.until), cut: false, heard: here.map(person => person.id),
+    note: action.note };
   actor.began = now;
   if (action.action === 'say' || action.action === 'call') {
     Object.assign(event, cut(action.text as string, limit));

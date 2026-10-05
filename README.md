@@ -95,9 +95,10 @@ node src/cli.ts live examples/night-station.json [--model <id>] [--minutes <n>] 
 
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
 each with a place and a sheet. Every character is played by the model, `gpt-6.1-sol@low` unless `--model` says
-otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-your-own). One turn is one request and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional
-private note. `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a
-morning, where what each one remembers after the night decides what happens.
+otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-your-own). One turn is one request
+and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note.
+`examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
+what each one remembers after the night decides what happens.
 
 The rules of time and hearing:
 
@@ -108,14 +109,19 @@ The rules of time and hearing:
 - Everyone in the speaker's place hears a `say` and is held until it ends, so people in one place take turns.
 - A `call` goes through the world's `remote`, a telephone for example. The one called hears it wherever they are, and
   those next to the caller hear the caller's half. A world without `remote` has no calls.
-- A `go` takes the minutes between the two places. On the way a character hears nothing and does not act. A call to
-  it is delivered when it arrives.
-- A `sleep` lasts the seconds the character chose, 12 hours at most. A sleeper hears and sees nothing, interrupts
+- A `go` leads to another place of the list and takes the minutes between the two. On the way a character hears
+  nothing and does not act. A call to it is delivered when it arrives.
+- A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
+  next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours.
+- A sleeper hears and sees nothing, interrupts
   nobody and is woken by nothing. A call to it is delivered when it wakes. The others see it fall asleep and wake,
   and are told that it is asleep when they are told who is with them.
 - A leaving and an arrival are seen by everyone awake in the place and end their waiting. A `do`, a falling asleep
   and a waking are seen too, and a witness learns of them at its own next turn.
-- An answer that cannot be used counts as a wait of 30 seconds.
+- An answer that cannot be used counts as a wait of 30 seconds. The journal keeps the reason, one of seven: it was
+  not a JSON object, named no action, lacked its text, called nobody who can be called, led to the place the
+  character is already in or to no place of the list, or lasted no time the action allows. The character's next turn
+  says which, and what to do instead.
 
 What a character knows:
 
@@ -127,7 +133,8 @@ What a character knows:
   own actions and notes, and the calls that waited for it.
 - The long-term memory is one text of at most `longWords` words, 400 unless the world file says otherwise. The
   character writes it itself, through the model, from the old text and the lines being folded into it. What it
-  leaves out is forgotten. A longer answer is cut at the limit.
+  leaves out is forgotten. A longer answer is cut at the limit. It is asked to write in the past tense, without
+  where it is at that moment, and to give a deed a result only where the lines show one.
 - A character rewrites its memory when it wakes: everything before the sleep is folded, and the waking and the calls
   that waited begin the new lines. It also rewrites it at the start of a turn while the lines hold more than
   `shortWords` words, 2000 by default: the oldest lines are folded until about half of that is left.
@@ -138,7 +145,8 @@ What a character knows:
 
 The journal and the state file:
 
-- Everything that happens is a record in an append-only journal: an action as it was read from the answer, an
+- Everything that happens is a record in an append-only journal: an action as it was read from the answer, or the
+  reason why the answer could not be used, an
   arrival or a waking, a memory rewrite. Each record is stored with the event the rules made of it. There is no
   other state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
   plays the world. Any beginning of a journal is a whole world at that moment.
