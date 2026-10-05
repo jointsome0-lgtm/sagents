@@ -16,11 +16,12 @@ import sys
 # The core of the live mode: the rules, with no model and no disk in them.
 CORE = ['src/world.ts', 'src/journal.ts', 'src/laws.ts', 'src/sleep.ts', 'src/weather.ts', 'src/memory.ts', 'src/reading.ts']
 # The bands of the core's size in tokens: up to the first bound nothing is said, and above each bound its line.
-# Provisional, all three: the owner has not settled the numbers yet.
+# 70,000 is the owner's mark for the core's size, to steer by and not a ban; the other two are four fifths and six
+# fifths of it.
 CORE_BANDS = [
-    (24_000, 'note: the core is nearing its size.'),
-    (30_000, 'WARNING: the core is over its size. A change that adds to the core says what it takes out of it, or why the size should rise.'),
-    (36_000, 'STRONG WARNING: the core no longer reads whole. Split it or cut it before anything more is added.'),
+    (56_000, 'note: the core is nearing its size.'),
+    (70_000, 'WARNING: the core is over its size. A change that adds to the core says what it takes out of it, or why the size should rise.'),
+    (84_000, 'STRONG WARNING: the core no longer reads whole. Split it or cut it before anything more is added.'),
 ]
 LIVE = 'src/live.ts'
 # Tracked files that are not this project's own text.
@@ -72,7 +73,7 @@ if missing:
     print(f'size: {", ".join(missing)} of the list in scripts/size.py is not a tracked text file; the counts below lack it.')
 core = sum(counts.get(path, 0) for path in CORE)
 print(f'size, in {ENCODING} tokens, of {"the Git index" if staged else "the working tree"}:')
-print(f'  core, {len(CORE)} files without model and disk: {core:,} (provisional bounds: {", ".join(f"{bound:,}" for bound, _ in CORE_BANDS)})')
+print(f'  core, {len(CORE)} files without model and disk: {core:,} (bounds: {", ".join(f"{bound:,}" for bound, _ in CORE_BANDS)})')
 print(f'  {LIVE}: {counts.get(LIVE, 0):,}')
 print(f'  all tracked text but {" and ".join(NOT_COUNTED)}: {sum(counts.values()):,}')
 over = [(bound, line) for bound, line in CORE_BANDS if core > bound]

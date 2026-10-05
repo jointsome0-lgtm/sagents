@@ -485,11 +485,12 @@ npm run size                    # how large the core is, in tokens
 (`src/world.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`), `src/live.ts`, and
 all tracked text except `LICENSE` and `package-lock.json`. It reads the working tree, or the Git index with
 `npm run size -- --index`. The core is meant to stay small enough to read whole, and its count falls into one of four bands,
-whose bounds are provisional: up to 24,000 tokens the number is printed and nothing else; from there to 30,000 a
-note says that the core is nearing its size; from there to 36,000 a warning says that it is over, and that a change
-which adds to the core says what it takes out or why the size should rise; above 36,000 a strong warning says that
+around the owner's mark of 70,000 tokens, which is there to steer by: up to 56,000 tokens, four fifths of the mark,
+the number is printed and nothing else; from there to 70,000 a
+note says that the core is nearing its size; from there to 84,000, six fifths of the mark, a warning says that it is over, and that a change
+which adds to the core says what it takes out or why the size should rise; above 84,000 a strong warning says that
 the core no longer reads whole and should be split or cut before more is added. The script ends well in every band:
-it forbids nothing. The list of core files and the three bounds are at the top of `scripts/size.py`. The count needs the Python package `tiktoken`,
+it forbids nothing. Tests are counted against nothing. The list of core files and the three bounds are at the top of `scripts/size.py`. The count needs the Python package `tiktoken`,
 which is no dependency of this project: name a Python that has it in `SAGENTS_SIZE_PYTHON`. Without it the script
 says how to get it, counts nothing and ends well. It
 is not part of `npm test`. A change that grows the core says by how many tokens.

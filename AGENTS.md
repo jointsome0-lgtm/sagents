@@ -25,9 +25,9 @@ environment from `environments/`.
 - A request to the model holds what the caller gave and nothing else. Do not add default instructions, tools or
   metadata to it.
 - The core of the live mode (`world.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`,
-  `reading.ts`) is meant to stay small enough to read whole. `npm run size` counts it in tokens against three bounds
-  kept in `scripts/size.py`: a note above the first, a warning above the second, a strong warning above the third,
-  and it forbids nothing. Above the second bound a change that adds to the core says what it takes out or why the
+  `reading.ts`) is meant to stay small enough to read whole. `npm run size` counts it in tokens against the owner's
+  mark of 70,000, a mark to steer by, and two bounds a fifth below and above it, kept in `scripts/size.py`: a note above the first, a warning above the second, a strong warning above the third,
+  and it forbids nothing. Above the mark a change that adds to the core says what it takes out or why the
   size should rise. When a change grows the core, run it
   before and after and say in your report by how many tokens the core grew. It needs `tiktoken` from outside the
   repository, from the Python that `SAGENTS_SIZE_PYTHON` names, and never estimates: without it, say that the count was not taken.
