@@ -43,6 +43,8 @@ memory.
 ## What works today
 
 sagents needs Node 24.9 or newer and nothing else. It has no dependencies, and Node runs its TypeScript as it is.
+It is run from a checkout of this repository, as the lines below show: it is not on npm and has no installed command
+or entry point of a package, and `"private": true` in `package.json` guards against publishing it there by mistake.
 
 ```sh
 node src/cli.ts login
@@ -58,8 +60,11 @@ again, for another account or when signing in with the saved registration no lon
 models and says whether the name is in it. The list is not the set of names a request takes: a name that is not in it
 may be served all the same.
 
-`ask` reads one request as JSON from stdin and prints one JSON line. `--timeout <seconds>` limits the whole call and is
-180 by default.
+`ask` reads one request as JSON from stdin and prints one JSON line. `--timeout <seconds>` limits the call, the reading
+of the request included, and is 180 by default. It does not cut short a renewal of the ChatGPT plan's access token,
+which a call begins with when the token is about to expire: the renewal runs to its own end, at most 90 seconds of
+waiting for another sagents process that is renewing and then 30 seconds for the sign-in service, so that a new pair
+of tokens is never lost unsaved, and a call whose limit passed meanwhile ends with `timeout` right after it.
 
 | Field | Meaning |
 | --- | --- |
@@ -74,7 +79,10 @@ may be served all the same.
 ```
 
 The numbers and the failure above only show the shape. An answer is whole or it is a failure: one that the model's own
-limit cut short comes back as `output_limit`, without the text written by then.
+limit cut short comes back as `output_limit`, without the text written by then. This holds for what a call returns,
+and `ask` and `live` take nothing else. A program that calls `src/chatgpt.ts` itself and gives it `onText` is handed
+the text as the stream brings it, before the answer is known to be whole or to come from the model asked for, so a
+call that ends in a failure, `wrong_model` included, may have handed over a part by then.
 
 | `reason` | What happened |
 | --- | --- |
@@ -83,7 +91,7 @@ limit cut short comes back as `output_limit`, without the text written by then.
 | `rate_limited`, `model_unavailable`, `provider_failed` | The service did not serve the request this time. `provider_failed` without `httpStatus` means it could not be reached. |
 | `invalid_request`, `context_limit` | The request cannot be served as it is. `param` names the field when the service did, and for `api:` the setting or the field that sagents itself refused, before anything was sent. |
 | `output_limit`, `incomplete_stream`, `invalid_stream`, `invalid_response`, `empty_response` | The answer did not arrive whole or cannot be read. |
-| `wrong_model` | The plan's service said that another model answers than the one asked for. Nothing of that answer is passed on. Checked only for the ChatGPT plan, and only when the stream names a model: a stream that names none is taken as it is, and an `api:` server's answer is not checked. |
+| `wrong_model` | The plan's service said that another model answers than the one asked for. Nothing of that answer is returned. Checked only for the ChatGPT plan, and only when the stream names a model: a stream that names none is taken as it is, and an `api:` server's answer is not checked. |
 | `timeout`, `cancelled` | The call's own limit, or its caller, stopped it. |
 | `storage_failed` | The account file or its lock could not be read or written. An account file that cannot be read or understood is left as it is; repair or remove it by hand in `~/.config/sagents/`. |
 
@@ -120,7 +128,10 @@ The rules of time and hearing:
   else the world's `travelMinutes`. A walk of some kilometres is one action, and the clock stands at its end when the walker arrives. On the way a character hears
   nothing and does not act. A call to it is delivered when it arrives.
 - A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
-  next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours.
+  next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours. A known limit:
+  a `do` ends early as a `wait` does, when someone speaks, comes or leaves nearby or the weather changes, and its
+  doer is free again then, yet the deed is credited whole at once: the world answers for all its seconds, and a
+  search counts them all.
 - A place of a world file may have `"clock": true`, and so may a character, for a watch or a phone. A resident knows
   the clock only with one at hand, its own or its place's: then a turn opens with `Now 21:04:10.` and the lines of
   its memory open with the clock. With none the turn says the part of the day, `Now evening, as far as you can tell:
@@ -171,8 +182,11 @@ The world answers a deed:
   null when there is nothing to notice. The fields stand in this order, the entries before the words, so that the
   words are written after the entries and cannot lead them; both orders passed the check of 2026-10-05 on the weak
   local model. The schema is made for each
-  request and lists the labels, ids and states that the answer may name, so a model held to its schema can name
-  nothing else; an id of `wakes`, `finds` or `poses` that is not of the place is dropped all the same.
+  request and lists the labels, ids and states that the answer may name, so a model held to its schema names
+  nothing else where a list has entries. A list that is empty takes any string, since a strict schema may refuse an
+  empty list, and the states of all the things there stand in one list, so the schema does not hold a state to its
+  own thing. The rules do the rest: an id of `wakes`, `finds` or `poses` that is not of the place is dropped, and an
+  entry of `moves` or `sets` that cannot be taken refuses the answer, as «Things» says.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
   each person and place, the seconds of that person's deeds there that the world called a search. A thing is found
   by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «Ночь на
@@ -196,7 +210,8 @@ The world answers a deed:
 - The answer is a record of its own, right after its deed: the journal takes nothing else there, so a run that
   stopped between the two asks the world first when it continues. An answer that cannot be used is asked for once
   more; after that nothing came of the deed, and the answer counts as unusable. An answer that the rules of things
-  refuse is asked for once more too, as «Things» says.
+  refuse is asked for once more too, as «Things» says. The count of two asks is a run's own and no record keeps it:
+  a run that stops between the two, at its `--calls`, starts the count again when it continues.
 - What a model tells in a `do` does not by itself make anything true: the deed is what was tried, and what came of
   it is what the world answered from the facts.
 
@@ -205,7 +220,10 @@ People of a place whom nobody plays:
 - A place of a world file may have `crowd`, a text of who is around as anyone there sees them (60 words at most), and
   `figures`, a list of `{ id, name, looks, facts }`: those of them who have a name. A figure has no sheet, no memory
   and no turn, so it costs nothing until someone speaks to it. It stays in its place, never speaks first, wakes
-  nobody and follows nobody, and a `call` does not reach it. Its id is no place's, no character's and no other figure's.
+  nobody and follows nobody, and a `call` does not reach it.
+- An id names one thing: the ids of the places, the characters and the figures are all different, and none is
+  `eaten` or `burned`, has the shape of a thing's label (`t7`) or is a name every object of JavaScript has, like
+  `constructor`. A world file that gives such an id is refused.
 - A turn lists the figures of the resident's place with their looks, under `People of this place, who answer when
   you say with \`to\`:`, and then the crowd as `Around you: …`. A figure's `facts` are for the world alone.
 - A `say` may have `to`, the id of a figure of the speaker's place; any other `to` of a `say` is dropped. Everyone
@@ -231,8 +249,10 @@ Things:
 - Things are records that the rules keep and count (`src/things.ts`). A place has `things` and a character
   `carries`, each a list of `{ name, … }`, and a thing has one holder: a person, a place or another thing. `holds`,
   a list, makes it a thing that holds others, like a table, a coat with pockets or a bag; `open` says that what it
-  holds is in plain sight. `n` makes it a count of things that are alike, like money, cigarettes or logs; a count
-  holds nothing, so four mugs are four records. `fixed` is a part of the place that never moves. `stock` is a
+  holds is in plain sight. `n`, a whole number from 1 to 1,000,000,000, makes it a count of things that are alike,
+  like money, cigarettes or logs; a count holds nothing, so four mugs are four records. `fixed` is a part of the
+  place that never moves: a thing of the place itself or a thing inside a fixed one, and never something a character
+  carries or that lies in a thing which can move. `stock` is a
   supply with no count, which taking does not use up. `food` is the calories of one and makes it something to eat
   or drink; `burns` says that it can burn up. `states` is the list of states it can be in and `state` the one it is
   in, the first when not given; `fire` is true for what can set things alight, or names the state in which it can.
@@ -361,7 +381,8 @@ The journal and the state file:
   a journal that does not is refused. The file belongs to one world file and its environment together, by a hash
   of the content of both, and refuses another of either, so neither can be edited or exchanged while the world is
   under way. A second run on a file that is in use is
-  refused.
+  refused. A new or empty file becomes a state file; an SQLite database of anything else is refused before
+  anything in it is changed.
 
 The laws of the world. Whatever the model answers, these hold in every journal. `npm test` plays thirty characters
 for thousands of steps with answers of every kind, checks each law from the journal alone, and a failure names the
@@ -374,12 +395,14 @@ exception: an answer that the model's own limit cut short (`output_limit`) is an
 turn it is a lost turn like any other, for the world's answer and a memory rewrite it is one of their two tries,
 and it counts as a request, with no tokens known for it. Three such answers of one model in a row, with no answer
 of that model arriving whole in between, end the run as `failed (output_limit)`. It prints
-one line per event, or one JSON object per event with `--json`, and then one line of totals: the status and its
+each event as it happens. In the text output an event is one line, followed by a line for each thing it found, moved
+or put into another state, for each pose it changed and for a private note; a `wait` with no note prints nothing,
+and a memory rewrite is shown whole, over as many lines as it has, marked as private like a note. With `--json`
+every event is one JSON object on one line, the silent waits too. Then comes one line of totals: the status and its
 reason, the story minutes played, the requests, the unusable answers of every kind and how many of them were cut
 at the output limit (`overlong`), the memory rewrites and how
 many of them were lost, the answers of the world that the rules of things refused and the deeds left with nothing, and the tokens. The tokens are summed over the answers that reported their usage: when some
-reported none, the totals say how many (`unreported`) and do not count them as zero. In the text output a memory rewrite is shown whole, marked as private like a
-note.
+reported none, the totals say how many (`unreported`) and do not count them as zero.
 
 A model for each resident. `--cast <character id>=<model name>`, given as many times as needed, has that character
 played by a model of its own; `--model` plays everyone else. A model name is what `--model` takes. Every request
@@ -428,8 +451,9 @@ What it lacks:
 
 #### What comes next for the live world
 
-1. Things as the engine's state: items with amounts, owners and places; food with calories and tags; money.
-2. A seaside example world of four residents, houses, a sports pool, a beach and cafés.
+1. What the things still lack: tags on food, a shop and prices, things made of other things, and residents who
+   take, give and eat without the world.
+2. A larger seaside world than `examples/seaside-cafe.json`: four residents, houses, a sports pool, a beach and cafés.
 3. An energy balance: hunger from the day's shortfall, weight and fitness from the same count over weeks.
 4. `examine` as an action the engine answers by a table, more detailed for a resident with a doctor's skill; skills
    in the world file; injury and illness; a person's own reactions to kinds of food.

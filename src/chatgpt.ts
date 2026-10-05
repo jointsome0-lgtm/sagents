@@ -66,6 +66,9 @@ export type Request = { model: string; system?: string; messages: Message[]; sch
 export type Usage = { inputTokens: number | null; cachedInputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null };
 // An answer is whole or it is a failure: one that the model's own limit cut short is `output_limit`.
 export type Result = { text: string; usage: Usage | null };
+// `onText` is handed the text as it arrives: of the plan's stream each piece at once, before the answer is known to be
+// whole and to come from the model asked for, so a call that then fails may have handed over a part; of an `api:`
+// server the whole text once, after its checks. Only what a call returns is an answer.
 export type Controls = { signal?: AbortSignal; onText?: (delta: string) => unknown; timeoutMs?: number };
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
