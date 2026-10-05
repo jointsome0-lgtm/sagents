@@ -58,6 +58,7 @@ const INSTEAD = {
   to: 'A call reaches one person: `to` must be the id of one other person from the list of people.',
   here: 'You are already in that place. `go` leads only to another place of the list; moving about inside a place is a `do`.',
   place: '`place` must be the id of a place from the list of places.',
+  long: 'It ran on to the limit of one answer and was lost whole. Answer with the one JSON object, at once and briefly.',
   time: `A \`do\` or a \`wait\` lasts 1 to ${MAX_SECONDS} seconds and a \`sleep\` 1 to ${MAX_SLEEP}, given as \`seconds\` or as \`until\`, a time of day like 06:30.`,
 };
 const NO_REMOTE = 'There is no means of remote contact here: to reach someone, go where they are.';

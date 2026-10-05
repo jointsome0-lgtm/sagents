@@ -49,8 +49,9 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 export type Action = { action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; until: string | null;
   note: string | null };
 // Why an answer could not be used as an action: it was not a JSON object, named no action, lacked its text, called
-// nobody who can be called, led to the place the character is in or to no place, or lasted no time the action allows.
-export const REFUSALS = ['json', 'action', 'text', 'to', 'here', 'place', 'time'] as const;
+// nobody who can be called, led to the place the character is in or to no place, or lasted no time the action allows;
+// or it never arrived whole, because the model wrote on to the limit of one answer (`long`).
+export const REFUSALS = ['json', 'action', 'text', 'to', 'here', 'place', 'time', 'long'] as const;
 export type Refusal = typeof REFUSALS[number];
 export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(reason => reason === value);
 // `place` is where it happened; `to` is the character called, or the place a `go` leads to; `heard` holds the ids of

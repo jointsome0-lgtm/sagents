@@ -146,9 +146,10 @@ The rules of time and hearing:
   journal keeps it as a record of its own, and the others there see it fall asleep.
 - A leaving and an arrival are seen by everyone awake in the place and end their waiting. A `do`, a falling asleep
   and a waking are seen too, and a witness learns of them at its own next turn.
-- An answer that cannot be used counts as a wait of 30 seconds. The journal keeps the reason, one of seven: it was
+- An answer that cannot be used counts as a wait of 30 seconds. The journal keeps the reason, one of eight: it was
   not a JSON object, named no action, lacked its text, called nobody who can be called, led to the place the
-  character is already in or to no place of the list, or lasted no time the action allows. The character's next turn
+  character is already in or to no place of the list, lasted no time the action allows, or was cut short at the
+  model's limit of one answer. The character's next turn
   says which, and what to do instead.
 
 The world answers a deed:
@@ -314,9 +315,13 @@ law and the record:
 - Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place's.
 
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
-rewrite is a request too. It stops at the first failure of the model connection and tries nothing again. It prints
+rewrite is a request too. It stops at the first failure of the model connection and tries nothing again, with one
+exception: an answer that the model's own limit cut short (`output_limit`) is an answer that cannot be used. For a
+turn it is a lost turn like any other, for the world's answer and a memory rewrite it is one of their two tries,
+and it counts as a request, with no tokens known for it. It prints
 one line per event, or one JSON object per event with `--json`, and then one line of totals: the status and its
-reason, the story minutes played, the requests, the unusable answers of every kind, the memory rewrites and how
+reason, the story minutes played, the requests, the unusable answers of every kind and how many of them were cut
+at the output limit (`overlong`), the memory rewrites and how
 many of them were lost, and the tokens. In the text output a memory rewrite is shown whole, marked as private like a
 note.
 

@@ -110,8 +110,8 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.match(sent.anna[3].messages[0].content, /may hold 65 words at most\. 1 min 15 s of the story are left\.$/);
   // Nobody is free before the horizon any more: the run ends without another call.
   assert.deepEqual({ ...outcome, events: journal.all.length },
-    { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, rewrites: 0, lost: 0, inputTokens: 900, outputTokens: 90, events: 9,
-      models: { 'stand-in': { calls: 9, invalid: 1, inputTokens: 900, outputTokens: 90 } } });
+    { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, overlong: 0, rewrites: 0, lost: 0, inputTokens: 900, outputTokens: 90, events: 9,
+      models: { 'stand-in': { calls: 9, invalid: 1, overlong: 0, inputTokens: 900, outputTokens: 90 } } });
 
   const short = standIn({});
   const few = memoryStore();
@@ -228,7 +228,7 @@ test('a character with a model of its own is asked through that connection under
   assert.deepEqual(journal.all.filter(entry => entry.event.who === 'anna').map(entry => [entry.record.kind, entry.by]),
     [['act', 'api:own'], ['wake', null], ['act', 'api:own'], ['act', 'api:own'], ['memory', 'api:own'], ['wake', null], ['act', 'api:own']]);
   assert.ok(journal.all.filter(entry => entry.event.who !== 'anna').every(entry => entry.by === 'common'));
-  assert.deepEqual(outcome.models['api:own'], { calls: 6, invalid: 1, inputTokens: 600, outputTokens: 60 });
+  assert.deepEqual(outcome.models['api:own'], { calls: 6, invalid: 1, overlong: 0, inputTokens: 600, outputTokens: 60 });
   assert.equal(outcome.models.common.calls, outcome.calls - 6);
 });
 

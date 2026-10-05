@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
 
+import { ModelError } from './chatgpt.ts';
 import type { Request } from './chatgpt.ts';
 import { JournalError, memoryStore, replay, StateError } from './journal.ts';
 import type { Entry } from './journal.ts';
@@ -66,7 +67,8 @@ export const LAWS = {
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
 // The same request always gets the same answer, so the same world always gets the same journal. The answers are of
-// every kind: the oversized, a time of day in place of seconds, and the unusable for each of its reasons.
+// every kind: the oversized, a time of day in place of seconds, the unusable for each of its reasons, and the one
+// that the model's limit cut short, for a turn, a memory and the world alike.
 // `record` says how many records the journal held at a request, so that the largest request can be placed. While
 // `seen.turns` is a list, it gains for every request who was asked, a resident or for the world the deed's place, at
 // which record, whether for a turn, and the words of bodies, belongings, things and facts that the request held.
@@ -128,6 +130,8 @@ function standIn(record: () => number) {
                   : roll < 0.9 ? { ...none, action: 'wait', until, seconds: 5 }
                     : roll < 0.95 ? { ...none, action: 'sleep', until } : { ...none, action: 'sleep', seconds: upTo(roll < 0.96 ? 43_200 : 1800) };
     }
+    // Now and then the model writes on to its limit, whatever it was asked: the connection then fails with this code.
+    if (random() < 0.02) throw new ModelError('output_limit');
     return { text: typeof answer === 'string' ? answer : JSON.stringify(answer), usage: null };
   };
   return { seen, respond };
@@ -144,7 +148,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
-    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0 };
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0 };
   const sleepEnds = new Map<string, number>();
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
@@ -290,6 +294,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   // The run had all of it in it, or the laws above were tried on little.
   for (const [kind, times] of Object.entries(count)) assert.ok(times >= 5, `${kind} happened ${times} times`);
   assert.deepEqual([whole.rewrites, whole.lost], [count.memory, count.memoryLost]);
+  assert.ok(whole.overlong > count.long, 'no answer of the world or memory was cut short');
   law('request', seen.largest <= requestLimit(world), seen.record);
 
   // The record a replay refuses, which the journal's own sentence names, or null when it takes them all.

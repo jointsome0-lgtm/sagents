@@ -201,29 +201,31 @@ export type Player = { respond: (request: Request) => Promise<Result>; model: st
 // player as everyone's when it is not given.
 export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number;
   onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean };
-export type Tally = { calls: number; invalid: number; inputTokens: number; outputTokens: number };
+export type Tally = { calls: number; invalid: number; overlong: number; inputTokens: number; outputTokens: number };
 // `reason` is `horizon` or `calls` for a run that ended as planned, and the failure's code for one that did not.
 // `seconds` is the story time this run played. `rewrites` counts the memories written anew and `lost` those of them
 // whose answer could not be used twice, so that the lines they were to keep are forgotten. `invalid` counts every
-// answer that could not be used, whatever was asked. `models` holds the same counts for each model's name.
+// answer that could not be used, whatever was asked, and `overlong` those of them that the model's own limit of one
+// answer cut short, for which no tokens are known. `models` holds the same counts for each model's name.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; seconds: number; rewrites: number; lost: number;
   models: { [name: string]: Tally } };
 
+const CUT = Symbol('cut');
 // Plays the world on from its journal until the horizon, the limit of model calls or a failure of the connection.
-// `calls` counts the answers that arrived, a memory's as well as a turn's. A failure ends the run at once: nothing is
-// tried again, and the journal holds everything up to it.
+// `calls` counts the answers that arrived or were cut short at the model's limit, a memory's as well as a turn's. Any
+// other failure ends the run at once: nothing is tried again, and the journal holds everything up to it.
 export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
   pause = false }: Live): Promise<Outcome> {
   const state = replay(world, journal.entries());
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(world), shared = sharedOf(world);
-  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, rewrites: 0, lost: 0, inputTokens: 0, outputTokens: 0,
+  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, rewrites: 0, lost: 0, inputTokens: 0, outputTokens: 0,
     models: {} };
   // Who plays whom. Every request of a character, a turn or a memory, goes to its own connection under its own model.
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
-  const tallyOf = (player: { name: string }) => outcome.models[player.name] ??= { calls: 0, invalid: 0, inputTokens: 0, outputTokens: 0 };
+  const tallyOf = (player: { name: string }) => outcome.models[player.name] ??= { calls: 0, invalid: 0, overlong: 0, inputTokens: 0, outputTokens: 0 };
   const unusable = (player: { name: string }) => {
     outcome.invalid += 1;
     tallyOf(player).invalid += 1;
@@ -236,7 +238,9 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     await onEvent(event, by);
   };
   // One answer of a player's model, or null when the run ends here instead. Nobody is moved to another model.
-  const ask = async (player: Required<Player>, content: Omit<Request, 'model'>): Promise<string | null> => {
+  // An answer that the model's own limit cut short is `CUT`: it was asked for and counts as a call, it cannot be used,
+  // and the run goes on as after any answer that cannot. Every other failure of the connection ends the run.
+  const ask = async (player: Required<Player>, content: Omit<Request, 'model'>): Promise<string | typeof CUT | null> => {
     if (outcome.calls >= most) {
       outcome.reason = 'calls';
       return null;
@@ -244,6 +248,13 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     let answer: Result;
     try { answer = await player.respond({ model: player.model, ...content }); } catch (error) {
       if (!(error instanceof ModelError)) throw error;
+      if (error.code === 'output_limit') {
+        for (const tally of [outcome, tallyOf(player)]) {
+          tally.calls += 1;
+          tally.overlong += 1;
+        }
+        return CUT;
+      }
       Object.assign(outcome, { status: 'failed', reason: error.code });
       return null;
     }
@@ -273,7 +284,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
         const answer = await ask(judge, request);
         if (answer === null) return outcome;
-        came = readResult(answer, sleepers, present.map(person => person.id), deed.place, hidden);
+        came = answer === CUT ? null : readResult(answer, sleepers, present.map(person => person.id), deed.place, hidden);
         if (!came) unusable(judge);
       }
       await happened({ kind: 'result', who: deed.who, at: deed.at, text: came?.text ?? null, wakes: came?.wakes ?? [], changes: came?.changes ?? [],
@@ -311,7 +322,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       for (let attempt = 0; attempt < 2 && !memory; attempt += 1) {
         const answer = await ask(player, request);
         if (answer === null) return outcome;
-        memory = readMemory(answer, world.longWords);
+        memory = answer === CUT ? null : readMemory(answer, world.longWords);
         if (!memory) unusable(player);
       }
       outcome.rewrites += 1;
@@ -343,7 +354,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
         pause ? '' : ` ${Math.floor((horizon - now) / 60)} min ${(horizon - now) % 60} s of the story are left.`}`,
     ].join('\n') }] });
     if (answer === null) return outcome;
-    const action = readAction(world, actor, answer);
+    const action = answer === CUT ? 'long' : readAction(world, actor, answer);
     if (typeof action === 'string') unusable(player);
     await happened({ kind: 'act', who, at: now, limit, action }, player.name);
   }
