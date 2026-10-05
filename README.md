@@ -457,8 +457,8 @@ and a memory rewrite is shown whole, over as many lines as it has, marked as pri
 every event is one JSON object on one line, the silent waits too. Then comes one line of totals: the status and its
 reason, the story minutes played, the requests, the unusable answers of every kind and how many of them were cut
 at the output limit (`overlong`), the memory rewrites and how
-many of them were lost, the answers of the world that the rules of things refused and the deeds left with nothing, and the tokens. The tokens are summed over the answers that reported their usage: when some
-reported none, the totals say how many (`unreported`) and do not count them as zero.
+many of them were lost, the answers of the world that the rules of things refused and the deeds left with nothing, and the tokens: the input tokens, how many of them the service says it read from its cache (`cachedInputTokens`), and the output tokens. The tokens are summed over the answers that reported their usage: when some
+reported none, the totals say how many (`unreported`) and do not count them as zero; an answer that reported no cached count adds none. The totals also count the requests and the tokens by what a request was for, a resident's turn, a memory rewrite or an answer of the world, which is the result of a deed or a figure's answer, a second ask included: `--json` has them as `kinds`, and the text output adds one line for each, so that the turns are told from the world's answers when one model gives both.
 
 A model for each resident. `--cast <character id>=<model name>`, given as many times as needed, has that character
 played by a model of its own; `--model` plays everyone else. A model name is what `--model` takes. Every request

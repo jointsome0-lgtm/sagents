@@ -351,20 +351,25 @@ export type Player = { respond: (request: Request) => Promise<Result>; model: st
 // after another, end a run: 3 when it is not given.
 export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number;
   onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number };
-export type Tally = { calls: number; invalid: number; overlong: number; unreported: number; inputTokens: number; outputTokens: number };
+export type Tally = { calls: number; invalid: number; overlong: number; unreported: number; inputTokens: number; cachedInputTokens: number; outputTokens: number };
+// What a request was for: a resident's turn, a memory written anew, or an answer of the world, to a deed or for a figure.
+export type Asked = 'turn' | 'memory' | 'world';
+export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 'outputTokens'>;
 // `reason` is `horizon` or `calls` for a run that ended as planned, and the failure's code for one that did not.
 // `seconds` is the story time this run played. `rewrites` counts the memories written anew and `lost` those of them
 // whose answer could not be used twice, so that the lines they were to keep are forgotten. `invalid` counts every
 // answer that could not be used, whatever was asked, and `overlong` those of them that the model's own limit of one
 // answer cut short, for which no tokens are known. `unreported` counts the answers that arrived whole and came with no
-// usage, so that the tokens are the sum over the others and not a total that looks whole. `models` holds the same counts for each model's name.
+// usage, so that the tokens are the sum over the others and not a total that looks whole. `cachedInputTokens` are those of the input tokens that the service says it read from its cache. `models` holds the same counts for each model's name,
+// and `kinds` the calls and the tokens by what a request was for, so that a resident's turn is told from the world's answer when one model gives both.
 // `refused` counts the answers of the world that could be read and that the rules of things did not take, and `void`
 // the deeds and speeches to figures that nothing came of because neither of the two answers asked for could be used
 // or taken.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; seconds: number; rewrites: number; lost: number; refused: number; void: number;
-  models: { [name: string]: Tally } };
+  models: { [name: string]: Tally }; kinds: { [kind in Asked]: Spent } };
 
 const CUT = Symbol('cut');
+const spent = (): Spent => ({ calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
 // Plays the world on from its journal until the horizon, the limit of model calls or a failure of the connection.
 // `calls` counts the answers that arrived or were cut short at the model's limit, a memory's as well as a turn's. Any
 // other failure ends the run at once: nothing is tried again, and the journal holds everything up to it.
@@ -374,15 +379,15 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(world), shared = sharedOf(world);
-  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 0, outputTokens: 0,
-    models: {} };
+  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+    models: {}, kinds: { turn: spent(), memory: spent(), world: spent() } };
   // Who plays whom. Every request of a character, a turn or a memory, goes to its own connection under its own model.
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
   // A tally is the totals' own property under the model's name, whatever the name: one like `constructor` finds nothing that every object has.
   const tallyOf = (player: { name: string }) => {
     if (!Object.hasOwn(outcome.models, player.name)) {
-      Object.defineProperty(outcome.models, player.name, { value: { calls: 0, invalid: 0, overlong: 0, unreported: 0, inputTokens: 0, outputTokens: 0 }, enumerable: true, writable: true, configurable: true });
+      Object.defineProperty(outcome.models, player.name, { value: { invalid: 0, overlong: 0, unreported: 0, ...spent() }, enumerable: true, writable: true, configurable: true });
     }
     return outcome.models[player.name];
   };
@@ -403,7 +408,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   // with none of its answers arriving whole in between: a model that only writes to its limit would spend every
   // call the run has. Every other failure of the connection ends the run.
   const cuts = new Map<string, number>();
-  const ask = async (player: Required<Player>, content: Omit<Request, 'model'>): Promise<string | typeof CUT | null> => {
+  const ask = async (player: Required<Player>, kind: Asked, content: Omit<Request, 'model'>): Promise<string | typeof CUT | null> => {
     if (outcome.calls >= most) {
       outcome.reason = 'calls';
       return null;
@@ -416,6 +421,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
           tally.calls += 1;
           tally.overlong += 1;
         }
+        outcome.kinds[kind].calls += 1;
         cuts.set(player.name, (cuts.get(player.name) ?? 0) + 1);
         if (cuts.get(player.name)! < cutRun) return CUT;
         // The cut that ends the run cannot be used either, and no caller is left to count it.
@@ -425,10 +431,11 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       return null;
     }
     cuts.delete(player.name);
-    for (const tally of [outcome, tallyOf(player)]) {
+    for (const tally of [outcome, tallyOf(player)]) if (!answer.usage) tally.unreported += 1;
+    for (const tally of [outcome, tallyOf(player), outcome.kinds[kind]]) {
       tally.calls += 1;
-      if (!answer.usage) tally.unreported += 1;
       tally.inputTokens += answer.usage?.inputTokens ?? 0;
+      tally.cachedInputTokens += answer.usage?.cachedInputTokens ?? 0;
       tally.outputTokens += answer.usage?.outputTokens ?? 0;
     }
     return answer.text;
@@ -446,7 +453,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null) => {
     let came: Came | null = null, again = '';
     for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
-      const answer = await ask(judge, { system, schema, messages: [{ role: 'user', content: `${content}${again}` }] });
+      const answer = await ask(judge, 'world', { system, schema, messages: [{ role: 'user', content: `${content}${again}` }] });
       if (answer === null) return null;
       came = answer === CUT ? null : read(answer);
       const refused = came && refusal(world, state.people, state.things, deed, came);
@@ -508,7 +515,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       // An answer that cannot be used gets one more try. After that the old text stays and the lines are lost.
       let memory = null;
       for (let attempt = 0; attempt < 2 && !memory; attempt += 1) {
-        const answer = await ask(player, request);
+        const answer = await ask(player, 'memory', request);
         if (answer === null) return outcome;
         memory = answer === CUT ? null : readMemory(answer, world.longWords);
         if (!memory) unusable(player);
@@ -534,7 +541,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now);
     const spot = world.places.find(item => item.id === place)!;
     const body = `${part('Your pose', actor.pose)}${carries('You carry', who, true)}`.slice(1);
-    const answer = await ask(player, { system, schema, messages: [{ role: 'user', content: [
+    const answer = await ask(player, 'turn', { system, schema, messages: [{ role: 'user', content: [
       ...known(mind, mind.lines),
       `${nowOf(world, actor, now)} You are in ${tagged(spot)}. ${others.length ? 'Here with you:' : spot.figures.length || spot.crowd !== null ? 'None of the people of the list is here with you.' : 'Nobody else is here.'}`,
       ...others,
