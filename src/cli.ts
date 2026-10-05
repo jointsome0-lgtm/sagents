@@ -167,9 +167,9 @@ if (command === 'ask') {
         // Tokens are a sum over the answers that reported them, and the line says when some did not.
         const unreported = (count: number) => count ? `, without ${count} answers that reported no usage` : '';
         console.log(json ? JSON.stringify({ status: totals.status, reason: totals.reason, minutes: played, calls: totals.calls, invalid: totals.invalid, overlong: totals.overlong,
-          rewrites: totals.rewrites, lost: totals.lost, unreported: totals.unreported, inputTokens: totals.inputTokens, outputTokens: totals.outputTokens, models: totals.models })
+          rewrites: totals.rewrites, lost: totals.lost, refused: totals.refused, void: totals.void, unreported: totals.unreported, inputTokens: totals.inputTokens, outputTokens: totals.outputTokens, models: totals.models })
           : `${totals.status} (${totals.reason}): ${played} story minutes, ${totals.calls} calls, ${totals.invalid} invalid, ${totals.overlong} of them cut at the output limit, ${totals.rewrites} memory rewrites, ${
-            totals.lost} lost, ${totals.inputTokens} input tokens, ${totals.outputTokens} output tokens${unreported(totals.unreported)}`);
+            totals.lost} lost, ${totals.refused} answers of the world refused, ${totals.void} deeds left with nothing, ${totals.inputTokens} input tokens, ${totals.outputTokens} output tokens${unreported(totals.unreported)}`);
         const models = Object.entries(totals.models);
         if (!json && models.length > 1) {
           for (const [name, tally] of models) {

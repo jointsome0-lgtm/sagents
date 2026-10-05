@@ -2,7 +2,8 @@
 // where, and the events of a run. The rules are next to it: the clock and the distances in `time.ts`, what a
 // resident does in `action.ts`, and what the world answers to a deed or for a figure in `answer.ts`.
 import { boundedOf, amountOf, countOf, isObject, listOf, refuse, textOf, TIME } from './reading.ts';
-import type { Change } from './answer.ts';
+import { all, MAX_IN_PLACE, MAX_ON_PERSON, readThings } from './things.ts';
+import type { Posting, Thing } from './things.ts';
 import type { Sleep } from './sleep.ts';
 import type { Weather } from './weather.ts';
 
@@ -18,13 +19,13 @@ export const LOST_SECONDS = 30;
 
 // `facts` is what is true of the world, of a place or of a person and is not seen at once. It is for the world's own
 // answers to what people do and never for a character: no character is sent any of it.
-// `things` is what lies in a place and can be moved, taken or changed. Of a person, `looks` is what anyone near sees
-// and never changes, the body and the face and no clothes, `pose` how and where in the place it is, `holds` what is in its hands or worn, and `has`
-// what it carries out of sight. The world file gives how these begin; `things`, `pose`, `holds` and `has` then belong
-// to the run's state and change only by the world's answer to a deed. A place that is `open` lies under the open sky.
-// `hidden` is what lies in a place and is not found without a search: each thing with the `minutes` one person must
-// have searched the place to find it, or which a deed finds at once by going straight to the spot its text names.
-// The world is told it apart from `things`, under its `id`, a label that is its number in the place's list.
+// `things` are the records of what stands and lies in a place, and `carries` those of what a person has in hand or
+// wears, each with all that it holds (`things.ts`). Of a person, `looks` is what anyone near sees and never changes,
+// the body and the face and no clothes, and `pose` how and where in the place it is. The world file gives how these
+// begin; the things and the pose then belong to the run's state and change only by the world's answer. A thing of a
+// place that is `hidden` is not found without a search of its minutes, or by a deed that goes straight to its spot.
+// `memory` is what a person remembers when the story begins: what it owes and is owed today, where things lie. The
+// sheet says who the person is, and this text ages as a memory does. A place that is `open` lies under the open sky.
 // `crowd` is the people of a place whom nobody plays, as anyone there sees them, and `figures` those of them who
 // have a name: each with `looks` and `facts` as a character has them, and with no sheet, memory or turn. A figure
 // stays in its place and does nothing but answer a `say` addressed to it, in the words the world gives it.
@@ -32,14 +33,13 @@ export const LOST_SECONDS = 30;
 // A place with a `clock` shows the time to everyone in it, and a character with one, a watch or a phone, reads it
 // anywhere. Neither changes in a run: a clock is not yet a thing that can be handed over.
 export type Figure = { id: string; name: string; looks: string | null; facts: string | null };
-export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; hidden: Hidden[]; open: boolean; clock: boolean;
+export type Place = { id: string; name: string; about: string; facts: string | null; things: Thing[]; open: boolean; clock: boolean;
   crowd: string | null; figures: Figure[];
   at: [number, number] | null; minutesTo: { [place: string]: number } };
-export type Hidden = { id: string; text: string; minutes: number };
-export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null; looks: string | null; pose: string | null;
-  holds: string | null; has: string | null; clock: boolean };
+export type Character = { id: string; name: string; place: string; sheet: string; memory: string | null; facts: string | null; looks: string | null; pose: string | null;
+  carries: Thing[]; clock: boolean };
 // The most words each of these texts may hold, in the world file and in the world's answer alike.
-export const LIMITS = { looks: 60, pose: 20, holds: 30, has: 60, things: 120, hidden: 60, crowd: 60 };
+export const LIMITS = { looks: 60, pose: 20, crowd: 60 };
 // `remote` names the means by which people reach each other from afar; a world with null has none.
 // `walkMetresPerMinute` is the pace at which everyone walks between places that say where they lie.
 // `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `sleep` and
@@ -52,23 +52,24 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // those who perceived it when it happened, without the one who did it. A `memory` is a character's long-term text
 // written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
 // A `result` is the world's answer to the `do` before it, of the same `who`: `text` is what came of the deed, or null
-// when nothing did that could be noticed, and `wakes` and `changes`, the sleepers the deed
-// wakes and what it changes of bodies and belongings, which a result and a reply have. A `reply` is what a figure
-// answers to the `say` before it: `who` is the figure, `to` the speaker, `text` its words, or null when it says
-// nothing, and `seconds` how long they take from the end of that `say`. A `weather` is a change of the weather, which nobody does and
-// which has no place: `who` and `place` are empty, `text` is the new weather under the open sky and `indoors`, which
-// only this kind has, what of it reaches someone under a roof, or null. A result also says whether the world called
-// the deed a `search` of the place, which hidden things it says the deed went straight to, `finds`, and what hidden
-// things were `found` by it either way.
+// when nothing did that could be noticed, `wakes` the sleepers the deed wakes and `poses` the poses it changed. It
+// says whether the world called the deed a `search` of the place and which hidden things it says the deed went
+// straight to, `finds`. What the rules made of the answer is in `moved`, one posting for each thing that went from
+// one holder to another or out of the world, where an `eaten` one is eaten by `who`; in `set`, the things put into
+// another state; and in `found`, the hidden things found either way. A `reply` is what a figure answers to the `say`
+// before it: `who` is the figure, `to` the speaker, `text` its words, or null when it says nothing, `seconds` how
+// long they take from the end of that `say`, and `moved` what changed hands with them. A `weather` is a change of the
+// weather, which nobody does and which has no place: `who` and `place` are empty, `text` is the new weather under the
+// open sky and `indoors`, which only this kind has, what of it reaches someone under a roof, or null.
 export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result' | 'reply' | 'weather'; who: string; place: string; to: string | null;
-  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[]; changes?: Change[];
-  indoors?: string | null; search?: boolean; finds?: string[]; found?: string[] };
+  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[];
+  indoors?: string | null; search?: boolean; finds?: string[]; moved?: Posting[]; set?: { what: string; name: string; state: string }[];
+  poses?: { of: string; text: string }[]; found?: { what: string; name: string; spot: string }[] };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
-// is the start of its own last action.
-// `pose`, `holds` and `has` are its body and belongings as they are now.
+// is the start of its own last action. `pose` is how it is placed now.
 export type Person = { id: string; place: string | null; heading: string | null; asleep: boolean; freeAt: number; began: number | null;
-  speaking: number; listening: number; pose: string | null; holds: string | null; has: string | null };
+  speaking: number; listening: number; pose: string | null };
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const factsOf = (value: unknown, field: string) => boundedOf(value, field, MAX_FACTS);
@@ -83,19 +84,16 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   if (!isObject(value)) return refuse('the file', 'must be a JSON object');
   if (typeof value.clock !== 'string' || !TIME.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
   if (value.remote !== undefined && value.remote !== null) textOf(value.remote, 'remote');
-  const places: Place[] = [];
+  const places: Place[] = [], labels = { next: 1 }, longWords = countOf(value.longWords, 'longWords', 400);
+  const within = (things: Thing[], most: number, field: string) => all(things).length <= most ? things : refuse(field, `must hold ${most} things at most, with all that they hold`);
   for (const [index, place] of listOf(value.places, 'places').entries()) {
     const field = `places[${index}]`;
     if (!isObject(place)) return refuse(field, 'must be an object');
     if (place.open !== undefined && typeof place.open !== 'boolean') return refuse(`${field}.open`, 'must be true or false');
     if (place.clock !== undefined && typeof place.clock !== 'boolean') return refuse(`${field}.clock`, 'must be true or false');
     if (place.minutesTo !== undefined && !isObject(place.minutesTo)) return refuse(`${field}.minutesTo`, 'must be an object');
-    if (place.hidden !== undefined && !Array.isArray(place.hidden)) return refuse(`${field}.hidden`, 'must be a list');
-    const hidden = ((place.hidden ?? []) as unknown[]).map((thing, at) => {
-      if (!isObject(thing)) return refuse(`${field}.hidden[${at}]`, 'must be an object');
-      return { id: `h${at + 1}`, text: boundedOf(textOf(thing.text, `${field}.hidden[${at}].text`), `${field}.hidden[${at}].text`, LIMITS.hidden) as string,
-        minutes: amountOf(thing.minutes ?? null, `${field}.hidden[${at}].minutes`, 0) };
-    });
+    // What the rules read as texts before they kept things as records is refused, so that no thing is lost unseen.
+    if (place.hidden !== undefined) return refuse(`${field}.hidden`, 'is no longer read: a hidden thing is one of `things` with `hidden`');
     if (place.figures !== undefined && !Array.isArray(place.figures)) return refuse(`${field}.figures`, 'must be a list');
     const figures = ((place.figures ?? []) as unknown[]).map((figure, at): Figure => {
       const name = `${field}.figures[${at}]`;
@@ -111,7 +109,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     for (const [to, minutes] of Object.entries(place.minutesTo ?? {})) minutesTo[to] = amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0);
     places.push({ id: idOf(place.id, `${field}.id`, places.map(known => known.id)), name: textOf(place.name, `${field}.name`),
       about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
-      things: boundedOf(place.things, `${field}.things`, LIMITS.things), hidden, open: place.open === true, clock: place.clock === true,
+      things: within(readThings(place.things, `${field}.things`, labels, true), MAX_IN_PLACE, `${field}.things`), open: place.open === true, clock: place.clock === true,
       crowd: boundedOf(place.crowd, `${field}.crowd`, LIMITS.crowd), figures, at: at as [number, number] | null, minutesTo });
   }
   for (const [index, place] of places.entries()) {
@@ -124,10 +122,12 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     if (!isObject(character)) return refuse(field, 'must be an object');
     if (!places.some(place => place.id === character.place)) return refuse(`${field}.place`, 'must name a place of the list');
     if (character.clock !== undefined && typeof character.clock !== 'boolean') return refuse(`${field}.clock`, 'must be true or false');
+    const old = ['holds', 'has'].find(name => character[name] !== undefined);
+    if (old) return refuse(`${field}.${old}`, 'is no longer read: what a person has is the list `carries`');
     characters.push({ id: idOf(character.id, `${field}.id`, characters.map(known => known.id)), name: textOf(character.name, `${field}.name`),
-      place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), facts: factsOf(character.facts, `${field}.facts`),
+      place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), memory: boundedOf(character.memory, `${field}.memory`, longWords), facts: factsOf(character.facts, `${field}.facts`),
       looks: boundedOf(character.looks, `${field}.looks`, LIMITS.looks), pose: boundedOf(character.pose, `${field}.pose`, LIMITS.pose),
-      holds: boundedOf(character.holds, `${field}.holds`, LIMITS.holds), has: boundedOf(character.has, `${field}.has`, LIMITS.has),
+      carries: within(readThings(character.carries, `${field}.carries`, labels), MAX_ON_PERSON, `${field}.carries`),
       clock: character.clock === true });
   }
   // An id names one thing: a figure's is no place's, no character's and no other figure's.
@@ -139,7 +139,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
     travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5),
     walkMetresPerMinute: amountOf(value.walkMetresPerMinute, 'walkMetresPerMinute', 80), shortWords: countOf(value.shortWords, 'shortWords', 2000),
-    longWords: countOf(value.longWords, 'longWords', 400), places, characters };
+    longWords, places, characters };
 }
 
 // Everyone with a name whom nobody plays, and everyone a line may name: the characters and those.

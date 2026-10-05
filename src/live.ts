@@ -7,7 +7,10 @@ import type { Line, Mind } from './memory.ts';
 import { LAWS } from './laws.ts';
 import { closed } from './reading.ts';
 import { next, readAction } from './action.ts';
-import { readReply, readResult, sought } from './answer.ts';
+import { readReply, readResult, refusal } from './answer.ts';
+import type { Answer } from './answer.ts';
+import { all, MAX_IN_PLACE, MAX_MOVES, MAX_ON_PERSON, MAX_SETS, MAX_STOCK, NAME_WORDS, RECORD, shown, SINKS, sought, written } from './things.ts';
+import type { Refused, Thing } from './things.ts';
 import { clockAt, DRIFT, hasClock, sensed, SENSED, travelSeconds, wordLimit } from './time.ts';
 import { CHARS_PER_WORD, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, namesOf } from './world.ts';
 import type { Event, Person, Place, World } from './world.ts';
@@ -35,7 +38,7 @@ Each turn says the time. With a clock at hand, your own or one in the place you 
 
 Each turn says how your body feels. People need sleep: an hour of it makes up for two awake, and one who stays awake too long falls asleep on the spot.
 
-Each turn also says the weather as it reaches you where you are, what you see of those who are with you, how you are placed, what you hold in sight and what you carry out of sight. What you hold and carry and how you are placed do not change by themselves or by words: to take, give, put down or hide a thing, to sit or lie down, do it, and the world tells you what came of it.
+Each turn also says the weather as it reaches you where you are, what you see of those who are with you, how you are placed and what you carry: what you have in your hands or wear, and in square brackets after a thing what is in it or in its pockets, with \`×\` and a number where there are several. Of others you see what they carry and not what is inside it, unless it lies open. What you carry and how you are placed do not change by themselves or by words: to take, give, put down or hide a thing, to sit or lie down, do it, and the world tells you what came of it and what went from where to where.
 
 A turn may also list people of the place you are in: those around, and some by name with an id. They are not among the people of the list above and cannot be called. They stay where they are and do nothing unless someone speaks to them: to speak to one, say with \`to\`. What one of them answers, everyone in the place hears.
 
@@ -51,12 +54,6 @@ const text = { type: ['string', 'null'] };
 const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'note'],
   properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: text,
     seconds: { type: ['integer', 'null'] }, until: text, note: text } });
-const changesSchema = { type: 'array', items: { type: 'object', additionalProperties: false, required: ['of', 'what', 'text'],
-  properties: { of: { type: 'string' }, what: { type: 'string', enum: ['pose', 'holds', 'has', 'things'] }, text: { type: 'string' } } } };
-const REPLY_SCHEMA = { type: 'object', additionalProperties: false, required: ['reply', 'changes'], properties: { reply: text, changes: changesSchema } };
-const RESULT_SCHEMA = { type: 'object', additionalProperties: false, required: ['result', 'wakes', 'changes', 'search', 'finds'],
-  properties: { result: text, wakes: { type: 'array', items: { type: 'string' } }, search: { type: 'boolean' }, finds: { type: 'array', items: { type: 'string' } },
-    changes: changesSchema } };
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
@@ -95,40 +92,61 @@ const rewriteOf = (world: World, time: string, waking: boolean) => `${time} This
 Write your memory anew as one text of about ${Math.floor(world.longWords * MEMORY_AIM)} words, in the language of your sheet, from what you remember and the lines above. The limit is ${world.longWords} words: a text past it is cut there, and its end is lost. Put first what will be needed later, each with its number, name and place as the lines give them: what is owed and to whom, what was promised and by when, sums agreed, times set, where a thing was put. Then what you know about people, what you want, what has changed in you. Leave out passing chores and small talk that nothing hangs on. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten.
 Answer with one JSON object that has the single field \`memory\`.`;
 
-// What the world is told of `changes` and of things, for a deed and for a figure's answer alike.
-const CHANGES = `- changes: what ${'{0}'} changed of the people here and of the things of the place, or an empty list when it changed nothing. An entry has \`of\`, \`what\` and \`text\`. \`what\` is one of: pose, how and where in the place a person is (${LIMITS.pose} words at most); holds, what a person has in their hands or wears in sight (${LIMITS.holds}); has, what a person carries out of sight (${LIMITS.has}); things, what lies in the place and can be moved, taken or changed (${LIMITS.things}). \`of\` is the id of a person here, or for things the id of the place. \`text\` is the whole new text that takes the place of the old one, in the language of the world's description; an empty text when nothing is left.`;
-const KEPT = `A thing never appears from nowhere and never vanishes. What one person gives, another receives. What is taken from the place is in someone's hands or pockets afterwards, and what is put down is among the things of the place: such a deed changes both texts. A thing goes with what is in it: clothes taken off or a bag put down take what is in their pockets along, out of what the person carries and into the things of the place. A deed that only looks, listens or speaks changes nothing.`;
-// What the world is told to be when it is asked what came of a deed. It is sent facts, bodies and belongings and no
-// person's sheet, note, memory or speech, and what it answers is held to the people and the place the rules know.
+// How the world is told of things, for a deed and for a figure's answer alike.
+const NOTATION = `Every thing here is listed once, under a label like t7. What a thing holds stands in square brackets after it: \`t8 parka [t9 cigarettes ×17; t10 lighter]\`. \`×17\` is how many there are, and a thing with no number is one. Empty brackets mean a thing that can hold others and holds nothing now; a thing with no brackets never holds anything. Under \`Things here\` is what stands or lies in the place. After \`Carries\` is what a person has in their hands or wears, in sight; what is in the brackets of such a thing is in its pockets or inside it, out of sight unless the thing is \`open\`. Marks after a thing: \`fixed\`, a part of the place, never moved; \`open\`, what it holds is in plain sight; \`stock\`, a supply with no count, which taking does not use up; \`food\`, it can be eaten or drunk; \`burns\`, it can burn up; \`fire\`, it can set things alight; \`state\`, how it is now, and in brackets the states it can have.`;
+// What the world is told to be when it is asked what came of a deed. It is sent facts, bodies and things and no
+// person's sheet, note, memory or speech, and what it answers is held to the people, the place and the things the
+// rules know. This text was measured as it stands, as form `A1h` of the check of 2026-10-05: a change of it is a new
+// text to measure, and the harness of that check compares the two.
 export const WORLD_INSTRUCTIONS = `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.
 
-You are told what is there, and nothing else exists: a search for something you were not told of finds nothing of the kind. Say what is there as the world itself. Never speak of facts, of what was mentioned or listed, or of your task.
+You are told what is there, and nothing else exists: a search for something you were not told of finds nothing of the kind. Say what is there as the world itself. Never speak of facts, of what was mentioned or listed, of labels and marks, or of your task.
 
 You are told the weather so that you know it, not to report it. A result speaks of the weather only when the deed meets it: someone steps out into it, opens a door or a window to it, looks or listens for it.
 
 You are told which other places there are. Nobody gets to another place by a deed: whoever tries is still here, by the way out, and the result says only that. A pose never names another place.
 
-Answer with one JSON object.
-- result: what the senses give as the direct result of the deed, in one or two plain sentences, in the language of the world's description. It never retells the deed: when there is nothing to notice beyond the deed itself, it is null. Say only what is seen, heard or felt, never what anyone thinks, says or does next: people who are awake answer on their own turns.
-- wakes: the ids of the sleepers here whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not.
-${CHANGES.replace('{0}', 'the deed')}
+${NOTATION}
+
+The lists are the truth about where each thing is, and what an earlier result says of a thing may be out of date. You keep no count and rewrite no list: you say which things the deed moved, by label, and the lists are kept from that. A thing never appears from nowhere and never vanishes: it stays where it is listed unless an entry of yours moves it. What a person wears is a thing like any other: when it is taken off and hung up, put down or handed over, it has moved and has an entry. A deed that only looks, listens or speaks moves nothing. A deed that needs a thing that is not here moves nothing either, and the result says what was seen of that.
+
+Answer with one JSON object, its fields in this order.
 - search: true when the deed is a search of the place: someone looks through it, under and behind what is there, for one thing or for whatever there is. False for any other deed, a look around included.
 - finds: the labels of the hidden things that the deed goes straight to, or an empty list.
+- moves: what the deed moved, or an empty list. An entry has \`what\`, \`n\` and \`to\`. It says where a thing ends up and not the way it went: money taken out of a pocket and handed over is one entry, to the one who got it. \`what\` is the label of the thing. \`n\` is how many of it go: 1 for a thing with no number; for a thing with a number, the part that the deed names, or the whole number when all of it goes; for a stock, how many are taken. \`to\` is where it ends up: the id of a person here, in that person's hands or on them; the id of this place, when it is left on the floor or the ground, or on something here that has no label of its own; the label of a thing with brackets, in it or on it; \`eaten\`, when the one who does the deed eats or drinks it up; \`burned\`, when it burns up, which takes a \`fire\` here. A thing goes with all that it holds, as one entry: never list what is inside a thing that moves. Never list a thing that stays where it is.
+- sets: the things whose state the deed changed, or an empty list. An entry has \`what\`, the label of a thing with a \`state\` mark, and \`state\`, one of the states in its brackets.
+- poses: the pose of each person here whose pose the deed changed, or an empty list. An entry has \`of\`, the id of the person, and \`text\`: how and where in the place the person now is, 20 words at most, in the language of the world's description. A pose names no thing that is held or worn: the lists say that.
+- wakes: the ids of the sleepers here whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not.
+- result: what the senses give as the direct result of the deed, in one or two plain sentences, in the language of the world's description. It never retells the deed: when there is nothing to notice beyond the deed itself, it is null. Say only what is seen, heard or felt, never what anyone thinks, says or does next: people who are awake answer on their own turns. It agrees with \`moves\` and \`sets\`: no thing changes hands, place or state in it without an entry there. It gives no numbers of things or of money.
 
-You may be told what is hidden here, each thing under a label. A hidden thing is seen by nobody, and no result, pose or text of things speaks of it or hints at it, whoever looks and wherever, until it is found. It is found in two ways. By a search that has lasted long enough: you are told which things this deed finds if it is a search, and you never decide whether a search has been long enough. Or by a deed that goes straight to the very spot the hidden text names, however short the deed is: its label then goes into \`finds\`. A deed that names another spot, or names the thing and not the spot where it lies, does not go straight to it. When a thing is found either way, the result says where it turned up and what is seen of it, and from then on it is among the things of the place.
-
-${KEPT}`;
+You may be told what is hidden here, each thing under its label. A hidden thing is seen by nobody, and no result or pose speaks of it or hints at it, whoever looks and wherever, until it is found. It is found in two ways. By a search that has lasted long enough: you are told which things this deed finds if it is a search, and you never decide whether a search has been long enough. Or by a deed that goes straight to the very spot named for it, however short the deed is: its label then goes into \`finds\`. A deed that names another spot, or names the thing and not the spot where it lies, does not go straight to it. When a thing is found either way, the result says where it turned up and what is seen of it, and from then on it lies in the place in sight. Only a deed that finds a hidden thing can move it or what it holds.`;
 // What the world is told to be when it is asked what a figure answers: someone of a place whom nobody plays.
 export const FIGURE_INSTRUCTIONS = `You are the world of a story: not a narrator and not one of the people who live in it. In a place there are people whom nobody plays: those around, and some with a name. Someone has spoken to one of them, and you say what that one answers.
 
-You are told what is there, and nothing else exists. The one who answers knows what its own facts say, what anyone in the place sees and hears, and what was said to the people of the place before. It does not know what others carry out of sight or what their facts say: you are told those so that the answer does not go against them.
+You are told what is there, and nothing else exists. The one who answers knows what its own facts say, what anyone in the place sees and hears, and what was said to the people of the place before. It does not know what others carry out of sight or what their facts say: you are told those so that the answer does not go against them. Never speak of facts, of labels and marks, or of your task.
 
-Answer with one JSON object.
+${NOTATION}
+
+The people whom nobody plays carry nothing of their own: what they have at hand is among the things of the place. The lists are the truth about where each thing is. A thing never appears from nowhere and never vanishes: it stays where it is listed unless an entry of yours moves it.
+
+Answer with one JSON object, its fields in this order.
 - reply: what that person says aloud, as such a person would say it, in the language of the world's description, ${MAX_WORDS} words at most. Speech only: no gestures and no thoughts. It answers what was said, briefly, and starts nothing of its own; it does not leave, follow anyone or speak for anyone else. Null when it says nothing.
-${CHANGES.replace('{0}', 'the answer')}
-
-${KEPT} An answer changes something only when the one who answers hands a thing over or takes one while speaking.`;
-const worldSystemOf = (world: World) => `${WORLD_INSTRUCTIONS}
+- moves: what the one who answers hands over or takes while speaking, or an empty list. An entry has \`what\`, \`n\` and \`to\`. \`what\` is the label of the thing. \`n\` is how many of it go: 1 for a thing with no number; for a thing with a number, the part that goes, or the whole number when all of it goes; for a stock, how many are taken. \`to\` is where it ends up: the id of a person here, in that person's hands or on them; the id of this place; the label of a thing with brackets, in it or on it. A thing goes with all that it holds, as one entry: never list what is inside a thing that moves.`;
+// The one sentence an answer that the rules of things refused is asked again with: the entry and the cause, in the
+// words of the text above and never as a code.
+const CAUSES = {
+  what: '`what` is not the label of a thing here',
+  hidden: 'it names a hidden thing or what such a thing holds, and nothing in the answer finds that thing',
+  fixed: 'a `fixed` thing is a part of the place and is never moved',
+  n: `\`n\` is 1 for a thing with no number, no more than the number of a thing that has one, and ${MAX_STOCK} at most from a stock`,
+  to: '`to` is not the id of a person here, the id of this place or the label of a thing with brackets, nor a way for a thing to leave the world that is open here',
+  inside: 'a thing cannot end up in itself or in what it holds, nor more than four things deep',
+  sink: 'only a thing marked `food` is `eaten`, and only a thing marked `burns` is `burned`, with a `fire` here',
+  full: `a person carries ${MAX_ON_PERSON} things at most and a place holds ${MAX_IN_PLACE}, with all that they hold`,
+  state: '`state` must be one of the states in the brackets of the `state` mark of that thing',
+};
+const againOf = ({ code, entry }: Refused) => `Your answer to this was not taken and nothing of it happened, because of the entry ${JSON.stringify(entry)}: ${CAUSES[code]}. Answer again.`;
+export const worldSystemOf = (world: World) => `${WORLD_INSTRUCTIONS}
 
 The world: ${world.title}
 ${world.about}${world.facts === null ? '' : `\nFacts: ${world.facts}`}`;
@@ -138,14 +156,48 @@ const nowOf = (world: World, actor: Person, at: number) => hasClock(world, actor
   : `Now ${sensed(world, at, world.places.some(place => place.id === actor.place && place.open))}, as far as you can tell: no clock is at hand.`;
 // One text under its name, closed as a sentence, or nothing when there is none.
 const part = (name: string, value: string | null) => value === null ? '' : ` ${name}: ${closed(value)}`;
-// What anyone in a person's place sees of it. What it carries out of sight is not here.
-const seen = (character: { looks: string | null }, person: Person) => `${part('Looks', character.looks)}${part('Pose', person.pose)}${part('Holds', person.holds)}`;
+// What anyone in a person's place sees of its body.
+const seen = (character: { looks: string | null }, person: Person) => `${part('Looks', character.looks)}${part('Pose', person.pose)}`;
+// The things of a place as the world is told of them, each under its label with all that it holds, and what a
+// person carries, after that person's looks and pose. The harness of the check that measured the world's text
+// compares these two with its own.
+export const thingsOf = (things: Thing[]) => things.length ? ['Things here:', ...things.map(thing => `- ${written(thing)}`)] : ['Things here: nothing.'];
+export const carriedOf = (things: Thing[]) => ` Carries: ${things.map(written).join('; ') || 'nothing'}.`;
 
-// Everyone of the list who is in a place, as the world is told of them: with what is out of sight and with facts.
+// What an answer may name in a place, in the order the request lists it: the things in sight, the hidden ones when
+// the answer is a deed's, and what the people there carry. A thing that holds others is where a thing can be put.
+function namedOf(state: State, place: Place, deed: boolean) {
+  const lies = state.things.places.get(place.id)!, people = state.people.filter(person => person.place === place.id);
+  const things = all([...lies.filter(thing => !thing.hidden), ...(deed ? lies.filter(thing => thing.hidden) : []), ...people.flatMap(person => state.things.people.get(person.id)!)]);
+  return { what: things.filter(thing => !thing.fixed).map(thing => thing.label),
+    to: [...people.map(person => person.id), place.id, ...things.filter(thing => thing.holds).map(thing => thing.label),
+      ...(deed ? SINKS.filter(sink => things.some(thing => sink === 'eaten' ? thing.food !== null : thing.burns)) : [])],
+    stated: things.filter(thing => thing.states).map(thing => thing.label), states: [...new Set(things.flatMap(thing => thing.states ?? []))],
+    of: people.map(person => person.id), finds: lies.filter(thing => thing.hidden).map(thing => thing.label), wakes: people.filter(person => person.asleep).map(person => person.id) };
+}
+// A string that is one of a list, or any string when the list is empty: a strict schema may refuse an empty list.
+const oneOf = (list: string[]) => list.length ? { type: 'string', enum: list } : { type: 'string' };
+const entries = (properties: object) => ({ type: 'array', items: { type: 'object', additionalProperties: false, required: Object.keys(properties), properties } });
+// The schema of the world's answer is made for each request, so that a model held to it can name no label, id or
+// state that is not there. Its fields stand in the order that was measured: what moved before the words about it.
+const resultSchemaOf = (state: State, place: Place) => {
+  const names = namedOf(state, place, true);
+  const properties = { search: { type: 'boolean' }, finds: { type: 'array', items: oneOf(names.finds) },
+    moves: entries({ what: oneOf(names.what), n: { type: 'integer' }, to: oneOf(names.to) }), sets: entries({ what: oneOf(names.stated), state: oneOf(names.states) }),
+    poses: entries({ of: oneOf(names.of), text: { type: 'string' } }), wakes: { type: 'array', items: oneOf(names.wakes) }, result: text };
+  return { type: 'object', additionalProperties: false, required: Object.keys(properties), properties };
+};
+const replySchemaOf = (state: State, place: Place) => {
+  const names = namedOf(state, place, false);
+  return { type: 'object', additionalProperties: false, required: ['reply', 'moves'],
+    properties: { reply: text, moves: entries({ what: oneOf(names.what), n: { type: 'integer' }, to: oneOf(names.to) }) } };
+};
+
+// Everyone of the list who is in a place, as the world is told of them: with all they carry and with facts.
 const hereOf = (world: World, state: State, place: Place) => world.characters.flatMap((character, index) => {
   const person = state.people[index];
   return person.place !== place.id ? [] : [`- ${tagged(character)}, ${person.asleep ? 'asleep' : 'awake'}.${seen(character, person)}${
-    part('Has out of sight', person.has)}${part('Facts', character.facts)}`];
+    carriedOf(state.things.people.get(person.id)!)}${part('Facts', character.facts)}`];
 });
 // What the world is reminded of when it answers in a place, for a deed and for a figure alike: what came of the
 // latest deeds there, and what was said to the figures of the place and answered.
@@ -157,29 +209,32 @@ const earlierOf = (state: State, place: Place) => {
 // The people of a place whom nobody plays, as the world is told of them.
 const crowdOf = (place: Place) => [...(place.crowd === null ? [] : [`Around, played by nobody: ${closed(place.crowd)}`]),
   ...(place.figures.length ? ['Of this place, played by nobody:', ...place.figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}${part('Facts', figure.facts)}`)] : [])];
+// The place as the world is told of it, with the things that lie in it in sight.
+const placeOf = (state: State, place: Place) => [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Facts', place.facts)}`,
+  ...thingsOf(state.things.places.get(place.id)!.filter(thing => !thing.hidden))];
 // One speech to a figure as the world is asked what the figure answers: the place, who is there, the people of the
 // place, what came of earlier deeds there, what was said to the figures before and answered, and the speech.
 function replyOf(world: World, state: State, said: Event): string {
   const place = world.places.find(item => item.id === said.place)!;
-  return [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Things', state.lies.things.get(place.id)!)}${part('Facts', place.facts)}`,
+  return [...placeOf(state, place),
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...crowdOf(place),
     ...earlierOf(state, place),
     `Now ${said.clock}. ${named(world.characters, said.who)} says to ${tagged(place.figures.find(figure => figure.id === said.to)!)}: "${said.text}"`,
     `What does ${named(place.figures, said.to)} answer?`].join('\n');
 }
 
-// One deed as the world is asked about it: the place, the other places by name, who is there, what came of earlier
-// deeds there, what was said to the figures of the place and answered, and the deed. The rules know how long the deed lasts, so they say which of the hidden things of the
+// One deed as the world is asked about it: the place and its things, what is hidden there, the other places by name,
+// who is there with what they carry, what came of earlier deeds there, what was said to the figures of the place and
+// answered, and the deed. The rules know how long the deed lasts, so they say which of the hidden things of the
 // place it finds if the world calls it a search; whether the deed goes straight to one is the world's to say.
 function deedOf(world: World, state: State, deed: Event): string {
   const place = world.places.find(item => item.id === deed.place)!;
-  const here = hereOf(world, state, place);
-  const { found, left } = sought(state.lies, deed);
-  return [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Things', state.lies.things.get(place.id)!)}${part('Facts', place.facts)}`,
-    ...found.map(thing => `Hidden here (${thing.id}). This deed finds it if it is a search of the place, or if it goes straight to the spot named: ${closed(thing.text)}`),
-    ...left.map(thing => `Hidden here (${thing.id}). This deed finds it only if it goes straight to the spot named, and not by searching: ${closed(thing.text)}`),
+  const { found } = sought(state.things, deed);
+  return [...placeOf(state, place),
+    ...state.things.places.get(place.id)!.filter(thing => thing.hidden).map(thing => `Hidden here (${thing.label}). This deed finds it ${found.includes(thing)
+      ? 'if it is a search of the place, or if it goes straight to the spot named' : 'only if it goes straight to the spot named, and not by searching'}: ${thing.hidden!.spot}: ${written(thing)}`),
     ...(world.places.length > 1 ? [`Other places, which nobody reaches by a deed: ${world.places.filter(item => item !== place).map(tagged).join(', ')}.`] : []),
-    ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...here, ...crowdOf(place),
+    ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...crowdOf(place),
     ...earlierOf(state, place),
     `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`, 'What comes of it?'].join('\n');
 }
@@ -187,32 +242,36 @@ function deedOf(world: World, state: State, deed: Event): string {
 // No request of a world is longer than this many characters, system text and message together, however long the
 // world has run. A line holds a speech, a note or a deed of `MAX_WORDS` words under a head of names and a time, a
 // character's own action is four lines at most with what came of it, and the lines of one request are `shortWords` and one such action.
-// A body's text is as long as its limit of words lets it be, since the world's answer may make it so, and every law
-// adds what it says it may.
+// A pose is as long as its limit of words lets it be, since the world's answer may make it so, a person carries and
+// a place holds as many records as the rules of things let them, each as long as a record can be, and every law adds
+// what it says it may. One answer of the world adds one line of what it moved, set and found.
 export function requestLimit(world: World): number {
   const longest = (texts: string[]) => Math.max(...texts.map(item => item.length));
   const people = world.characters.map(tagged), places = world.places.map(tagged);
   const looks = (character: { looks: string | null }) => (character.looks?.length ?? 0) + 20;
   const system = sharedOf(world).length + longest(people) + longest(world.characters.map(character => character.sheet)) + Math.max(...world.characters.map(looks)) + 40;
   const head = 2 * longest(namesOf(world).map(character => character.name)) + longest(world.places.map(place => place.name)) + (world.remote?.length ?? 0) + SENSED + 140;
-  const lines = (world.shortWords + 4 * (head + MAX_WORDS)) * (CHARS_PER_WORD + 1);
+  const spots = Math.max(...world.places.map(place => place.things.reduce((sum, thing) => sum + (thing.hidden ? thing.hidden.spot.length + 160 : 0), 0)));
+  const told = (MAX_MOVES + MAX_SETS) * (3 * NAME_WORDS * CHARS_PER_WORD + 80) + spots + MAX_IN_PLACE * NAME_WORDS * CHARS_PER_WORD;
+  const lines = (world.shortWords + 4 * (head + MAX_WORDS)) * (CHARS_PER_WORD + 1) + told;
   const laws = LAWS.reduce((sum, law) => sum + law.size(world), 0);
-  const visible = (LIMITS.pose + LIMITS.holds) * CHARS_PER_WORD + 60;
+  const visible = LIMITS.pose * CHARS_PER_WORD + MAX_ON_PERSON * RECORD + 60;
   // The people of one place whom nobody plays, as a request lists them: for the world with their facts.
   const local = (withFacts: boolean) => Math.max(...world.places.map(place => (place.crowd?.length ?? 0) + 150
     + place.figures.reduce((sum, figure) => sum + tagged(figure).length + looks(figure) + (withFacts ? (figure.facts?.length ?? 0) + 20 : 0) + 20, 0)));
   const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + SENSED + 900
-    + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + LIMITS.has * CHARS_PER_WORD + laws + local(false);
+    + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + laws + local(false);
   const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
-  // The world's request: every person could be in one place, each with its body, belongings and facts, under the
+  // The world's request: every person could be in one place, each with its body, what it carries and facts, under the
   // things, what is hidden, the results and the exchanges with its figures that the place keeps, and the weather.
+  // An answer that the rules refused is asked again with one sentence more.
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
   const deed = worldSystemOf(world).length
-    + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place) + place.hidden.reduce((sum, thing) => sum + thing.text.length + 140, 0)))
-    + LIMITS.things * CHARS_PER_WORD
+    + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place) + 40)) + spots
+    + MAX_IN_PLACE * RECORD
     + places.reduce((sum, item) => sum + item.length + 2, 0) + 60
-    + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + LIMITS.has * CHARS_PER_WORD + 40, 0)
-    + (RESULT_WORDS + SAID_WORDS + 4 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + laws + local(true) + 600;
+    + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + 40, 0)
+    + (RESULT_WORDS + SAID_WORDS + 4 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + laws + local(true) + 1200;
   // A figure's answer is asked for with the same place, people and reminders, without what is hidden.
   const answer = deed + FIGURE_INSTRUCTIONS.length - WORLD_INSTRUCTIONS.length;
   return Math.max(resident, deed, answer);
@@ -237,8 +296,11 @@ export function linesOf(world: World, event: Event): string[] {
                   event.wakes?.length ? ` (wakes ${event.wakes.map(id => named(world.characters, id)).join(', ')})` : ''}${event.search ? ' (a search)' : ''}`
                   : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}` : `${who} waits (${event.seconds} s)`;
   return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} ${event.place ? `[${named(world.places, event.place)}] ` : ''}${what}`]),
-    ...(event.changes ?? []).map(change => `         ${change.what} of ${named(change.what === 'things' ? world.places : world.characters, change.of)}: ${change.text || 'nothing'}`),
-    ...(event.found ?? []).map(thing => `         found: ${thing}`),
+    ...(event.found ?? []).map(thing => `         found: ${thing.what} ${thing.name} (${thing.spot})`),
+    ...(event.moved ?? []).map(posting => `         moved: ${posting.what} ${posting.name}${posting.n === null ? '' : ` ×${posting.n}`}, ${posting.from} -> ${posting.to}${
+      posting.as === null || posting.as === posting.what ? '' : ` as ${posting.as}`}`),
+    ...(event.set ?? []).map(thing => `         state: ${thing.what} ${thing.name}, ${thing.state}`),
+    ...(event.poses ?? []).map(pose => `         pose of ${named(world.characters, pose.of)}: ${pose.text || 'none'}`),
     ...(event.note ? [`         private note of ${who}: ${event.note}`] : [])];
 }
 
@@ -261,7 +323,10 @@ export type Tally = { calls: number; invalid: number; overlong: number; unreport
 // answer that could not be used, whatever was asked, and `overlong` those of them that the model's own limit of one
 // answer cut short, for which no tokens are known. `unreported` counts the answers that arrived whole and came with no
 // usage, so that the tokens are the sum over the others and not a total that looks whole. `models` holds the same counts for each model's name.
-export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; seconds: number; rewrites: number; lost: number;
+// `refused` counts the answers of the world that could be read and that the rules of things did not take, and `void`
+// the deeds and speeches to figures that nothing came of because neither of the two answers asked for could be used
+// or taken.
+export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; seconds: number; rewrites: number; lost: number; refused: number; void: number;
   models: { [name: string]: Tally } };
 
 const CUT = Symbol('cut');
@@ -274,7 +339,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(world), shared = sharedOf(world);
-  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, unreported: 0, rewrites: 0, lost: 0, inputTokens: 0, outputTokens: 0,
+  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 0, outputTokens: 0,
     models: {} };
   // Who plays whom. Every request of a character, a turn or a memory, goes to its own connection under its own model.
   const everyone = { respond, model, name: name ?? model };
@@ -332,38 +397,43 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   // parallel here.
   const judge = { ...(worldPlayer ?? everyone), name: worldPlayer ? worldPlayer.name ?? worldPlayer.model : everyone.name };
   const worldSystem = worldSystemOf(world), figureSystem = `${FIGURE_INSTRUCTIONS}\n\n${worldSystem.slice(WORLD_INSTRUCTIONS.length + 2)}`;
+  // The world's answer to a deed or for a figure: `read` gives it as it can be taken, or null. An answer that cannot
+  // be used is asked for once more as it was, and one that the rules of things refuse once more with the sentence
+  // that says why. After the second nothing came of the deed. A refused answer never reaches the journal.
+  const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null) => {
+    let came: Came | null = null, again = '';
+    for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
+      const answer = await ask(judge, { system, schema, messages: [{ role: 'user', content: `${content}${again}` }] });
+      if (answer === null) return null;
+      came = answer === CUT ? null : read(answer);
+      const refused = came && refusal(world, state.people, state.things, deed, came);
+      if (!came) unusable(judge);
+      if (refused) {
+        outcome.refused += 1;
+        [came, again] = [null, `\n${againOf(refused)}`];
+      }
+    }
+    if (!came) outcome.void += 1;
+    return { came };
+  };
   for (;;) {
     const deed = state.deed;
     if (deed?.kind === 'say') {
-      // A speech to a figure waits for the figure's answer, which the world gives, as a deed waits for its result:
-      // one more try for an answer that cannot be used, and after that the figure says nothing.
-      const request = { system: figureSystem, schema: REPLY_SCHEMA, messages: [{ role: 'user' as const, content: replyOf(world, state, deed) }] };
-      const present = state.people.filter(person => person.place === deed.place).map(person => person.id);
-      let came = null;
-      for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
-        const answer = await ask(judge, request);
-        if (answer === null) return outcome;
-        came = answer === CUT ? null : readReply(answer, present, deed.place);
-        if (!came) unusable(judge);
-      }
-      await happened({ kind: 'reply', who: deed.who, at: deed.at, figure: deed.to as string, text: came?.text ?? null, changes: came?.changes ?? [] }, judge.name);
+      // A speech to a figure waits for the figure's answer, which the world gives, as a deed waits for its result.
+      // When no answer could be taken, the figure says nothing.
+      const place = world.places.find(item => item.id === deed.place)!;
+      const got = await answered(deed, figureSystem, replySchemaOf(state, place), replyOf(world, state, deed), readReply);
+      if (!got) return outcome;
+      await happened({ kind: 'reply', who: deed.who, at: deed.at, figure: deed.to as string, text: got.came?.text ?? null, moves: got.came?.moves ?? [] }, judge.name);
       continue;
     }
     if (deed) {
-      // A deed waits for the world's answer, and nothing else can happen before it. An answer that cannot be used
-      // gets one more try; after that nothing came of the deed.
-      const request = { system: worldSystem, schema: RESULT_SCHEMA, messages: [{ role: 'user' as const, content: deedOf(world, state, deed) }] };
-      const present = state.people.filter(person => person.place === deed.place);
-      const sleepers = present.filter(person => person.asleep).map(person => person.id), hidden = state.lies.hidden.get(deed.place)!.map(thing => thing.id);
-      let came = null;
-      for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
-        const answer = await ask(judge, request);
-        if (answer === null) return outcome;
-        came = answer === CUT ? null : readResult(answer, sleepers, present.map(person => person.id), deed.place, hidden);
-        if (!came) unusable(judge);
-      }
-      await happened({ kind: 'result', who: deed.who, at: deed.at, text: came?.text ?? null, wakes: came?.wakes ?? [], changes: came?.changes ?? [],
-        search: came?.search ?? false, finds: came?.finds ?? [] }, judge.name);
+      // A deed waits for the world's answer, and nothing else can happen before it.
+      const place = world.places.find(item => item.id === deed.place)!, present = state.people.filter(person => person.place === deed.place);
+      const sleepers = present.filter(person => person.asleep).map(person => person.id), hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
+      const got = await answered(deed, worldSystem, resultSchemaOf(state, place), deedOf(world, state, deed), answer => readResult(answer, sleepers, present.map(person => person.id), hidden));
+      if (!got) return outcome;
+      await happened({ kind: 'result', who: deed.who, at: deed.at, ...(got.came ?? { text: null, wakes: [], moves: [], sets: [], poses: [], search: false, finds: [] }) }, judge.name);
       continue;
     }
     const actor = next(state.people);
@@ -406,18 +476,21 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       continue;
     }
     const place = actor.place;
+    // What a person carries as a resident is told of it. Someone who was given nothing in the world file and has
+    // nothing is not spoken of as carrying; what was given and is gone is said as nothing.
+    const carries = (name: string, id: string, own: boolean) => {
+      const things = state.things.people.get(id)!;
+      return things.length || world.characters.find(character => character.id === id)!.carries.length ? ` ${name}: ${shown(things, own) || 'nothing'}.` : '';
+    };
     // The people of a state stand in the world file's order.
     const others = world.characters.flatMap((character, index) => {
       const person = state.people[index];
       return person !== actor && person.place === place
-        ? [`- ${tagged(character)}${person.asleep ? ', asleep' : ''}${LAWS.map(law => law.seen?.(world, state.laws, person, now) ?? '').join('')}.${seen(character, person)}`] : [];
+        ? [`- ${tagged(character)}${person.asleep ? ', asleep' : ''}${LAWS.map(law => law.seen?.(world, state.laws, person, now) ?? '').join('')}.${seen(character, person)}${carries('Carries', person.id, false)}`] : [];
     });
-    const self = world.characters.find(character => character.id === who)!;
-    // What was given in the world file and is gone is said as nothing; what never was is not spoken of.
-    const own = (name: string, value: string | null, given: string | null) => value === null && given === null ? '' : part(name, value ?? 'nothing');
     const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now);
     const spot = world.places.find(item => item.id === place)!;
-    const body = `${part('Your pose', actor.pose)}${own('You hold', actor.holds, self.holds)}${own('You carry out of sight', actor.has, self.has)}`.slice(1);
+    const body = `${part('Your pose', actor.pose)}${carries('You carry', who, true)}`.slice(1);
     const answer = await ask(player, { system, schema, messages: [{ role: 'user', content: [
       ...known(mind, mind.lines),
       `${nowOf(world, actor, now)} You are in ${tagged(spot)}. ${others.length ? 'Here with you:' : spot.figures.length || spot.crowd !== null ? 'None of the people of the list is here with you.' : 'Nobody else is here.'}`,

@@ -9,7 +9,8 @@ sagents runs story agents: models with tools for an interactive story where a co
 (`src/chatgpt.ts` for a ChatGPT plan, `src/compatible.ts` for a chat completions server), the choice between them by
 the model's name (`src/model.ts`), a prototype of the live mode and the command line (`src/cli.ts`). The live mode is
 `src/world.ts` for the world file and what a run holds, `src/time.ts` for the clock and the distances, `src/action.ts`
-for what a resident does, `src/answer.ts` for what the world answers to a deed, `src/reading.ts` for the checks a world file is read
+for what a resident does, `src/answer.ts` for what the world answers to a deed, `src/things.ts` for the things
+that the rules count and move, `src/reading.ts` for the checks a world file is read
 with, `src/laws.ts` for the form of a law that the clock drives, with `src/sleep.ts` and `src/weather.ts` in that
 form, `src/memory.ts` for what a character remembers, `src/journal.ts` for the records that are its only state,
 `src/state.ts` for the file that keeps them and `src/live.ts` for the run and the prompts. All but the last two hold
@@ -25,7 +26,7 @@ environment from `environments/`.
   something or lose data unnoticed.
 - A request to the model holds what the caller gave and nothing else. Do not add default instructions, tools or
   metadata to it.
-- The core of the live mode (`world.ts`, `time.ts`, `action.ts`, `answer.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`,
+- The core of the live mode (`world.ts`, `time.ts`, `action.ts`, `answer.ts`, `things.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`,
   `reading.ts`) is meant to stay small enough to read whole. `npm run size` counts it in tokens against the owner's
   mark of 70,000, a mark to steer by, and two bounds a fifth below and above it, kept in `scripts/size.py`: a note above the first, a warning above the second, a strong warning above the third,
   and it forbids nothing. Above the mark a change that adds to the core says what it takes out or why the

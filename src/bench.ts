@@ -22,9 +22,11 @@ const calls = people * turns;
 const source = JSON.stringify({ title: 'Город', about: 'Город из многих мест. '.repeat(10), clock: '08:00', remote: 'телефон', travelMinutes: 5,
   // A seeded series, and every other place under the open sky.
   weather: { seed: 7, minutes: [5, 20], states: ['Ясно и тихо.', 'Идёт дождь.', 'Сильный ветер.'].map(text => ({ text, indoors: `За окном: ${text}` })) },
-  places: Array.from({ length: places }, (_, index) => ({ id: `p${index}`, name: `Место ${index}`, about: 'Обычное место в городе.', things: 'Стол, две скамьи, ящик с инструментом.', open: index % 2 === 1 })),
+  places: Array.from({ length: places }, (_, index) => ({ id: `p${index}`, name: `Место ${index}`, about: 'Обычное место в городе.',
+    things: [{ name: 'стол', fixed: true, open: true, holds: [{ name: 'ящик с инструментом', holds: [{ name: 'молоток' }] }] }, { name: 'скамья', fixed: true }, { name: 'скамья', fixed: true }], open: index % 2 === 1 })),
   characters: Array.from({ length: people }, (_, index) => ({ id: `c${index}`, name: `Житель ${index}`, place: `p${index % places}`, sheet: 'Ты житель города. '.repeat(20),
-    looks: 'Человек средних лет в серой куртке.', pose: 'Стоит у стены.', holds: 'Сумка на плече.', has: 'Кошелёк и ключи в кармане.' })) });
+    looks: 'Человек средних лет в серой куртке.', pose: 'Стоит у стены.',
+    carries: [{ name: 'сумка', holds: [{ name: 'кошелёк', holds: [{ name: 'рубли', n: 500, money: true }] }, { name: 'ключи' }] }] })) });
 const world = readWorld(JSON.parse(source));
 
 let seed = 42;
@@ -48,7 +50,7 @@ const respond = async (request: Request) => {
   const usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
   if ('result' in (request.schema as { properties: object }).properties) {
     results += 1;
-    return { text: JSON.stringify({ result: speech, wakes: [], changes: [] }), usage };
+    return { text: JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], result: speech }), usage };
   }
   if ('memory' in (request.schema as { properties: object }).properties) {
     rewrites += 1;

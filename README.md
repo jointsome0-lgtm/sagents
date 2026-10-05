@@ -161,29 +161,32 @@ The world answers a deed:
 - A world file may give `facts` to the world, to a place and to a character: what is true there and is not seen at
   once, 300 words each at most. No resident is ever sent any of it.
 - After every `do` the world is asked once what came of it, through the model of `--world-model`, which is
-  `--model`'s unless given. It is sent the world's description and facts, the place with its things, what is hidden in it and its facts, the names
-  of the other places, who is there, awake or asleep, each with looks, pose, what it holds, what it carries out of sight and its facts, what
+  `--model`'s unless given. It is sent the world's description and facts, the place with its facts and its things, what is hidden in it, the names
+  of the other places, who is there, awake or asleep, each with looks, pose, what it carries and its facts, what
   came of the latest earlier deeds in that place (400 words of them), the clock, and the doer's name with the deed
   and its span. It is sent no sheet, note, memory or speech.
-- It answers with `result`, one or two sentences of what the senses give, 65 words at most, or null when there is
-  nothing to notice; with `wakes`, the sleepers of that place whom the deed wakes; with `changes`, described
-  below; with `search`, whether the deed was a search of the place; and with `finds`, the labels of the hidden
-  things the deed went straight to. Any other id or label is dropped.
+- It answers with `search`, whether the deed was a search of the place; `finds`, the labels of the hidden things
+  the deed went straight to; `moves`, `sets` and `poses`, described under «Things» below; `wakes`, the sleepers of
+  that place whom the deed wakes; and `result`, one or two sentences of what the senses give, 65 words at most, or
+  null when there is nothing to notice. The fields stand in this order, what moved before the words about it: in
+  the check of 2026-10-05 a weak local model named the moves right more often so. The schema is made for each
+  request and lists the labels, ids and states that the answer may name, so a model held to its schema can name
+  nothing else; an id of `wakes`, `finds` or `poses` that is not of the place is dropped all the same.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
   each person and place, the seconds of that person's deeds there that the world called a search. A thing is found
   by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «Ночь на
   перевале», in one deed or in several. The rules know how long a deed lasts before the world is asked, so the
   request lists the hidden things of the place in two kinds, those this deed finds if it is a search and those no
   search finds yet, and the world counts nothing.
-- The second way is a deed that goes straight to the very spot the hidden text names, however short: someone who
+- The second way is a deed that goes straight to the very spot named for the hidden thing, however short: someone who
   knows that the backpack lies under the workbench behind the canisters reaches there and has it. That is a reading
-  of the deed, so the world judges it: every hidden thing is sent under a label, `h1` for the first of the place's
-  list, and the answer's `finds` names the labels the deed went straight to. A label that was not sent is dropped.
+  of the deed, so the world judges it: every hidden thing is sent under its label with its spot, and the answer's
+  `finds` names the labels the deed went straight to. A label that was not sent is dropped.
   The world is told that a deed which names another spot, or the thing and not where it lies, is not one.
 - The world is told that nobody sees a hidden thing and that no result speaks of one until it is found. What is
-  found either way is hidden no longer, for anyone: the rules put its text at the end of the
-  place's `things`, cut at their limit, unless the answer's `changes` wrote those things anew, which then says
-  where it went. The time one person searched does not count for another, and it is kept when the person leaves.
+  found either way is hidden no longer, for anyone: it lies in the place in sight, with all that it holds. Only an
+  answer that finds a hidden thing can move it or what it holds. The time one person searched does not count for
+  another, and it is kept when the person leaves.
 - Nobody gets to another place by a deed, and the world is told so: whoever tries is still where it was, by the
   way out, and a pose never names another place. Only a `go` moves anyone. The world is told the weather so that it
   knows it, and to speak of it only when the deed meets it. Nothing checks that it kept to either.
@@ -191,7 +194,8 @@ The world answers a deed:
   sleeper it wakes has its sleep end when the deed ends, and reads who woke it and by what deed.
 - The answer is a record of its own, right after its deed: the journal takes nothing else there, so a run that
   stopped between the two asks the world first when it continues. An answer that cannot be used is asked for once
-  more; after that nothing came of the deed, and the answer counts as unusable.
+  more; after that nothing came of the deed, and the answer counts as unusable. An answer that the rules of things
+  refuse is asked for once more too, as «Things» says.
 - What a model tells in a `do` does not by itself make anything true: the deed is what was tried, and what came of
   it is what the world answered from the facts.
 
@@ -208,8 +212,9 @@ People of a place whom nobody plays:
   what the figure answers: it is sent what a deed's request holds of the place and of those in it, without what is
   hidden, with the crowd and every figure of the place with looks and facts, with what came of the latest earlier
   deeds there, and with what was said to the figures of that place before and answered (300 words of it).
-- It answers with `reply`, the figure's words, 65 at most, or null when the figure says nothing, and with `changes`
-  as a deed's answer has them, for a thing handed over while speaking. The answer begins when the speech ends and
+- It answers with `reply`, the figure's words, 65 at most, or null when the figure says nothing, and with `moves`
+  as a deed's answer has them, for a thing handed over while speaking: a figure carries nothing of its own, what it
+  has at hand is among the things of its place, and nothing is eaten or burned by its answer. The answer begins when the speech ends and
   holds the speaker and everyone who heard the speech as speech does. A sleeper is not woken by it.
 - The answer is a record of its own, right after its speech, and the journal takes nothing else there. An answer
   that cannot be used, or one cut at the model's limit, is asked for once more; after that the figure says nothing.
@@ -217,27 +222,66 @@ People of a place whom nobody plays:
 - The world's request about a deed also holds the crowd and the figures of the deed's place, and what was said to
   them before and answered, so that a deed is judged with what a figure promised.
 
-Bodies and belongings:
+Things:
 
 - A world file may give a character `looks`, what anyone near sees and what never changes: the body and the face,
-  and no clothes, which can be taken off (60 words at most); `pose`, how and where in its place it is (20);
-  `holds`, what is in its hands or worn, clothes included (30); and `has`,
-  what it carries out of sight (60). It may give a place `things`: what lies there and can be moved, taken or
-  changed (120); and `hidden`, a list of `{ text, minutes }`: what lies there and is not seen until someone finds
-  it, each text 60 words at most. `facts` are for what does not change. All are optional and in the world's language.
-- `pose`, `holds`, `has` and `things` start from the world file and then belong to the world's state. They change
-  only by `changes` in the world's answer to a deed: a list of `{ of, what, text }`, where `what` is `pose`, `holds`,
-  `has` or `things`, `of` is the id of a person in the deed's place, awake or asleep, or for `things` the id of that
-  place, and `text` is the whole new text, cut at the limit of its kind; an empty text means that nothing is left.
-  An entry that names anyone or anything else is dropped. The record of the answer keeps the changes as they were
-  read. A `go` drops the walker's pose, and so does falling asleep, by a `sleep` or at the limit: a sleeper is shown as asleep and has no pose until a deed gives it one, and wakes with none. Nothing else touches any of them.
-- The world is told that a thing never appears from nowhere and never vanishes: what one gives another receives,
-  what is taken from a place is in someone's hands or pockets afterwards, and a thing goes with what is in it, so
-  clothes taken off take what is in their pockets out of what the person carries. Nothing checks that it kept to this.
-- A character's `looks` are part of its own system text. Every turn says its own pose, what it holds and what it
-  carries out of sight, and for each person in its place their looks, pose and what they hold. It is never sent
-  what another person carries out of sight, anything of a person in another place, or any `things`, `hidden` or `facts`:
-  what lies in a place a character learns by a deed and the world's answer to it.
+  and no clothes, which can be taken off (60 words at most), and `pose`, how and where in its place it is (20).
+  `facts` are for what does not change. All are optional and in the world's language.
+- Things are records that the rules keep and count (`src/things.ts`). A place has `things` and a character
+  `carries`, each a list of `{ name, … }`, and a thing has one holder: a person, a place or another thing. `holds`,
+  a list, makes it a thing that holds others, like a table, a coat with pockets or a bag; `open` says that what it
+  holds is in plain sight. `n` makes it a count of things that are alike, like money, cigarettes or logs; a count
+  holds nothing, so four mugs are four records. `fixed` is a part of the place that never moves. `stock` is a
+  supply with no count, which taking does not use up. `food` is the calories of one and makes it something to eat
+  or drink; `burns` says that it can burn up. `states` is the list of states it can be in and `state` the one it is
+  in, the first when not given; `fire` is true for what can set things alight, or names the state in which it can.
+  `money` marks a count that no deed uses up or makes. `hidden`, `{ spot, minutes }` on a thing of a place itself,
+  says where it lies unfound and how long a search finds it. A name has eight words at most and none of `, ; [ ] ×`.
+  The examples show all of these. A file that still has the texts `holds`, `has`, a text of `things` or a list
+  `hidden` is refused.
+- The rules give every record a label, `t1`, `t2` and on in the order of the file. A label is the world's own, is
+  never used again, and no resident is sent one. The world is told of things in one notation,
+  `t8 parka [t9 cigarettes ×17, burns; t10 lighter, fire]`: under `Things here` what stands or lies in the place,
+  after `Carries` what a person has in hand or wears, and in square brackets what a thing holds.
+- The world keeps no count and rewrites no list. Its answer says which things the deed moved: `moves` is a list of
+  `{ what, n, to }`, the label, how many, and where they end up: the id of a person there, the id of the place, the
+  label of a thing that holds others, `eaten` or `burned`. There is no «from»: the rules know where the thing was.
+  `sets` is a list of `{ what, state }` and puts a thing into one of its states; `poses` is a list of `{ of, text }`.
+- The rules take the moves in their order and the whole answer or none of it. A whole record keeps its label and
+  all that it holds, so a coat goes with what is in its pockets. A part of a count leaves the rest under the old
+  label and is a new record where it went. What is taken from a stock is a new record, and the stock is as it was.
+  Counts of one name and kind at one holder become one record. A move to where the thing already is does nothing.
+- An answer is refused whole for the first entry that names no thing of the place, a hidden thing that the answer
+  does not find, a `fixed` thing, more than there is or more than 20 from a stock, a `to` that is none of the above,
+  a thing put into itself or deeper than four, something eaten that is not `food` or burned that does not burn or
+  with no fire there, money eaten or burned, more than 30 records on a person or 60 in a place, or a state the
+  thing does not have. More than 12 moves or 6 states make the answer unusable. A refused answer changes nothing
+  and never reaches the journal: the world is asked once more with the same request and one sentence that names
+  the entry and the cause in the words of its instructions. After the second nothing came of the deed. The totals
+  count the answers `refused` and the deeds and speeches left `void`.
+- A thing appears only out of a stock and leaves the world only by being eaten or burned, so for every name what
+  there is, what was eaten or burned and what came from a stock add up to what the world file gave, and the sum
+  of money never changes. The event of an answer holds `moved`, a posting for each thing with how many went from
+  which holder to which, and an `eaten` posting says who ate what; `set`; and `found`. The laws of the random run
+  count by these postings.
+- The rules read no prose, and no words of a model change a count. Whoever perceives an answer reads after it one
+  line that the rules wrote from the postings: what went from whom or from what to whom, what was eaten or burned,
+  what is in another state now and what was found where. It names things and people, and no label.
+- `pose` and the things start from the world file and then belong to the world's state. A `go` drops the walker's
+  pose, and so does falling asleep, by a `sleep` or at the limit: a sleeper is shown as asleep and has no pose until
+  a deed gives it one, and wakes with none. The things a person carries go where the person goes.
+- A character's `looks` are part of its own system text. Every turn says its own pose and what it carries, three
+  things deep with the counts, and for each person in its place their looks, pose and what they carry, without what
+  is inside a thing unless the thing is `open`. It is never sent what is inside a thing that another carries,
+  anything of a person in another place, anything hidden, or any `facts`; the things of a place it learns by a deed
+  and the world's answer to it.
+- A character may have `memory`, what it remembers when the story begins, within `longWords`: what it owes and is
+  owed today, what it saw, where a thing lies. The sheet says who the person is; a sum or a debt in the sheet would
+  stay true in every request whatever happened, while the memory ages by the rules of memory. A place's `about`
+  names only what does not move.
+- Not built yet: a shop and prices, things made of other things, residents who take, give and eat without the
+  world, calories that count, and doors that stop a `go`. A clock is still a mark of a place or a person and not a
+  thing that can be handed over.
 
 The weather:
 
@@ -330,7 +374,7 @@ of that model arriving whole in between, end the run as `failed (output_limit)`.
 one line per event, or one JSON object per event with `--json`, and then one line of totals: the status and its
 reason, the story minutes played, the requests, the unusable answers of every kind and how many of them were cut
 at the output limit (`overlong`), the memory rewrites and how
-many of them were lost, and the tokens. The tokens are summed over the answers that reported their usage: when some
+many of them were lost, the answers of the world that the rules of things refused and the deeds left with nothing, and the tokens. The tokens are summed over the answers that reported their usage: when some
 reported none, the totals say how many (`unreported`) and do not count them as zero. In the text output a memory rewrite is shown whole, marked as private like a
 note.
 
@@ -350,16 +394,17 @@ large the requests were; `node src/bench.ts 1000 100 50` is 1000 characters in 1
 What it lacks:
 
 - There is no author above the characters. Nothing happens in the world unless a character does it.
-- The world answers a deed and does nothing of its own accord. What people have and hold and the things of a place
-  are texts that the world's answer rewrites whole: nothing counts the items in them, so nothing checks that a thing
-  given was received or that the answer agrees with the facts. The facts of the world file never change.
+- The world answers a deed and does nothing of its own accord. The rules count the things and hold every move to
+  what is there, but whether a deed moved a thing at all is the world's reading: a weak model leaves a move out, and
+  then its words say that a jacket was hung up while the lists keep it on its owner. Nothing compares the words of
+  a result with its moves. The facts of the world file never change.
 - A search is whatever the world calls one, and a deed went straight to a hidden thing when the world says so:
   nothing checks either, so a world that is generous finds a thing for someone who only guessed. Nobody is told how
   long a search has lasted or that there is anything left to find.
 - A walk is a straight line at one pace for everyone, whatever lies between and however tired the walker is. A
   long walk cannot be broken off, nothing is perceived on it, and the walker is not told what the weather did meanwhile.
-- A `go` takes along everything a person holds and has, whatever its size, and nobody sees what lies in a place
-  without a deed.
+- A `go` takes along everything a person carries, whatever its size, and nobody is told what lies in a place
+  without a deed. A resident names a thing in its own words, and the world has to find the label.
 - A clock is a mark in the world file and not a thing: a watch that is handed over, lost or stopped still shows its
   first owner the time, and a clock carried out of a place stays in it. A span in seconds is said exactly to
   everyone, and a sleeper who is woken early is not told by how much.
@@ -461,7 +506,7 @@ npm run size                    # how large the core is, in tokens
 ```
 
 `npm run size` counts tokens (`o200k_base`) of three things: the core of the live mode without model and disk
-(`src/world.ts`, `time.ts`, `action.ts`, `answer.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`), `src/live.ts`, and
+(`src/world.ts`, `time.ts`, `action.ts`, `answer.ts`, `things.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`), `src/live.ts`, and
 all tracked text except `LICENSE` and `package-lock.json`. It reads the working tree, or the Git index with
 `npm run size -- --index`. The core is meant to stay small enough to read whole, and its count falls into one of four bands,
 around the owner's mark of 70,000 tokens, which is there to steer by: up to 56,000 tokens, four fifths of the mark,

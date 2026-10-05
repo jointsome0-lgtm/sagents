@@ -10,11 +10,13 @@ import type { Line, Mind } from './memory.ts';
 import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
 import { apply, arrive, isRefusal, next, readAction, start, wake } from './action.ts';
-import { lying, readReply, reply, readResult, result } from './answer.ts';
+import { readReply, reply, readResult, result } from './answer.ts';
+import { stocked } from './things.ts';
 import { clockAt, hasClock, timeFor } from './time.ts';
 import { namesOf, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, sizeOf } from './world.ts';
 import type { Action, Refusal } from './action.ts';
-import type { Change, Lying } from './answer.ts';
+import type { Answer } from './answer.ts';
+import type { Move, Things } from './things.ts';
 import type { Event, Person, World } from './world.ts';
 
 // The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
@@ -23,17 +25,17 @@ export class JournalError extends Error {}
 // `act`: the action as it was read from the answer, or the reason why the answer could not be used, with that turn's
 // word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
-// `at`: what came of the deed, or null, the sleepers it wakes, what it changes of bodies and belongings, whether
-// the deed was a search of its place, and the labels of the hidden things it went straight to.
-// `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`: its words, or
-// null, and what the answer changes of bodies and belongings.
+// `at`: what came of the deed, or null, the sleepers it wakes, what it moved by label and where to, the states and
+// the poses it changed, whether the deed was a search of its place, and the labels of the hidden things it went
+// straight to. `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`:
+// its words, or null, and what changed hands with them. Neither is ever an answer that the rules of things refuse.
 // A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
 // no answer is behind it.
 export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal }
   | { kind: 'arrive' | 'wake'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean }
-  | { kind: 'reply'; who: string; at: number; figure: string; text: string | null; changes: Change[] }
-  | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[]; changes: Change[]; search: boolean; finds: string[] }
+  | { kind: 'reply'; who: string; at: number; figure: string; text: string | null; moves: Move[] }
+  | ({ kind: 'result'; who: string; at: number } & Answer)
   | LawRecord;
 // `by` is the name of the model whose answer the record came of, and null for a record no answer is behind. The rules
 // never read it: the same records give the same world whoever answered.
@@ -42,10 +44,10 @@ export type Entry = { seq: number; record: Record; event: Event; by: string | nu
 // `deed` is a `do`, or a `say` to a figure, that the world has not answered yet: its answer is the only record that
 // can come next. `results` holds, for each place, the latest of what came of the deeds done there, which the world is
 // shown when it answers the next, and `said` the latest of what was said to the figures of the place and answered.
-// `lies` is what lies in each place now, hidden or not, with how long each person has searched each place, and `laws`
+// `things` is what each place and each person holds now, with how long each person has searched each place, and `laws`
 // holds the parts of the state that the laws of `laws.ts` keep.
 export type State = { people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
-  said: Map<string, Line[]>; lies: Lying; laws: Parts };
+  said: Map<string, Line[]>; things: Things; laws: Parts };
 // How many words of earlier results a place keeps. The newest one stays whatever its size.
 export const RESULT_WORDS = 400;
 // How many words of earlier speeches to its figures and their answers a place keeps, the newest whatever its size.
@@ -79,6 +81,13 @@ export const CUT = 'Your speech was longer than the limit: the others heard only
 const NOTHING = 'Nothing came of it that could be noticed.';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
+// What an answer did to things, as everyone who perceived it is told: from the postings the rules made, never from
+// the answer's words. No label is in it, and a thing that stayed on one person or in one thing of the place is not.
+const told = (event: Event, doer: string) => [
+  ...(event.moved ?? []).filter(posting => posting.out !== posting.into).map(({ name, n, to, out, into }) => `${name}${n === null ? '' : ` ×${n}`} ${
+    to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went from ${out} to ${into}`}.`),
+  ...(event.set ?? []).map(({ name, state }) => `${name} is now ${state}.`),
+  ...(event.found ?? []).map(({ name, spot }) => `${name} was found: ${spot}.`)].join(' ');
 // A speech as it opens when it is addressed to a figure of the place.
 const toFigure = (world: World, event: Event) => event.kind === 'say' && event.to !== null ? ` to ${named(namesOf(world), event.to)}` : '';
 
@@ -110,8 +119,8 @@ function own(world: World, event: Event, when: string, span = `${event.seconds} 
 }
 
 export const begin = (world: World): State =>
-  ({ people: start(world), minds: new Map(world.characters.map(character => [character.id, blank()])), seq: 0, deed: null,
-    results: new Map(world.places.map(place => [place.id, []])), said: new Map(world.places.map(place => [place.id, []])), lies: lying(world), laws: beginLaws(world) });
+  ({ people: start(world), minds: new Map(world.characters.map(character => [character.id, { ...blank(), long: character.memory ?? '' }])), seq: 0, deed: null,
+    results: new Map(world.places.map(place => [place.id, []])), said: new Map(world.places.map(place => [place.id, []])), things: stocked(world), laws: beginLaws(world) });
 
 // One record applied to the world: the event it makes, with everyone moved on and every memory brought up to date.
 // A record that the rules could not have produced in this state is refused, and the state is then not to be used.
@@ -124,14 +133,18 @@ export function advance(world: World, state: State, record: Record): Event {
   if (deed?.kind === 'say' || record.kind === 'reply') {
     // A speech to a figure is followed by that figure's answer and by nothing else, and a figure answers nothing else.
     if (!deed || record.kind !== 'reply' || record.who !== deed.who || record.at !== deed.at || record.figure !== deed.to) return refuse('is not a figure\'s answer to a speech to it just before');
-    const present = people.filter(person => person.place === deed.place).map(person => person.id);
-    const { text, changes } = record;
-    if (!isDeepStrictEqual(readReply(JSON.stringify({ reply: text, changes }), present, deed.place), { text, changes })) return refuse('holds an answer that the speech cannot have');
-    const event = reply(world, people, state.lies, deed, text, changes);
+    const { text, moves } = record;
+    if (!isDeepStrictEqual(readReply(JSON.stringify({ reply: text, moves })), { text, moves })) return refuse('holds an answer that the speech cannot have');
+    const event = reply(world, people, state.things, deed, text, moves);
+    if ('code' in event) return refuse('holds an answer that the rules of things refuse');
     const figure = named(namesOf(world), record.figure), speaker = named(world.characters, deed.who), end = deed.at + deed.seconds;
     // The speaker learns that nothing was answered; the others heard the speech and nothing after it.
     if (text === null) remember(minds.get(deed.who)!, lineOf(seq, `${when(deed.who, end)} ${figure} does not answer.`));
-    for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, `${when(id, end)} ${figure} answers ${id === deed.who ? 'you' : speaker}: "${text}"`));
+    const moved = told(event, '');
+    for (const id of event.heard) {
+      if (text !== null) remember(minds.get(id)!, lineOf(seq, `${when(id, end)} ${figure} answers ${id === deed.who ? 'you' : speaker}: "${text}"`));
+      if (moved) remember(minds.get(id)!, lineOf(seq, `${when(id, end)} ${moved}`));
+    }
     // The place keeps what was said to its figures and what they answered, the latest of it.
     const kept = state.said.get(deed.place)!;
     kept.push(lineOf(seq, `${event.clock} ${speaker} to ${figure}: "${deed.text}" ${text === null ? `${figure} did not answer.` : `${figure}: "${text}"`}`));
@@ -144,14 +157,20 @@ export function advance(world: World, state: State, record: Record): Event {
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
     const sleepers = people.filter(person => person.asleep && person.place === deed.place).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
-    const { text, wakes, changes, search, finds } = record, hidden = state.lies.hidden.get(deed.place)!.map(thing => thing.id);
-    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, changes, search, finds }), sleepers, present, deed.place, hidden), { text, wakes, changes, search, finds })) {
+    const { text, wakes, moves, sets, poses, search, finds } = record, answer = { text, wakes, moves, sets, poses, search, finds };
+    const hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
+    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, search, finds }), sleepers, present, hidden), answer)) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
-    const event = result(world, people, state.lies, deed, text, wakes, changes, search, finds);
-    const doer = named(world.characters, deed.who);
-    remember(minds.get(deed.who)!, lineOf(seq, `${when(deed.who, event.at)} ${record.text === null ? NOTHING : `What came of it: ${record.text}`}`));
-    for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} What came of what ${doer} did: ${record.text}`));
+    const event = result(world, people, state.things, deed, answer);
+    if ('code' in event) return refuse('holds an answer that the rules of things refuse');
+    const doer = named(world.characters, deed.who), moved = told(event, doer);
+    // What the answer says came of the deed, and after it what the rules say went where, for the doer and for those there.
+    const lines = [...(text === null ? moved ? [] : [NOTHING] : [`What came of it: ${text}`]), ...(moved ? [moved] : [])];
+    remember(minds.get(deed.who)!, ...lines.map(line => lineOf(seq, `${when(deed.who, event.at)} ${line}`)));
+    for (const id of event.heard) {
+      remember(minds.get(id)!, ...[...(text === null ? [] : [`What came of what ${doer} did: ${text}`]), ...(moved ? [moved] : [])].map(line => lineOf(seq, `${when(id, event.at)} ${line}`)));
+    }
     for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${doer} woke you by this: ${deed.text}`));
     if (record.text !== null) {
       // The place keeps what came of the deeds done in it, the latest ones.

@@ -17,9 +17,9 @@ export const REFUSALS = ['json', 'action', 'text', 'to', 'here', 'place', 'time'
 export type Refusal = typeof REFUSALS[number];
 export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(reason => reason === value);
 
-// Everyone begins awake, placed, holding and carrying what the world file says.
-export const start = (world: World): Person[] => world.characters.map(({ id, place, pose, holds, has }) =>
-  ({ id, place, pose, holds, has, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0 }));
+// Everyone begins awake and placed as the world file says.
+export const start = (world: World): Person[] => world.characters.map(({ id, place, pose }) =>
+  ({ id, place, pose, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0 }));
 
 // The next to play: the one free first, then the one whose own last action began earliest, then the world file's order.
 export const next = (people: Person[]): Person => people.reduce((first, person) =>
