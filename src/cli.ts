@@ -1,14 +1,16 @@
 import { parseArgs } from 'node:util';
 import { createChatgpt, ModelError, signIn, SignInError } from './chatgpt.ts';
 import type { Message, Request } from './chatgpt.ts';
+import { modelFor } from './model.ts';
 
 const USAGE = `node src/cli.ts login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
 node src/cli.ts status [<model>]       whether this computer is signed in, and whether the plan offers the model
 node src/cli.ts ask [--timeout <s>]    one request as JSON on stdin, one JSON line on stdout
 
-A request: {"model": "<id>" or "<id>@<effort>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}}
+A request: {"model": "<id>", "<id>@<effort>" or "api:<id>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}}
 An answer: {"status": "done", "text": "...", "usage": {...}} or {"status": "failed", "reason": "<code>"}
-A failed answer also has "httpStatus", "providerCode" and "param" when the service gave them.`;
+A failed answer also has "httpStatus", "providerCode" and "param" when the service gave them.
+"api:<id>" is a model of the chat completions server that SAGENTS_API_URL names, with SAGENTS_API_KEY if it asks for one.`;
 const DEFAULT_MODEL = 'gpt-6.1-sol';
 const MAX_REQUEST = 16_000_000;
 
@@ -77,7 +79,8 @@ if (command === 'ask') {
     // The time limit covers the reading of the request too.
     const started = performance.now();
     const request = await requestFrom(process.stdin, AbortSignal.timeout(Math.floor(seconds * 1000)));
-    const result = await chatgpt.respond(request, { timeoutMs: Math.max(1, seconds * 1000 - (performance.now() - started)) });
+    const { respond, model } = modelFor(request.model);
+    const result = await respond({ ...request, model }, { timeoutMs: Math.max(1, seconds * 1000 - (performance.now() - started)) });
     console.log(JSON.stringify({ status: 'done', ...result }));
   } catch (error) {
     console.log(JSON.stringify({ status: 'failed', ...detailsOf(error) }));
