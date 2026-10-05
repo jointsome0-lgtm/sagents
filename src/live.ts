@@ -368,8 +368,10 @@ export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 
 // and `kinds` the calls and the tokens by what a request was for, so that a resident's turn is told from the world's answer when one model gives both.
 // `refused` counts the answers of the world that could be read and that the rules of things did not take, and `void`
 // the deeds and speeches to figures that nothing came of because neither of the two answers asked for could be used
-// or taken.
-export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; seconds: number; rewrites: number; lost: number; refused: number; void: number;
+// or taken. A run that a connection's failure ended keeps what the failure may say of itself besides its code: the
+// HTTP status, and the service's own code and field name, when it had them. Never the service's words.
+export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string;
+  seconds: number; rewrites: number; lost: number; refused: number; void: number;
   models: { [name: string]: Tally }; kinds: { [kind in Asked]: Spent } };
 
 const CUT = Symbol('cut'), DECLINED = Symbol('declined');
@@ -439,7 +441,8 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
         unusable(player);
         if (outcome.declined < declinedRun) return DECLINED;
       }
-      Object.assign(outcome, { status: 'failed', reason: error.code });
+      Object.assign(outcome, { status: 'failed', reason: error.code, ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}),
+        ...(error.providerCode ? { providerCode: error.providerCode } : {}), ...(error.param ? { param: error.param } : {}) });
       return null;
     }
     cuts.delete(player.name);
