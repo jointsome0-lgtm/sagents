@@ -168,8 +168,9 @@ The world answers a deed:
 - It answers with `search`, whether the deed was a search of the place; `finds`, the labels of the hidden things
   the deed went straight to; `moves`, `sets` and `poses`, described under «Things» below; `wakes`, the sleepers of
   that place whom the deed wakes; and `result`, one or two sentences of what the senses give, 65 words at most, or
-  null when there is nothing to notice. The fields stand in this order, what moved before the words about it: in
-  the check of 2026-10-05 a weak local model named the moves right more often so. The schema is made for each
+  null when there is nothing to notice. The fields stand in this order, the entries before the words, so that the
+  words are written after the entries and cannot lead them; both orders passed the check of 2026-10-05 on the weak
+  local model. The schema is made for each
   request and lists the labels, ids and states that the answer may name, so a model held to its schema can name
   nothing else; an id of `wakes`, `finds` or `poses` that is not of the place is dropped all the same.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for

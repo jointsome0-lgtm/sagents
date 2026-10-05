@@ -56,7 +56,10 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
     facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, clock: index % 5 === 0,
     carries: [{ name: `coat-c${index}`, holds: [{ name: `secret-c${index}` }, { name: 'coin', n: 10, money: true }] }, { name: `hat-c${index}` },
-      { name: `tray-c${index}`, open: true, holds: [{ name: 'apple', n: 3, food: 90 }] }] })) });
+      { name: `tray-c${index}`, open: true, holds: [{ name: 'apple', n: 3, food: 90 }] },
+      // Some carry nearly all a person may, and some a thing in a thing four deep, so that the run meets both limits.
+      ...(index % 5 === 1 ? Array.from({ length: 23 }, (_, at) => ({ name: `trinket-c${index}-${at}` })) : []),
+      ...(index % 5 === 3 ? [{ name: `nest-c${index}`, holds: [{ name: `nest2-c${index}`, holds: [{ name: `nest3-c${index}`, holds: [{ name: `nest4-c${index}`, holds: [] }] }] }] }] : [])] })) });
 // The settings of sleep come from an environment, and the world file changes one of them itself.
 const ENVIRONMENT = JSON.stringify({ dayStart: '07:00', tiredHours: 2, spentHours: 13.25 });
 const world = readWorld(JSON.parse(source), JSON.parse(ENVIRONMENT));
@@ -80,7 +83,7 @@ export const LAWS = {
   body: 'How a person is placed changes only by the world\'s answer to a deed done in the place where it is; a pose is also dropped when its owner leaves or falls asleep.',
   kept: 'A thing is where the postings of events put it and nowhere else, and the world is told of exactly those of its place and of the people there: a record has one holder, lies no deeper than four under a person or a place, a person carries thirty records at most and a place holds sixty, and for every name what there is, what was eaten or burned and what was taken from a supply add up to what the world file gave; the sum of money never changes.',
   moved: 'An answer of the world moves only what is in its place or on the people there, to them, into that place or, for a deed, out of the world by being eaten or burned; an answer that the rules refuse changes nothing.',
-  unseen: 'No resident is sent a label, what lies inside a thing that another person carries, what is hidden in a place before it is found, the facts of the people of a place whom nobody plays, or the looks or pose of a person in another place.',
+  unseen: 'No resident is sent a label, what lies inside a thing that another person carries and that is not open, what is hidden in a place before it is found, the facts of the people of a place whom nobody plays, or the looks or pose of a person in another place.',
   reply: 'Someone of a place whom nobody plays speaks only in answer to a speech addressed to it in its place, once and right after that speech.',
   found: 'A hidden thing is found only where it lies, by a search of its finder that has lasted its minutes or by a deed the world says went straight to it, and then it is hidden for nobody.',
   weather: 'The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of it.',
@@ -95,7 +98,8 @@ const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.
 // `seen.turns` is a list, it gains for every request who was asked, a resident or for the world the deed's place, at
 // which record, whether for a turn, and the words of bodies, facts and guarded things that the request held; `records`
 // holds every thing the request lists under a label, with its name and count, `labelled` says that it holds a label at all, and `again` counts the requests that
-// asked once more after an answer the rules refused.
+// asked once more after an answer the rules refused, `full` those of them that say a person would carry too much,
+// and `deep` those that say a thing would lie deeper than four.
 // `sky` holds the words of the weather in the whole request, and `now` those after its history, where a turn says
 // the weather of the moment. `reply` marks a request to the world for a figure's answer. `clocks` holds every time of the clock in the request, as the engine writes one.
 type Asked = { record: number; who: string; turn: boolean; reply?: boolean; marks: string[]; labelled: boolean; records: string[]; sky: string[]; now: string[]; clocks: string[] };
@@ -108,7 +112,7 @@ const askedOf = (request: Request, record: number, who: string, turn: boolean): 
 };
 const MARK = /\b(?:looks|pose|facts|crowd|hidden|inside|secret)-[cpf]\d+(?:-\d+)?/g;
 function standIn(record: () => number) {
-  const seen: { largest: number; record: number; again: number; turns: Asked[] | null } = { largest: 0, record: 0, again: 0, turns: [] };
+  const seen: { largest: number; record: number; again: number; full: number; deep: number; turns: Asked[] | null } = { largest: 0, record: 0, again: 0, full: 0, deep: 0, turns: [] };
   const respond = async (request: Request) => {
     const body = `${request.system}${request.messages.map(message => message.content).join('')}`;
     if (body.length > seen.largest) Object.assign(seen, { largest: body.length, record: record() });
@@ -127,6 +131,7 @@ function standIn(record: () => number) {
       seen.turns?.push({ ...askedOf(request, record(), spot, true), reply: 'reply' in asks });
       const content = request.messages[0].content, labels = [...content.matchAll(/\nHidden here \((t\d+)\)/g)].map(match => match[1]);
       if (content.includes('was not taken')) seen.again += 1;
+      if (content.includes('was not taken') && content.includes('a person carries 30 things at most')) seen.full += 1;
       // What it moves it mostly takes from what the schema lets it name, as a model held to the schema would, and it
       // reads the marks of a thing so that most entries can be taken: a part of a count or all of it, some from a
       // supply, food eaten and wood burned. It leaves alone what is still hidden and the things that only their
@@ -137,6 +142,9 @@ function standIn(record: () => number) {
       const told = (label: string) => new RegExp(`\\b${label} [^;[\\]\\n]*`).exec(content)?.[0] ?? '';
       const unfound = new Set([...content.matchAll(/\nHidden here[^\n]*/g)].flatMap(match => match[0].match(/\bt\d+\b/g) ?? []));
       const pick = <Item>(list: Item[]) => list[upTo(list.length) - 1];
+      // A thing sent into the innermost of four nested things is refused for its depth and for nothing else.
+      const sent = /because of the entry (\{[^}]*\}): [^\n]*four things deep/.exec(content);
+      if (sent && told(JSON.parse(sent[1]).to).includes(' nest4-') && JSON.parse(sent[1]).what !== JSON.parse(sent[1]).to) seen.deep += 1;
       const free = (names.what.enum ?? []).filter(label => !told(label).includes(' secret-')), careful = free.filter(label => !unfound.has(label));
       const fixed = [...content.matchAll(/\b(t\d+) [^;[\]\n]*, fixed/g)].map(match => match[1]), tos = names.to.enum ?? [];
       const moves = Array.from({ length: upTo(4) - 1 }, () => {
@@ -437,7 +445,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   for (const [kind, times] of Object.entries(count)) assert.ok(times >= 5, `${kind} happened ${times} times`);
   assert.deepEqual([whole.rewrites, whole.lost], [count.memory, count.memoryLost]);
   // Answers were refused and each was asked again with the reason, and some deeds were left with nothing.
-  for (const [kind, times] of Object.entries({ refused: whole.refused, void: whole.void })) assert.ok(times >= 5, `${kind} happened ${times} times`);
+  for (const [kind, times] of Object.entries({ refused: whole.refused, void: whole.void, full: seen.full, deep: seen.deep })) assert.ok(times >= 5, `${kind} happened ${times} times`);
   assert.ok(seen.again >= whole.refused - whole.void && seen.again >= 5, 'an answer was refused and not asked again');
   // The things the journal amounts to are the ledger's, each under one holder.
   const final = replay(world, journal.all).things, lying: string[] = [];
