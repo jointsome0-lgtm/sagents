@@ -20,7 +20,9 @@ const inMemory = process.argv.includes('--memory');
 const [people = 1000, places = 100, turns = 50] = process.argv.slice(2).filter(argument => argument !== '--memory').map(Number);
 const calls = people * turns;
 const source = JSON.stringify({ title: 'Город', about: 'Город из многих мест. '.repeat(10), clock: '08:00', remote: 'телефон', travelMinutes: 5,
-  places: Array.from({ length: places }, (_, index) => ({ id: `p${index}`, name: `Место ${index}`, about: 'Обычное место в городе.', things: 'Стол, две скамьи, ящик с инструментом.' })),
+  // A seeded series, and every other place under the open sky.
+  weather: { seed: 7, minutes: [5, 20], states: ['Ясно и тихо.', 'Идёт дождь.', 'Сильный ветер.'].map(text => ({ text, indoors: `За окном: ${text}` })) },
+  places: Array.from({ length: places }, (_, index) => ({ id: `p${index}`, name: `Место ${index}`, about: 'Обычное место в городе.', things: 'Стол, две скамьи, ящик с инструментом.', open: index % 2 === 1 })),
   characters: Array.from({ length: people }, (_, index) => ({ id: `c${index}`, name: `Житель ${index}`, place: `p${index % places}`, sheet: 'Ты житель города. '.repeat(20),
     looks: 'Человек средних лет в серой куртке.', pose: 'Стоит у стены.', holds: 'Сумка на плече.', has: 'Кошелёк и ключи в кармане.' })) });
 const world = readWorld(JSON.parse(source));

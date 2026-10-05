@@ -4,6 +4,7 @@ import { advance, memoryStore, replay, RESULT_WORDS } from './journal.ts';
 import type { Record, State, Store } from './journal.ts';
 import { idle, oldest, readMemory } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
+import { reaches, SKY_WORDS, skyAt } from './weather.ts';
 import { CHARS_PER_WORD, clockAt, LIMITS, spentAt, weariness, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, travelSeconds, wordLimit } from './world.ts';
 import type { Event, Person, World } from './world.ts';
 
@@ -28,7 +29,7 @@ Speak the way people speak: briefly, one thought at a time, and leave room for a
 
 Each turn says how your body feels. People need sleep: an hour of it makes up for two awake, and one who stays awake too long falls asleep on the spot.
 
-Each turn also says how you are placed, what you hold in sight and what you carry out of sight, and what you see of those who are with you. None of it changes by itself or by words: to take, give, put down or hide a thing, to sit or lie down, do it, and the world tells you what came of it.
+Each turn also says how you are placed, what you hold in sight and what you carry out of sight, and what you see of those who are with you, and the weather as it reaches you where you are. None of it changes by itself or by words: to take, give, put down or hide a thing, to sit or lie down, do it, and the world tells you what came of it.
 
 You know only your sheet, what you remember and what you perceived since, which is what a turn lists. Nothing else is known to you. You may keep things to yourself, and you need not say what you want.
 
@@ -117,7 +118,9 @@ function deedOf(world: World, state: State, deed: Event): string {
       part('Has out of sight', person.has)}${part('Facts', character.facts)}`];
   });
   const earlier = state.results.get(place.id)!;
-  return [`The place: ${tagged(place)}. ${place.about}${part('Things', state.things.get(place.id)!)}${part('Facts', place.facts)}`, 'Here:', ...here,
+  const now = world.weather && state.weather ? skyAt(world.weather, state.weather) : null;
+  return [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Things', state.things.get(place.id)!)}${part('Facts', place.facts)}`,
+    ...(now ? [`${part(place.open ? 'The weather' : 'The weather outside', now.text)}${place.open ? '' : part('Under this roof', now.indoors)}`.slice(1)] : []), 'Here:', ...here,
     ...(earlier.length ? ['What came of earlier deeds here:', ...earlier.map(line => line.text)] : []),
     `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`, 'What comes of it?'].join('\n');
 }
@@ -135,15 +138,15 @@ export function requestLimit(world: World): number {
   const lines = (world.shortWords + 4 * (head + MAX_WORDS)) * (CHARS_PER_WORD + 1);
   const visible = (LIMITS.pose + LIMITS.holds) * CHARS_PER_WORD + 60;
   const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + 800
-    + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + LIMITS.has * CHARS_PER_WORD;
+    + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + LIMITS.has * CHARS_PER_WORD + SKY_WORDS * CHARS_PER_WORD;
   const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
   // The world's request: every person could be in one place, each with its body, belongings and facts, under the
-  // things and the results the place keeps.
+  // things and the results the place keeps, and the weather.
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
   const deed = worldSystemOf(world).length
     + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place))) + LIMITS.things * CHARS_PER_WORD
     + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + LIMITS.has * CHARS_PER_WORD + 40, 0)
-    + (RESULT_WORDS + 2 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + 400;
+    + (RESULT_WORDS + 2 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + 2 * SKY_WORDS * CHARS_PER_WORD + 500;
   return Math.max(resident, deed);
 }
 
@@ -160,10 +163,11 @@ export function linesOf(world: World, event: Event): string[] {
             : event.kind === 'wake' ? `${who} wakes`
               : event.kind === 'memory' ? `private memory of ${who}${event.cut ? ' (cut)' : ''}: ${
                 event.text?.replaceAll('\n', '\n         ') ?? 'the rewrite was lost, and what it was to hold is forgotten'}`
+                : event.kind === 'weather' ? `the weather changes: ${event.text}${event.indoors == null ? '' : ` Under a roof: ${event.indoors}`}`
                 : event.kind === 'result' ? `what came of what ${who} did: ${event.text ?? 'nothing that could be noticed'}${
                   event.wakes?.length ? ` (wakes ${event.wakes.map(id => named(world.characters, id)).join(', ')})` : ''}`
                   : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}` : `${who} waits (${event.seconds} s)`;
-  return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} [${named(world.places, event.place)}] ${what}`]),
+  return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} ${event.place ? `[${named(world.places, event.place)}] ` : ''}${what}`]),
     ...(event.changes ?? []).map(change => `         ${change.what} of ${named(change.what === 'things' ? world.places : world.characters, change.of)}: ${change.text || 'nothing'}`),
     ...(event.note ? [`         private note of ${who}: ${event.note}`] : [])];
 }
@@ -259,6 +263,12 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     }
     const actor = next(state.people);
     const now = actor.freeAt, who = actor.id, mind = state.minds.get(who)!;
+    const skies = state.weather;
+    if (skies && skies.until !== null && skies.until <= now && skies.until < horizon) {
+      // The clock has reached a change of the weather: the rules put it before anyone acts at that moment.
+      await happened({ kind: 'weather', at: skies.until, n: skies.n + 1 });
+      continue;
+    }
     outcome.seconds = Math.min(now, horizon) - stands;
     if (now >= horizon) return outcome;
     if (actor.place === null) {
@@ -305,12 +315,15 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     // What was given in the world file and is gone is said as nothing; what never was is not spoken of.
     const own = (name: string, value: string | null, given: string | null) => value === null && given === null ? '' : part(name, value ?? 'nothing');
     const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now);
+    const spot = world.places.find(item => item.id === place)!;
+    const weather = world.weather && skies ? reaches(skyAt(world.weather, skies), spot.open) : null;
     const answer = await ask(player, { system, schema, messages: [{ role: 'user', content: [
       ...known(mind, mind.lines),
-      `Now ${clockAt(world, now)}. You are in ${tagged(world.places.find(item => item.id === place)!)}. ${others.length ? 'Here with you:' : 'Nobody else is here.'}`,
+      `Now ${clockAt(world, now)}. You are in ${tagged(spot)}. ${others.length ? 'Here with you:' : 'Nobody else is here.'}`,
       ...others,
       `${FEELS[weariness(world, actor, now)]}${part('Your pose', actor.pose)}${own('You hold', actor.holds, self.holds)}${
         own('You carry out of sight', actor.has, self.has)}`,
+      ...(weather === null ? [] : [part(spot.open ? 'The weather' : 'The weather, from under the roof', weather).slice(1)]),
       `Minutes from here: ${world.places.filter(item => item.id !== place).map(item => `${tagged(item)} ${travelSeconds(world, place, item.id) / 60}`).join(', ') || 'there is no other place'}.`,
       `This turn the \`text\` of a say or a call may hold ${limit} words at most.${
         pause ? '' : ` ${Math.floor((horizon - now) / 60)} min ${(horizon - now) % 60} s of the story are left.`}`,

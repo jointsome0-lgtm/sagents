@@ -7,7 +7,10 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { blank, idle, lineOf, remember, rewrite } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
-import { apply, arrive, clockAt, drop, lying, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, spentAt, start, wake } from './world.ts';
+import { following, reaches, skyAt } from './weather.ts';
+import type { Skies } from './weather.ts';
+import { apply, arrive, clockAt, drop, lying, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, sky, spentAt, start,
+  turnOfWeather, wake } from './world.ts';
 import type { Action, Change, Event, Person, Refusal, World } from './world.ts';
 
 // The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
@@ -17,20 +20,22 @@ export class JournalError extends Error {}
 // word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
 // `at`: what came of the deed, or null, the sleepers it wakes, and what it changes of bodies and belongings. `spent`: the person has been awake to the world's limit
-// and falls asleep where it is; like an arrival and a waking, no answer is behind it.
+// and falls asleep where it is; like an arrival and a waking, no answer is behind it. `weather`: the weather changes
+// to its state number `n`, at the second the world file gives for it; nobody does it and no answer is behind it.
 export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal }
   | { kind: 'arrive' | 'wake' | 'spent'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean }
-  | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[]; changes: Change[] };
+  | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[]; changes: Change[] }
+  | { kind: 'weather'; at: number; n: number };
 // `by` is the name of the model whose answer the record came of, and null for a record no answer is behind. The rules
 // never read it: the same records give the same world whoever answered.
 export type Entry = { seq: number; record: Record; event: Event; by: string | null };
 // Everything a journal amounts to: where everyone is and what each one remembers. `seq` is the next record's number.
 // `deed` is a `do` the world has not answered yet: its answer is the only record that can come next. `results` holds,
 // for each place, the latest of what came of the deeds done there, which the world is shown when it answers the next.
-// `things` is what lies in each place now.
+// `things` is what lies in each place now, and `weather` which state of the world's weather holds and until when.
 export type State = { people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
-  things: Map<string, string | null> };
+  things: Map<string, string | null>; weather: Skies | null };
 // How many words of earlier results a place keeps. The newest one stays whatever its size.
 export const RESULT_WORDS = 400;
 // Where a journal is kept. `append` is one step: its entries are written together or not at all.
@@ -60,6 +65,7 @@ export const refused = (world: World, reason: Refusal) => `${UNUSABLE} ${reason 
 export const CUT = 'Your speech was longer than the limit: the others heard only its first words.';
 const NOTHING = 'Nothing came of it that could be noticed.';
 const SPENT = 'You could stay awake no longer and fell asleep where you were';
+const WEATHER = 'The weather changes:';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
 
@@ -90,7 +96,7 @@ function own(world: World, event: Event): string[] {
 
 export const begin = (world: World): State =>
   ({ people: start(world), minds: new Map(world.characters.map(character => [character.id, blank()])), seq: 0, deed: null,
-    results: new Map(world.places.map(place => [place.id, []])), things: lying(world) });
+    results: new Map(world.places.map(place => [place.id, []])), things: lying(world), weather: sky(world) });
 
 // One record applied to the world: the event it makes, with everyone moved on and every memory brought up to date.
 // A record that the rules could not have produced in this state is refused, and the state is then not to be used.
@@ -122,7 +128,22 @@ export function advance(world: World, state: State, record: Record): Event {
     return event;
   }
   const actor = next(people);
-  if (record.who !== actor.id || record.at !== actor.freeAt) return refuse('is not the next thing to happen in its world');
+  const skies = state.weather, turns = skies !== null && skies.until !== null && skies.until <= actor.freeAt;
+  if (record.kind === 'weather') {
+    // The weather changes when the clock reaches the moment the world file gives, before anyone acts at that moment,
+    // and to the state the world file gives next.
+    if (!world.weather || !skies || !turns || record.at !== skies.until || record.n !== skies.n + 1) return refuse('is not the change of weather that the world file gives next');
+    state.weather = following(world.weather, skies);
+    const now = skyAt(world.weather, state.weather);
+    const event = turnOfWeather(world, people, record.at, now.text, now.indoors);
+    const open = new Set(world.places.filter(place => place.open).map(place => place.id));
+    for (const person of people) {
+      if (event.heard.includes(person.id)) remember(minds.get(person.id)!, lineOf(seq, `${event.clock} ${WEATHER} ${reaches(now, open.has(person.place as string))}`));
+    }
+    state.seq += 1;
+    return event;
+  }
+  if (turns || record.who !== actor.id || record.at !== actor.freeAt) return refuse('is not the next thing to happen in its world');
   const mind = minds.get(actor.id)!;
   let event: Event;
   if (record.kind === 'memory') {

@@ -1,27 +1,27 @@
 // The world of the `live` mode and its rules, with no model in them: named places, who is where, and a clock in whole
 // seconds since the story's start. There is no map and nobody judges outcomes: the rules say only how long an action
 // takes, who perceives it and when each character is free to act again.
+import { boundedOf, amountOf, countOf, cut, isObject, listOf, refuse, secondsOfDay, textOf, TIME, wordsOf } from './reading.ts';
+import { begin as beginWeather, readWeather } from './weather.ts';
+import type { Skies, Weather } from './weather.ts';
+
+export { CHARS_PER_WORD, cut, sizeOf, wordsOf, WorldError } from './reading.ts';
+
 export const MAX_WORDS = 65;
 export const MAX_SECONDS = 3600;
 export const MAX_SLEEP = 43_200;
 // The most words one `facts` of a world file may hold, so that the request to the world has a largest size.
 export const MAX_FACTS = 300;
-// A text of so many words holds at most this many characters for each of them, so that a limit in words is a limit
-// in characters too, whatever a model writes.
-export const CHARS_PER_WORD = 10;
 // What an answer that cannot be used becomes: a wait of this many seconds.
 export const LOST_SECONDS = 30;
-
-// The sentences about a world file that cannot be used; they are this file's own and may be shown.
-export class WorldError extends Error {}
 
 // `facts` is what is true of the world, of a place or of a person and is not seen at once. It is for the world's own
 // answers to what people do and never for a character: no character is sent any of it.
 // `things` is what lies in a place and can be moved, taken or changed. Of a person, `looks` is what anyone near sees
 // and never changes, `pose` how and where in the place it is, `holds` what is in its hands or worn in sight, and `has`
 // what it carries out of sight. The world file gives how these begin; `things`, `pose`, `holds` and `has` then belong
-// to the run's state and change only by the world's answer to a deed.
-export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; minutesTo: { [place: string]: number } };
+// to the run's state and change only by the world's answer to a deed. A place that is `open` lies under the open sky.
+export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; open: boolean; minutesTo: { [place: string]: number } };
 export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null; looks: string | null; pose: string | null;
   holds: string | null; has: string | null };
 // The most words each of these texts may hold, in the world file and in the world's answer alike.
@@ -33,10 +33,10 @@ const CHANGES = ['pose', 'holds', 'has', 'things'] as const;
 // `remote` names the means by which people reach each other from afar; a world with null has none.
 // `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `dayStart` is the
 // time of day everyone last woke before the story; after `tiredHours` awake a person is told it is tired, and after
-// `spentHours` it falls asleep where it is.
+// `spentHours` it falls asleep where it is. `weather` is what the sky does and when, or null for a world without any.
 export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null;
-  travelMinutes: number; shortWords: number; longWords: number; dayStart: string; tiredHours: number; spentHours: number; places: Place[];
-  characters: Character[] };
+  travelMinutes: number; shortWords: number; longWords: number; dayStart: string; tiredHours: number; spentHours: number; weather: Weather | null;
+  places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // One answer of a character, as the schema asks for it: every field is there and an unused one is null.
@@ -53,9 +53,12 @@ export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(rea
 // written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
 // A `result` is the world's answer to the `do` before it, of the same `who`: `text` is what came of the deed, or null
 // when nothing did that could be noticed, and `wakes` and `changes`, which only a result has, the sleepers the deed
-// wakes and what it changes of bodies and belongings.
-export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result'; who: string; place: string; to: string | null;
-  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[]; changes?: Change[] };
+// wakes and what it changes of bodies and belongings. A `weather` is a change of the weather, which nobody does and
+// which has no place: `who` and `place` are empty, `text` is the new weather under the open sky and `indoors`, which
+// only this kind has, what of it reaches someone under a roof, or null.
+export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result' | 'weather'; who: string; place: string; to: string | null;
+  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[]; changes?: Change[];
+  indoors?: string | null };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
 // is the start of its own last action.
@@ -65,19 +68,6 @@ export type Person = { id: string; place: string | null; heading: string | null;
   speaking: number; listening: number; debt: number; since: number; pose: string | null; holds: string | null; has: string | null };
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
-const isObject = (value: unknown): value is { readonly [field: string]: unknown } => !!value && typeof value === 'object' && !Array.isArray(value);
-const refuse = (field: string, problem: string): never => { throw new WorldError(`The world file cannot be used: \`${field}\` ${problem}.`); };
-const textOf = (value: unknown, field: string): string => typeof value === 'string' && value.trim() ? value : refuse(field, 'must be a text that is not empty');
-const amountOf = (value: unknown, field: string, absent: number): number => value === undefined ? absent
-  : typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : refuse(field, 'must be a number above zero');
-const countOf = (value: unknown, field: string, absent: number): number => value === undefined ? absent
-  : typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : refuse(field, 'must be a whole number above zero');
-const listOf = (value: unknown, field: string): unknown[] => Array.isArray(value) && value.length ? value : refuse(field, 'must be a list that is not empty');
-function boundedOf(value: unknown, field: string, limit: number): string | null {
-  if (value === undefined || value === null) return null;
-  const text = textOf(value, field);
-  return sizeOf(text) <= limit ? text : refuse(field, `must hold ${limit} words at most`);
-}
 const factsOf = (value: unknown, field: string) => boundedOf(value, field, MAX_FACTS);
 function idOf(value: unknown, field: string, taken: string[]): string {
   if (typeof value !== 'string' || !ID.test(value)) return refuse(field, 'must be a short id of Latin letters, digits, `_` and `-`');
@@ -87,7 +77,6 @@ function idOf(value: unknown, field: string, taken: string[]): string {
 // A world file as it was parsed from JSON, checked whole. The first thing wrong is one sentence that names the field.
 export function readWorld(value: unknown): World {
   if (!isObject(value)) return refuse('the file', 'must be a JSON object');
-  const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
   if (typeof value.clock !== 'string' || !TIME.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
   const dayStart = value.dayStart ?? '07:00';
   if (typeof dayStart !== 'string' || !TIME.test(dayStart)) return refuse('dayStart', 'must be a time of day like `07:00`');
@@ -98,12 +87,13 @@ export function readWorld(value: unknown): World {
   for (const [index, place] of listOf(value.places, 'places').entries()) {
     const field = `places[${index}]`;
     if (!isObject(place)) return refuse(field, 'must be an object');
+    if (place.open !== undefined && typeof place.open !== 'boolean') return refuse(`${field}.open`, 'must be true or false');
     if (place.minutesTo !== undefined && !isObject(place.minutesTo)) return refuse(`${field}.minutesTo`, 'must be an object');
     const minutesTo: { [place: string]: number } = {};
     for (const [to, minutes] of Object.entries(place.minutesTo ?? {})) minutesTo[to] = amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0);
     places.push({ id: idOf(place.id, `${field}.id`, places.map(known => known.id)), name: textOf(place.name, `${field}.name`),
       about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
-      things: boundedOf(place.things, `${field}.things`, LIMITS.things), minutesTo });
+      things: boundedOf(place.things, `${field}.things`, LIMITS.things), open: place.open === true, minutesTo });
   }
   for (const [index, place] of places.entries()) {
     const unknown = Object.keys(place.minutesTo).find(to => to === place.id || !places.some(known => known.id === to));
@@ -122,7 +112,7 @@ export function readWorld(value: unknown): World {
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
     travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), shortWords: countOf(value.shortWords, 'shortWords', 2000), dayStart, tiredHours, spentHours,
-    longWords: countOf(value.longWords, 'longWords', 400), places, characters };
+    longWords: countOf(value.longWords, 'longWords', 400), weather: readWeather(value.weather, value.clock), places, characters };
 }
 
 // The story's clock at so many seconds from its start, as a time of day. From the second day on it names the day.
@@ -133,21 +123,6 @@ export function clockAt(world: World, at: number): string {
   return day > 1 ? `day ${day} ${time}` : time;
 }
 
-export const wordsOf = (text: string) => text.trim().split(/\s+/).filter(Boolean);
-// The size of a text for every limit in words: its words, or more when it holds more characters than words take.
-export const sizeOf = (text: string) => Math.max(wordsOf(text).length, Math.ceil(text.length / CHARS_PER_WORD));
-// A text as it fits a limit in words: whole, or its beginning, marked as cut.
-export function cut(text: string, limit: number): { text: string; cut: boolean } {
-  if (sizeOf(text) <= limit) return { text, cut: false };
-  let end = 0, count = 0;
-  for (const word of text.matchAll(/\S+/g)) {
-    if (count++ === limit) break;
-    end = word.index + word[0].length;
-  }
-  // The end is not left on half a character.
-  const kept = text.slice(0, Math.min(end, limit * CHARS_PER_WORD)).replace(/[\uD800-\uDBFF]$/, '');
-  return { text: kept.trimEnd(), cut: true };
-}
 export const speechSeconds = (world: World, words: number) => Math.max(2, Math.ceil(words / world.wordsPerMinute * 60));
 // How many words one speech may hold when so many seconds are left before the horizon.
 export const wordLimit = (world: World, secondsLeft: number) => Math.max(1, Math.min(MAX_WORDS, Math.floor(secondsLeft * world.wordsPerMinute / 60)));
@@ -158,8 +133,10 @@ export function travelSeconds(world: World, from: string, to: string): number {
   return Math.max(1, Math.round((minutesTo(from, to) ?? minutesTo(to, from) ?? world.travelMinutes) * 60));
 }
 
-// Everyone begins awake since the world's `dayStart`, placed, holding and carrying what the world file says.
+// What lies in each place and what the sky is like when the story starts.
 export const lying = (world: World) => new Map(world.places.map(place => [place.id, place.things]));
+export const sky = (world: World): Skies | null => world.weather && beginWeather(world.weather);
+// Everyone begins awake since the world's `dayStart`, placed, holding and carrying what the world file says.
 export const start = (world: World): Person[] => world.characters.map(({ id, place, pose, holds, has }) =>
   ({ id, place, pose, holds, has, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0, debt: 86_400 - secondsUntil(world, 0, world.dayStart),
     since: 0 }));
@@ -177,11 +154,10 @@ export const next = (people: Person[]): Person => people.reduce((first, person) 
   person.freeAt < first.freeAt || (person.freeAt === first.freeAt && (person.began ?? -1) < (first.began ?? -1)) ? person : first);
 
 // The moment of the story `at` seconds from its start, as seconds since the midnight before the start.
-const sinceMidnight = (world: World, at: number) => { const [hours, minutes] = world.clock.split(':').map(Number); return hours * 3600 + minutes * 60 + at; };
+const sinceMidnight = (world: World, at: number) => secondsOfDay(world.clock) + at;
 // The seconds from `at` to the next moment the story's clock shows the time of day `until`, a whole day when it shows it now.
 export function secondsUntil(world: World, at: number, until: string): number {
-  const [hours, minutes] = until.split(':').map(Number);
-  return (hours * 3600 + minutes * 60 - sinceMidnight(world, at) % 86_400 + 86_400 - 1) % 86_400 + 1;
+  return (secondsOfDay(until) - sinceMidnight(world, at) % 86_400 + 86_400 - 1) % 86_400 + 1;
 }
 
 // A character's answer as an action it can take now, or the reason why it cannot be used. A field the action does not
@@ -227,7 +203,7 @@ export function readAction(world: World, actor: Person, answer: string): Action 
   return 'action';
 }
 
-// Someone spoke, came or left near this character: its wait or its activity ends. It is free now, or when its own
+// Someone spoke, came or left near this character, or the weather changed over it: its wait or its activity ends. It is free now, or when its own
 // speech and the speech it is hearing have ended.
 const attend = (person: Person, now: number) => { person.freeAt = Math.max(now, person.speaking, person.listening); };
 
@@ -345,4 +321,14 @@ export function drop(world: World, people: Person[], person: Person, now: number
 export function weariness(world: World, person: Person, now: number): 0 | 1 | 2 | 3 {
   const awake = debtAt(person, now), tired = world.tiredHours * 3600, spent = world.spentHours * 3600;
   return awake >= tired + (spent - tired) * 0.75 ? 3 : awake >= tired ? 2 : awake >= tired / 2 ? 1 : 0;
+}
+
+// The weather changes. Everyone awake in a place that the new weather reaches perceives it, and their waiting ends as
+// it does at an arrival; a sleeper and a traveller perceive nothing.
+export function turnOfWeather(world: World, people: Person[], now: number, text: string, indoors: string | null): Event {
+  const roofed = new Set(world.places.filter(place => !place.open).map(place => place.id));
+  const here = people.filter(person => person.place !== null && !person.asleep && (indoors !== null || !roofed.has(person.place)));
+  for (const witness of here) attend(witness, now);
+  return { at: now, clock: clockAt(world, now), kind: 'weather', who: '', place: '', to: null, text, seconds: 0, cut: false,
+    heard: here.map(person => person.id), note: null, indoors };
 }

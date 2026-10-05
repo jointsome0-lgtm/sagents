@@ -17,12 +17,18 @@ import { openState } from './state.ts';
 import { readWorld, sizeOf } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
+// The weather changes every ten minutes of the story, from the fifth on; every third change does not get under a roof.
+// Each text is one word that says which state it is of and whether it is the sky's or the roof's.
+const SKIES = Array.from({ length: 2000 }, (_, index) => ({ at: 300 + index * 600, text: `sky-${index + 1}-0`, indoors: index % 3 ? `roof-${index + 1}-0` : null }));
+const START = 20 * 3600;
 const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '20:00', remote: 'radio', travelMinutes: 3, shortWords: 300, longWords: 60,
   // Thirteen hours awake at the start, and the limit a quarter of an hour on, so that some reach it.
   dayStart: '07:00', tiredHours: 13.1, spentHours: 13.25,
+  weather: { start: { text: 'sky-0-0', indoors: 'roof-0-0' }, changes: SKIES.map(({ at, text, indoors }) => ({ text, indoors, day: Math.floor((START + at) / 86_400) + 1,
+    at: [Math.floor((START + at) % 86_400 / 3600), Math.floor((START + at) / 60) % 60].map(part => String(part).padStart(2, '0')).join(':') })) },
   // Every text of a body, of belongings, of things and of facts is one word that names its kind and its owner, so
   // that a request shows whose it holds.
-  places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {},
+  places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {}, open: index % 2 === 1,
     things: `things-p${index}-0`, facts: `facts-p${index}-0` })),
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
     facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, holds: `holds-c${index}-0`, ...(index % 4 ? { has: `has-c${index}-0` } : {}) })) });
@@ -46,6 +52,7 @@ export const LAWS = {
   spent: 'Nobody acts after being awake for the world\'s limit: at that turn it falls asleep instead.',
   body: 'What a person has, holds and how it is placed, and the things of a place, change only by the world\'s answer to a deed done in that place; a pose is also dropped when its owner leaves.',
   unseen: 'Nobody is sent what another person carries out of sight, or the looks, pose or holdings of a person in another place.',
+  weather: 'The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of it.',
 };
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
@@ -54,8 +61,15 @@ const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.
 // `record` says how many records the journal held at a request, so that the largest request can be placed. While
 // `seen.turns` is a list, it gains for every request who was asked, a resident or for the world the deed's place, at
 // which record, whether for a turn, and the words of bodies, belongings, things and facts that the request held.
-type Asked = { record: number; who: string; turn: boolean; marks: string[] };
+// `sky` holds the words of the weather in the whole request, and `now` those after its history, where a turn says
+// the weather of the moment.
+type Asked = { record: number; who: string; turn: boolean; marks: string[]; sky: string[]; now: string[] };
+const SKY = /\b(?:sky|roof)-\d+-0/g;
 const asker = (request: Request) => /\nYou are Person \d+ \((c\d+)\)\./.exec(request.system!)![1];
+const askedOf = (request: Request, record: number, who: string, turn: boolean): Asked => {
+  const content = request.messages[0].content, body = `${request.system}${content}`;
+  return { record, who, turn, marks: body.match(MARK) ?? [], sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [] };
+};
 const MARK = /\b(?:looks|pose|holds|has|things|facts)-[cp]\d+-\d+/g;
 function standIn(record: () => number) {
   const seen: { largest: number; record: number; turns: Asked[] | null } = { largest: 0, record: 0, turns: [] };
@@ -75,7 +89,7 @@ function standIn(record: () => number) {
       // It changes what it likes of those here and of the place, and names people and places elsewhere and a text
       // that is nobody's to change; now and then it leaves nothing.
       const here = [...body.matchAll(/\n- Person \d+ \((c\d+)\), a/g)].map(match => match[1]), spot = /^The place: Place \d+ \((p\d+)\)/.exec(request.messages[0].content)![1];
-      seen.turns?.push({ record: record(), who: spot, turn: true, marks: body.match(MARK) ?? [] });
+      seen.turns?.push(askedOf(request, record(), spot, true));
       const changes = Array.from({ length: upTo(6) - 1 }, () => {
         const what = ['pose', 'holds', 'has', 'things', 'looks'][upTo(5) - 1];
         const of = what === 'things' ? (random() < 0.7 ? spot : `p${upTo(PLACES) - 1}`) : random() < 0.7 ? here[upTo(here.length) - 1] : `c${upTo(PEOPLE) - 1}`;
@@ -83,10 +97,10 @@ function standIn(record: () => number) {
       });
       answer = roll < 0.1 ? 'no answer' : { result: roll < 0.4 ? null : words(upTo(90)), wakes: [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`], changes };
     } else if ('memory' in (request.schema as { properties: object }).properties) {
-      seen.turns?.push({ record: record(), who: asker(request), turn: false, marks: body.match(MARK) ?? [] });
+      seen.turns?.push(askedOf(request, record(), asker(request), false));
       answer = roll < 0.08 ? { memory: '' } : roll < 0.12 ? { memory: 'x'.repeat(5000) } : { memory: words(roll < 0.3 ? 61 + upTo(100) : upTo(60)) };
     } else {
-      seen.turns?.push({ record: record(), who: asker(request), turn: true, marks: body.match(MARK) ?? [] });
+      seen.turns?.push(askedOf(request, record(), asker(request), true));
       const none = { text: null, to: null, place: null, seconds: null, until: null, note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
       // A time of day at random: for a wait it is mostly out of reach, for a sleep about half the time.
       const until = `${String(upTo(24) - 1).padStart(2, '0')}:${String(upTo(60) - 1).padStart(2, '0')}`;
@@ -116,7 +130,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
-    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0 };
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0, weather: 0, roofless: 0 };
   const sleepEnds = new Map<string, number>();
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
@@ -125,7 +139,11 @@ test('thousands of steps of any answers leave a journal in which every law of th
   // Bodies, belongings and things, counted here from the world file and the records alone.
   const bodies = new Map(world.characters.map(({ id, pose, holds, has }) => [id, { pose, holds, has }]));
   const things = new Map(world.places.map(({ id, things: lying }) => [id, lying]));
-  let at = 0, asked = 0;
+  // Which state of the weather holds, and the words of it that each one has perceived so far.
+  const open = new Set(world.places.filter(item => item.open).map(item => item.id));
+  const felt = new Map(world.characters.map(character => [character.id, new Set<string>()]));
+  const reaching = (state: number, spot: string) => open.has(spot) ? `sky-${state}-0` : state && !SKIES[state - 1].indoors ? null : `roof-${state}-0`;
+  let at = 0, asked = 0, sky = 0;
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
     // A request made when the journal held this many records shows bodies, belongings and things as they stood then.
@@ -138,11 +156,29 @@ test('thousands of steps of any answers leave a journal in which every law of th
       const due = new Set((who === spot ? [things.get(who)!, `facts-${who}-0`, ...near.flatMap(({ id }) => [...seen(id), bodies.get(id)!.has, `facts-${id}-0`])]
         : [`looks-${who}-0`, ...(turn ? [...seen(who), bodies.get(who)!.has] : []), ...near.flatMap(({ id }) => seen(id))]).filter(mark => mark !== null));
       // A word that is not due is another's secret or a text of another place, or else a text that is no longer so.
-      const open = new RegExp(`^(looks|pose|holds)-(${[who, ...near.map(({ id }) => id)].join('|')})-`);
-      for (const mark of marks) law(who === spot || open.test(mark) ? 'body' : 'unseen', due.has(mark), seq);
+      const shown = new RegExp(`^(looks|pose|holds)-(${[who, ...near.map(({ id }) => id)].join('|')})-`);
+      for (const mark of marks) law(who === spot || shown.test(mark) ? 'body' : 'unseen', due.has(mark), seq);
       law('body', due.size === new Set(marks).size, seq);
+      // The world is told the weather outside and what of it gets under the roof of the deed's place. A turn says
+      // the weather as its place gives it, and a resident's request holds no word of a weather it did not perceive.
+      const { sky: words, now } = turns[asked], reaches = reaching(sky, spot as string);
+      if (who === spot) law('weather', isDeepStrictEqual(words, [`sky-${sky}-0`, ...(open.has(spot) || reaches === null ? [] : [reaches])]), seq);
+      else {
+        if (turn && reaches !== null) felt.get(who)!.add(reaches);
+        law('weather', isDeepStrictEqual(now, turn && reaches !== null ? [reaches] : []) && words.every(word => felt.get(who)!.has(word)), seq);
+      }
     }
     const before = journal.all[seq - 1]?.event;
+    if (record.kind === 'weather') {
+      const given = SKIES[sky];
+      law('weather', record.n === sky + 1 && record.at === given.at && event.text === given.text && event.indoors === given.indoors, seq);
+      sky += 1;
+      const reached = world.characters.map(character => character.id).filter(id => !away.has(id) && !asleep.has(id) && reaching(sky, place.get(id)!) !== null);
+      law('weather', isDeepStrictEqual(event.heard, reached), seq);
+      for (const id of reached) felt.get(id)!.add(reaching(sky, place.get(id)!)!);
+      count.weather += 1;
+      if (given.indoors === null) count.roofless += 1;
+    } else law('weather', event.at < SKIES[sky].at, seq);
     law('deed', (before?.kind === 'do') === (record.kind === 'result') && (record.kind !== 'result' || (before.who === record.who && before.at === record.at)), seq);
     if (record.kind === 'result') {
       for (const id of record.wakes) {
@@ -172,7 +208,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
     }
     for (const id of event.heard) {
       law('absent', !away.has(id) && !asleep.has(id), seq);
-      law('place', id !== event.who && (place.get(id) === event.place || (event.kind === 'call' && id === event.to)), seq);
+      law('place', event.kind === 'weather' || (id !== event.who && (place.get(id) === event.place || (event.kind === 'call' && id === event.to))), seq);
     }
     if (event.kind === 'say' || event.kind === 'call') {
       law('limit', sizeOf(event.text as string) <= (record.kind === 'act' ? record.limit : 0), seq);
@@ -231,9 +267,10 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const directory = mkdtempSync(join(tmpdir(), 'sagents-test-'));
   try {
     const path = join(directory, 'world.sqlite');
-    // Many of the runs are one call long, so that some stop between a deed and the world's answer to it.
+    // Many of the runs are one call long, so that some stop between a deed and the world's answer to it. Every other
+    // one is two calls long: an answer that cannot be used is asked for once more, and a run of one call stops there.
     const stops: string[] = [];
-    for (const calls of [300, ...Array.from({ length: 40 }, () => 1), 250, 310]) {
+    for (const calls of [300, ...Array.from({ length: 60 }, (_, index) => 1 + index % 2), 250, 310]) {
       const state = openState(path, source);
       try {
         // Two runs cannot write one file, and a file does not take another world.

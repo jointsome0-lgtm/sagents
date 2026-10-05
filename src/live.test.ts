@@ -207,23 +207,26 @@ test('a character with a model of its own is asked through that connection under
   assert.ok(Object.values(most.sent).flat().every(request => request.model === 'common'));
   // The journal says who answered, by the name as it was given, and nobody for a waking; the totals count each name.
   // Her first sleep had nothing before it to remember, so she woke from it without a rewrite and no model was asked.
-  assert.deepEqual(journal.all.filter(entry => entry.record.who === 'anna').map(entry => [entry.record.kind, entry.by]),
+  assert.deepEqual(journal.all.filter(entry => entry.event.who === 'anna').map(entry => [entry.record.kind, entry.by]),
     [['act', 'api:own'], ['wake', null], ['act', 'api:own'], ['act', 'api:own'], ['memory', 'api:own'], ['wake', null], ['act', 'api:own']]);
-  assert.ok(journal.all.filter(entry => entry.record.who !== 'anna').every(entry => entry.by === 'common'));
+  assert.ok(journal.all.filter(entry => entry.event.who !== 'anna').every(entry => entry.by === 'common'));
   assert.deepEqual(outcome.models['api:own'], { calls: 6, invalid: 1, inputTokens: 600, outputTokens: 60 });
   assert.equal(outcome.models.common.calls, outcome.calls - 6);
 });
 
-test('the world answers a deed from facts, bodies and belongings, a resident is sent its own and what it sees of those with it, and the answer has one place in the journal', async () => {
+test('the world answers a deed from facts, bodies, belongings and the weather, a resident is sent its own, what it sees of those with it and the weather that reaches it, and the answer has one place in the journal', async () => {
   const withFacts = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', facts: 'FACT-WORLD', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
     places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED', things: 'THINGS-RED' },
-      { id: 'blue', name: 'Blue room', about: 'Blue walls.', facts: 'FACT-BLUE', things: 'THINGS-BLUE' }],
+      { id: 'blue', name: 'Blue yard', about: 'Blue walls.', facts: 'FACT-BLUE', things: 'THINGS-BLUE', open: true }],
+    // The second weather does not get under a roof.
+    weather: { start: { text: 'SKY-ONE', indoors: 'ROOF-ONE' }, changes: [{ day: 1, at: '09:01', text: 'SKY-TWO', indoors: null }] },
     characters: [{ id: 'anna', name: 'Anna', place: 'red', sheet: 'SHEET-ANNA', facts: 'FACT-ANNA', looks: 'LOOKS-ANNA', pose: 'POSE-ANNA', holds: 'HOLDS-ANNA', has: 'HAS-ANNA' },
       { id: 'boris', name: 'Boris', place: 'red', sheet: 'SHEET-BORIS', facts: 'FACT-BORIS', looks: 'LOOKS-BORIS', pose: 'POSE-BORIS', holds: 'HOLDS-BORIS', has: 'HAS-BORIS' },
       { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA', looks: 'LOOKS-CLARA', pose: 'POSE-CLARA', holds: 'HOLDS-CLARA', has: 'HAS-CLARA' },
       { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN', facts: 'FACT-DAN', looks: 'LOOKS-DAN', pose: 'POSE-DAN', holds: 'HOLDS-DAN', has: 'HAS-DAN' }] });
   const { sent, respond } = standIn({
-    anna: [act('say', { text: 'SPEECH-WORD', note: 'NOTE-ANNA' }), act('sleep', { seconds: 600 }), JSON.stringify({ memory: 'LONG-ANNA' })],
+    anna: [act('say', { text: 'SPEECH-WORD', note: 'NOTE-ANNA' }), act('sleep', { seconds: 600 }), JSON.stringify({ memory: 'LONG-ANNA' }), act('wait', { seconds: 50 }),
+      act('wait', { seconds: 50 })],
     boris: [act('wait', { seconds: 5 }), act('do', { text: 'shakes Anna', seconds: 10 }), act('go', { place: 'blue' }), act('wait', { seconds: 5 })],
     clara: [act('do', { text: 'opens the window', seconds: 5 })],
     dan: [act('wait', { seconds: 3 })],
@@ -238,7 +241,8 @@ test('the world answers a deed from facts, bodies and belongings, a resident is 
   await runLive({ world: withFacts, respond, model: 'stand-in', minutes: 3, journal, pause: true });
   // The world is sent the facts of the world, the things and facts of the place, all of those in it, and the deed.
   assert.deepEqual(sent.world[1], { model: 'stand-in', system: `${WORLD_INSTRUCTIONS}\n\nThe world: Two rooms\nA house with two rooms.\nFacts: FACT-WORLD`,
-    schema: sent.world[0].schema, messages: [{ role: 'user', content: `The place: Red room (red). Red walls. Things: THINGS-RED. Facts: FACT-RED.
+    schema: sent.world[0].schema, messages: [{ role: 'user', content: `The place: Red room (red), under a roof. Red walls. Things: THINGS-RED. Facts: FACT-RED.
+The weather outside: SKY-ONE. Under this roof: ROOF-ONE.
 Here:
 - Anna (anna), asleep. Looks: LOOKS-ANNA. Pose: POSE-ANNA. Holds: HOLDS-ANNA. Has out of sight: HAS-ANNA. Facts: FACT-ANNA.
 - Boris (boris), awake. Looks: LOOKS-BORIS. Pose: POSE-BORIS. Holds: HOLDS-BORIS. Has out of sight: HAS-BORIS. Facts: FACT-BORIS.
@@ -257,6 +261,20 @@ What comes of it?` }] });
   assert.match(sent.boris[2].messages[0].content, / Here with you:\n- Anna \(anna\)\. Looks: LOOKS-ANNA\. Pose: POSE-NEW\. Holds: HOLDS-ANNA\.\nYou feel rested\. Your pose: POSE-BORIS\. You hold: HOLDS-NEW\. You carry out of sight: nothing\.\n/);
   assert.match(sent.boris[3].messages[0].content, /\n- Dan \(dan\)\. Looks: LOOKS-DAN\. Pose: POSE-DAN\. Holds: HOLDS-DAN\.\nYou feel rested\. You hold: HOLDS-NEW\. You carry out of sight: nothing\.\n/);
   assert.match(sent.boris[0].system ?? '', /\nSHEET-BORIS\nHow you look: LOOKS-BORIS$/);
+  // The weather reaches each one as its place gives it. The change at 09:01 is perceived under the open sky, where it
+  // ends the waiting, and not under the roof, which it does not get under; the world is told it wherever the deed is.
+  assert.match(sent.world[0].messages[0].content, /^The place: Blue yard \(blue\), under the open sky\. Blue walls\. Things: THINGS-BLUE\. Facts: FACT-BLUE\.\nThe weather: SKY-ONE\.\nHere:\n/);
+  assert.match(sent.boris[0].messages[0].content, /\nThe weather, from under the roof: ROOF-ONE\.\nMinutes from here/);
+  assert.match(sent.clara[0].messages[0].content, /\nThe weather: SKY-ONE\.\nMinutes from here/);
+  assert.match(sent.clara.at(-1)!.messages[0].content, /\n09:01:00 The weather changes: SKY-TWO\n[^]*\nThe weather: SKY-TWO\.\nMinutes from here/);
+  assert.match(sent.boris[3].messages[0].content, /\nNow 09:01:17\. [^]*\nThe weather: SKY-TWO\.\nMinutes from here/);
+  assert.equal(JSON.stringify([sent.anna, sent.boris.slice(0, 3)]).includes('SKY-'), false);
+  assert.equal(JSON.stringify([sent.clara, sent.dan]).includes('ROOF-'), false);
+  assert.match(sent.anna.at(-1)!.messages[0].content, /\nNow 09:01:07\. [^]*\nYou feel rested\.[^\n]*\nMinutes from here/);
+  const turned = journal.all.find(({ record }) => record.kind === 'weather')!;
+  assert.deepEqual([turned.record, turned.event.heard, turned.by], [{ kind: 'weather', at: 60, n: 1 }, ['clara', 'dan'], null]);
+  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'weather', at: 0, n: 1 }), JournalError);
+  assert.throws(() => replay(withFacts, journal.all.filter(({ record }) => record.kind !== 'weather').map((entry, seq) => ({ ...entry, seq }))), JournalError);
   // The doer and a witness read what came of the deed; the sleeper it woke reads who woke it and wakes when the deed ends.
   assert.match(sent.boris[2].messages[0].content, /\n09:00:07 You do \(10 s\): shakes Anna\n09:00:07 What came of it: RESULT-WORD\n/);
   assert.match(sent.dan[1].messages[0].content, /\n09:00:00 Clara does \(5 s\): opens the window\n09:00:00 What came of what Clara did: COLD-WORD\n/);

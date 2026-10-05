@@ -171,6 +171,25 @@ Bodies and belongings:
   what another person carries out of sight, anything of a person in another place, or any `things` or `facts`:
   what lies in a place a character learns by a deed and the world's answer to it.
 
+The weather:
+
+- A place of a world file with `"open": true` lies under the open sky; any other is under a roof.
+- A world file may give `weather`, in one of two forms. A schedule is `start`, the weather when the story starts,
+  and `changes`, each with a `day`, counted as the clock counts days, and a time of day `at`. A seeded series is a
+  `seed`, a list of `states`, two at least, and `minutes`, the least and the most minutes a state lasts: which
+  state comes n-th and how long it lasts follow from the seed and n alone, and no state comes twice running. A
+  state, and a change of a schedule, has `text`, what is seen and felt under the open sky, and `indoors`, what of it
+  reaches someone under a roof, or null when nothing does; 40 words each at most.
+- A change is a record of its own kind. The rules put it when the clock reaches its moment, before anyone acts at
+  that moment, and no model is asked. The journal refuses one that is not due or is not the one the world file gives.
+- Everyone awake in an open place perceives a change as a line, and it ends their waiting as an arrival does.
+  Everyone awake under a roof perceives the `indoors` text in the same way when there is one. A sleeper or a
+  traveller perceives nothing of it and is not told later.
+- A turn says the weather as the character's place gives it: `text` in an open place, `indoors` under a roof, and
+  nothing when that is null. The world's request always holds the weather and says whether the deed's place is
+  under the open sky or under a roof.
+- The weather changes no other rule yet: nobody is slowed, chilled or woken by it.
+
 What a character knows:
 
 - A request is built anew at every turn: the system text, which is the same for all characters up to the character's
@@ -196,7 +215,7 @@ The journal and the state file:
 
 - Everything that happens is a record in an append-only journal: an action as it was read from the answer, or the
   reason why the answer could not be used, the world's answer to a deed, an arrival, a waking or a falling asleep
-  at the limit, a memory rewrite. Each record is stored with the event the rules made of it. There is no other
+  at the limit, a change of the weather, a memory rewrite. Each record is stored with the event the rules made of it. There is no other
   state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
   plays the world. Any beginning of a journal is a whole world at that moment.
 - Without `--state` the journal lives in memory and ends with the run. Then the run is the whole story: a turn says
@@ -230,6 +249,8 @@ law and the record:
   deed done in that place; a pose is also dropped when its owner leaves.
 - Nobody is sent what another person carries out of sight, or the looks, pose or holdings of a person in another
   place.
+- The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of
+  it.
 
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again. It prints
@@ -242,8 +263,8 @@ A model for each resident. `--cast <character id>=<model name>`, given as many t
 played by a model of its own; `--model` plays everyone else. A model name is what `--model` takes. Every request
 of a character, a turn or a memory rewrite, goes to its model's connection, so everything a resident perceives is
 sent to the service that plays it. When a connection fails the run ends with its code: nobody is moved to another
-model. Each entry of the journal keeps `by`, the name of the model whose answer it came of, or null for an arrival
-or a waking; `--json` prints it with the event, and the state file keeps it. The rules never read it: the same
+model. Each entry of the journal keeps `by`, the name of the model whose answer it came of, or null for an arrival,
+a waking or a change of the weather; `--json` prints it with the event, and the state file keeps it. The rules never read it: the same
 records give the same world whoever answered. The totals count requests, unusable answers and tokens for each model
 name as well: `--json` has them as `models`, and the text output adds one line for each model when more than one
 played.
