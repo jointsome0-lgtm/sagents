@@ -198,9 +198,10 @@ export function linesOf(world: World, event: Event): string[] {
 export type Player = { respond: (request: Request) => Promise<Result>; model: string; name?: string };
 // `respond`, `model` and `name` play everyone whom `cast` does not name by id. `onEvent` is given the event and the
 // name of the model whose answer it came of, or null. `worldPlayer` answers what came of a deed, and is the same
-// player as everyone's when it is not given.
+// player as everyone's when it is not given. `cutRun` is how many answers of one model cut short at its limit, one
+// after another, end a run: 3 when it is not given.
 export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number;
-  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean };
+  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number };
 export type Tally = { calls: number; invalid: number; overlong: number; inputTokens: number; outputTokens: number };
 // `reason` is `horizon` or `calls` for a run that ended as planned, and the failure's code for one that did not.
 // `seconds` is the story time this run played. `rewrites` counts the memories written anew and `lost` those of them
@@ -211,13 +212,11 @@ export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; secon
   models: { [name: string]: Tally } };
 
 const CUT = Symbol('cut');
-// How many answers of one model cut short at its limit, one after another, end a run.
-const CUT_RUN = 3;
 // Plays the world on from its journal until the horizon, the limit of model calls or a failure of the connection.
 // `calls` counts the answers that arrived or were cut short at the model's limit, a memory's as well as a turn's. Any
 // other failure ends the run at once: nothing is tried again, and the journal holds everything up to it.
 export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
-  pause = false }: Live): Promise<Outcome> {
+  pause = false, cutRun = 3 }: Live): Promise<Outcome> {
   const state = replay(world, journal.entries());
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
@@ -241,7 +240,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   };
   // One answer of a player's model, or null when the run ends here instead. Nobody is moved to another model.
   // An answer that the model's own limit cut short is `CUT`: it was asked for and counts as a call, it cannot be used,
-  // and the run goes on as after any answer that cannot, until `CUT_RUN` answers of one model's name have been cut
+  // and the run goes on as after any answer that cannot, until `cutRun` answers of one model's name have been cut
   // with none of its answers arriving whole in between: a model that only writes to its limit would spend every
   // call the run has. Every other failure of the connection ends the run.
   const cuts = new Map<string, number>();
@@ -259,7 +258,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
           tally.overlong += 1;
         }
         cuts.set(player.name, (cuts.get(player.name) ?? 0) + 1);
-        if (cuts.get(player.name)! < CUT_RUN) return CUT;
+        if (cuts.get(player.name)! < cutRun) return CUT;
       }
       Object.assign(outcome, { status: 'failed', reason: error.code });
       return null;

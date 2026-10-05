@@ -131,6 +131,7 @@ function standIn(record: () => number) {
                     : roll < 0.95 ? { ...none, action: 'sleep', until } : { ...none, action: 'sleep', seconds: upTo(roll < 0.96 ? 43_200 : 1800) };
     }
     // Now and then the model writes on to its limit, whatever it was asked: the connection then fails with this code.
+    // The same request is cut again when it is asked again, so the runs here do not end at three in a row.
     if (random() < 0.02) throw new ModelError('output_limit');
     return { text: typeof answer === 'string' ? answer : JSON.stringify(answer), usage: null };
   };
@@ -140,7 +141,7 @@ function standIn(record: () => number) {
 test('thousands of steps of any answers leave a journal in which every law of the world holds', async () => {
   const journal = memoryStore();
   const { seen, respond } = standIn(() => journal.all.length);
-  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 4000, journal, pause: true });
+  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 4000, journal, pause: true, cutRun: Infinity });
   assert.deepEqual([whole.status, whole.reason, whole.calls], ['done', 'calls', 4000]);
   const turns = seen.turns!;
   seen.turns = null;
@@ -327,7 +328,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
         // Two runs cannot write one file, and a file does not take another world.
         assert.throws(() => openState(path, source, ENVIRONMENT), StateError);
         let last = '';
-        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, onEvent: event => { last = event.kind; } });
+        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, cutRun: Infinity, onEvent: event => { last = event.kind; } });
         stops.push(last);
       } finally { state.close(); }
     }
