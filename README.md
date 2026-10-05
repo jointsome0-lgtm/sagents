@@ -206,15 +206,16 @@ People of a place whom nobody plays:
 - A `say` may have `to`, the id of a figure of the speaker's place; any other `to` of a `say` is dropped. Everyone
   in the place hears the speech as any other. Then the world is asked once, through the model of `--world-model`,
   what the figure answers: it is sent what a deed's request holds of the place and of those in it, without what is
-  hidden and without the results of deeds, with the crowd and every figure of the place with looks and facts, and
-  with what was said to the figures of that place before and answered (300 words of it).
+  hidden, with the crowd and every figure of the place with looks and facts, with what came of the latest earlier
+  deeds there, and with what was said to the figures of that place before and answered (300 words of it).
 - It answers with `reply`, the figure's words, 65 at most, or null when the figure says nothing, and with `changes`
   as a deed's answer has them, for a thing handed over while speaking. The answer begins when the speech ends and
   holds the speaker and everyone who heard the speech as speech does. A sleeper is not woken by it.
 - The answer is a record of its own, right after its speech, and the journal takes nothing else there. An answer
   that cannot be used, or one cut at the model's limit, is asked for once more; after that the figure says nothing.
   So a speech to a figure costs one request more than a speech, and a null answer costs it too.
-- The world's request about a deed also holds the crowd and the figures of the deed's place.
+- The world's request about a deed also holds the crowd and the figures of the deed's place, and what was said to
+  them before and answered, so that a deed is judged with what a figure promised.
 
 Bodies and belongings:
 
@@ -387,8 +388,7 @@ What it lacks:
   character who is on the way when it reaches the limit falls asleep only at its turn after the arrival.
 - A seeded series of weather knows no time of day and no season: its states must read true at any hour.
 - A figure remembers nothing of its own: it is consistent only by its facts and by the latest of what was said to
-  the figures of its place, which all of them share. It does not hear what residents say to each other, does not
-  see what came of deeds, and a deed's request does not hold what was said to it. A crowd is a text and answers nobody.
+  the figures of its place, which all of them share. It does not hear what residents say to each other. A crowd is a text and answers nobody.
 - The world answers only a `do` and a speech to a figure. What is claimed in a speech or a note is checked by nobody.
 - A rewrite is the model's own summary, and nothing checks that it adds no facts. What a character forgets cannot be
   looked up again: the journal keeps it, the character has no way to it.

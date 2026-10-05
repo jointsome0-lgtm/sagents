@@ -141,33 +141,40 @@ const hereOf = (world: World, state: State, place: Place) => world.characters.fl
   return person.place !== place.id ? [] : [`- ${tagged(character)}, ${person.asleep ? 'asleep' : 'awake'}.${seen(character, person)}${
     part('Has out of sight', person.has)}${part('Facts', character.facts)}`];
 });
+// What the world is reminded of when it answers in a place, for a deed and for a figure alike: what came of the
+// latest deeds there, and what was said to the figures of the place and answered.
+const earlierOf = (state: State, place: Place) => {
+  const results = state.results.get(place.id)!, said = state.said.get(place.id)!;
+  return [...(results.length ? ['What came of earlier deeds here:', ...results.map(line => line.text)] : []),
+    ...(said.length ? ['What was said to the people of this place before:', ...said.map(line => line.text)] : [])];
+};
 // The people of a place whom nobody plays, as the world is told of them.
 const crowdOf = (place: Place) => [...(place.crowd === null ? [] : [`Around, played by nobody: ${closed(place.crowd)}`]),
   ...(place.figures.length ? ['Of this place, played by nobody:', ...place.figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}${part('Facts', figure.facts)}`)] : [])];
 // One speech to a figure as the world is asked what the figure answers: the place, who is there, the people of the
-// place, what was said to them before and answered, and the speech.
+// place, what came of earlier deeds there, what was said to the figures before and answered, and the speech.
 function replyOf(world: World, state: State, said: Event): string {
-  const place = world.places.find(item => item.id === said.place)!, earlier = state.said.get(place.id)!;
+  const place = world.places.find(item => item.id === said.place)!;
   return [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Things', state.lies.things.get(place.id)!)}${part('Facts', place.facts)}`,
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...crowdOf(place),
-    ...(earlier.length ? ['What was said to the people of this place before:', ...earlier.map(line => line.text)] : []),
+    ...earlierOf(state, place),
     `Now ${said.clock}. ${named(world.characters, said.who)} says to ${tagged(place.figures.find(figure => figure.id === said.to)!)}: "${said.text}"`,
     `What does ${named(place.figures, said.to)} answer?`].join('\n');
 }
 
 // One deed as the world is asked about it: the place, the other places by name, who is there, what came of earlier
-// deeds there, and the deed. The rules know how long the deed lasts, so they say which of the hidden things of the
+// deeds there, what was said to the figures of the place and answered, and the deed. The rules know how long the deed lasts, so they say which of the hidden things of the
 // place it finds if the world calls it a search; whether the deed goes straight to one is the world's to say.
 function deedOf(world: World, state: State, deed: Event): string {
   const place = world.places.find(item => item.id === deed.place)!;
   const here = hereOf(world, state, place);
-  const earlier = state.results.get(place.id)!, { found, left } = sought(state.lies, deed);
+  const { found, left } = sought(state.lies, deed);
   return [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Things', state.lies.things.get(place.id)!)}${part('Facts', place.facts)}`,
     ...found.map(thing => `Hidden here (${thing.id}). This deed finds it if it is a search of the place, or if it goes straight to the spot named: ${closed(thing.text)}`),
     ...left.map(thing => `Hidden here (${thing.id}). This deed finds it only if it goes straight to the spot named, and not by searching: ${closed(thing.text)}`),
     ...(world.places.length > 1 ? [`Other places, which nobody reaches by a deed: ${world.places.filter(item => item !== place).map(tagged).join(', ')}.`] : []),
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...here, ...crowdOf(place),
-    ...(earlier.length ? ['What came of earlier deeds here:', ...earlier.map(line => line.text)] : []),
+    ...earlierOf(state, place),
     `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`, 'What comes of it?'].join('\n');
 }
 
@@ -192,17 +199,16 @@ export function requestLimit(world: World): number {
     + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + LIMITS.has * CHARS_PER_WORD + laws + local(false);
   const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
   // The world's request: every person could be in one place, each with its body, belongings and facts, under the
-  // things, what is hidden and the results the place keeps, and the weather.
+  // things, what is hidden, the results and the exchanges with its figures that the place keeps, and the weather.
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
   const deed = worldSystemOf(world).length
     + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place) + place.hidden.reduce((sum, thing) => sum + thing.text.length + 140, 0)))
     + LIMITS.things * CHARS_PER_WORD
     + places.reduce((sum, item) => sum + item.length + 2, 0) + 60
     + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + LIMITS.has * CHARS_PER_WORD + 40, 0)
-    + (RESULT_WORDS + 2 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + laws + local(true) + 500;
-  // A figure's answer is asked for with the same place and people, and with what was said there before in place of
-  // the results and of what is hidden.
-  const answer = deed + FIGURE_INSTRUCTIONS.length - WORLD_INSTRUCTIONS.length + (SAID_WORDS - RESULT_WORDS) * (CHARS_PER_WORD + 1);
+    + (RESULT_WORDS + SAID_WORDS + 4 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + laws + local(true) + 600;
+  // A figure's answer is asked for with the same place, people and reminders, without what is hidden.
+  const answer = deed + FIGURE_INSTRUCTIONS.length - WORLD_INSTRUCTIONS.length;
   return Math.max(resident, deed, answer);
 }
 
