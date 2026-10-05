@@ -281,7 +281,12 @@ The world answers a deed:
 - A place keeps for the world what came of the deeds done in it, the latest 400 words of lines and the newest line
   whatever its size. A line is the clock, the doer, the deed and its span, then `Result:` with the world's words
   when there were any, then `In the lists:` with what the rules say went where, was eaten or burned, is in another
-  state or was found, which is the line that those in the place are told, when there was any of that. So a deed
+  state or was found, when there was any of that. It says what those in the place are told, in the world's own
+  words for things: each thing under its label, every move, also one into a pocket of the same person, and where
+  the thing went as the answer's `to` named it and as a request writes that holder (`t38 фотоаппарат went to t1
+  длинный стол.`, `t15 ключ went to t33 походная куртка.`), with no word of where it came from. Told with names
+  alone, a key that went into a jacket reads as gone to the person, and a weak model then answered with the person
+  where it had answered with the jacket. So a deed
   whose answer had entries and no words leaves a line too, and a deed that left neither leaves none. The line is
   written from the postings and not from the answer's words, and every later request to the world in that place
   has it, for a deed and for a figure's answer alike. In two whole runs of 2026-10-05, when a place kept only the

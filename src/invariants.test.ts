@@ -109,7 +109,7 @@ const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.
 // `record` says how many records the journal held at a request, so that the largest request can be placed. While
 // `seen.turns` is a list, it gains for every request who was asked, a resident or for the world the deed's place, at
 // which record, whether for a turn, and the words of bodies, facts and guarded things that the request held; `records`
-// holds every thing the request lists under a label, with its name and count, `labelled` says that it holds a label at all, and `again` counts the requests that
+// holds every thing the request lists under a label, with its name and count, the lines a place keeps left aside, `labelled` says that it holds a label at all, and `again` counts the requests that
 // asked once more after an answer the rules refused, `full` those of them that say a person would carry too much,
 // `deep` those that say a thing would lie deeper than four, and `same` those that say nothing moved.
 // `sky` holds the words of the weather in the whole request, and `now` those after its history, where a turn says
@@ -128,7 +128,7 @@ const SKY = /\b(?:sky|roof)-\d+-0/g, CLOCK = /(?:day \d+ )?\d\d:\d\d:\d\d/g, FEE
 const asker = (request: Request) => /\nYou are Person \d+ \((c\d+)\)\./.exec(request.system!)![1];
 const askedOf = (request: Request, record: number, who: string, turn: boolean): Asked => {
   const content = request.messages[0].content, body = `${request.system}${content}`;
-  return { record, who, turn, marks: body.match(MARK) ?? [], labelled: /\bt\d+\b/.test(content), records: (content.match(/\bt\d+ [^,;[\]\n]*/g) ?? []).map(found => found.replace(/\..*$/, '').trim()), sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [],
+  return { record, who, turn, marks: body.match(MARK) ?? [], labelled: /\bt\d+\b/.test(content), records: (content.replace(/\n[^\n]* Person \d+ did \([^\n]*/g, '').match(/\bt\d+ [^,;[\]\n]*/g) ?? []).map(found => found.replace(/\..*$/, '').trim()), sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [],
     clocks: body.match(CLOCK) ?? [], feels: body.match(FEELS) ?? [], lore: body.match(LORE) ?? [], facts: [...content.matchAll(/\n- (t\d+): (lore-[\w-]+)\.(?=\n)/g)].map(found => `${found[1]} ${found[2]}`),
     doors: [...content.matchAll(/\n- Place \d+ \((p\d+)\): ([^\n]*)/g)].map(found => `${found[1]} ${found[2]}`), sounds: body.split('\n').filter(line => /\bbeyond-|woke you/.test(line)),
     earlier: (/\nWhat came of earlier deeds here:\n((?:[^\n]* Person \d+ did \([^\n]*\n)*)/.exec(content)?.[1] ?? '').split('\n').filter(Boolean) };
@@ -453,9 +453,11 @@ test('thousands of steps of any answers leave a journal in which every law of th
       // The place keeps the world's words and what the rules told of the lists, the latest 400 words of them and
       // the newest line whatever its size, and nothing of a deed that left neither.
       const doer = world.characters.find(({ id }) => id === record.who)!.name, lines = kept.get(event.place)!;
-      const lists = [...event.moved!.filter(posting => posting.out !== posting.into).map(({ name, n, to, out, into }) => `${name}${n === null ? '' : ` ×${n}`} ${
-        to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went from ${out} to ${into}`}.`),
-      ...event.set!.map(({ name, state }) => `${name} is now ${state}.`), ...event.found!.map(({ name, spot }) => `${name} was found: ${spot}.`)].join(' ');
+      // The lists are in it under labels, every posting, with the holder as the answer named it and a request writes it.
+      const holder = (id: string) => { const one = [...world.characters, ...world.places].find(item => item.id === id); return one ? `${one.name} (${id})` : `${id} ${ledger.get(id)!.name}`; };
+      const lists = [...event.moved!.map(({ what, name, n, to, as }) => `${as ?? what} ${name}${n === null ? '' : ` ×${n}`} ${
+        to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went to ${holder(to)}`}.`),
+      ...event.set!.map(({ what, name, state }) => `${what} ${name} is now ${state}.`), ...event.found!.map(({ what, name, spot }) => `${what} ${name} was found: ${spot}.`)].join(' ');
       const shut = (text: string) => /[.!?…]$/.test(text) ? text : `${text}.`;
       if (record.text === null && !lists) count.keptNone += 1;
       else lines.push(`${event.clock} ${doer} did (${before.seconds} s): ${record.text === null ? shut(before.text!) : `${before.text} Result: ${lists ? shut(record.text) : record.text}`}${lists ? ` In the lists: ${lists}` : ''}`);

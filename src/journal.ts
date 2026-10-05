@@ -11,7 +11,7 @@ import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
 import { apply, arrive, isRefusal, next, readAction, sleepersNear, start, wake } from './action.ts';
 import { readReply, reply, readResult, result } from './answer.ts';
-import { stocked } from './things.ts';
+import { all, stocked } from './things.ts';
 import { clockAt, hasClock, timeFor } from './time.ts';
 import { closed } from './reading.ts';
 import { namesOf, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, sizeOf } from './world.ts';
@@ -91,6 +91,17 @@ const told = (event: Event, doer: string) => [
     to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went from ${out} to ${into}`}.`),
   ...(event.set ?? []).map(({ name, state }) => `${name} is now ${state}.`),
   ...(event.found ?? []).map(({ name, spot }) => `${name} was found: ${spot}.`)].join(' ');
+// The same for the world, in the line a place keeps: every posting, each thing under the label it has now, and where
+// it went as the answer's `to` said it and as a request writes that holder, a thing by its label, a person or the
+// place by its id. The other wording names the person and not the pocket, and a model that reads it answers so.
+const listed = (world: World, things: Things, event: Event, doer: string) => {
+  const within = [...things.places.get(event.place)!, ...[...things.people.values()].flat()];
+  const holder = (id: string) => { const one = [...world.characters, ...world.places].find(item => item.id === id); return one ? `${one.name} (${id})` : `${id} ${all(within).find(thing => thing.label === id)?.name ?? ''}`.trim(); };
+  return [...(event.moved ?? []).map(({ what, name, n, to, as }) => `${as ?? what} ${name}${n === null ? '' : ` ×${n}`} ${
+    to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went to ${holder(to)}`}.`),
+  ...(event.set ?? []).map(({ what, name, state }) => `${what} ${name} is now ${state}.`),
+  ...(event.found ?? []).map(({ what, name, spot }) => `${what} ${name} was found: ${spot}.`)].join(' ');
+};
 // A speech as it opens when it is addressed to a figure of the place.
 const toFigure = (world: World, event: Event) => event.kind === 'say' && event.to !== null ? ` to ${named(namesOf(world), event.to)}` : '';
 
@@ -187,12 +198,13 @@ export function advance(world: World, state: State, record: Record): Event {
     for (const id of event.nearby!) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} From ${from}, next door: ${beyond}`));
     for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${present.includes(id) ? `${doer} woke you by this: ${deed.text}`
       : `Something from ${from}, next door, woke you${beyond === null ? '.' : `: ${beyond}`}`}`));
-    if (text !== null || moved) {
+    const lists = listed(world, state.things, event, doer);
+    if (text !== null || lists) {
       // The place keeps what came of the deeds done in it, the latest ones: the world's words, and after them what the
-      // rules say went where, so that a deed that only moved a thing leaves a line and no older line is the last word
+      // rules say went where, under labels, so that a deed that only moved a thing leaves a line and no older line is the last word
       // about a thing that has gone since.
-      const kept = state.results.get(deed.place)!, lists = moved ? ` In the lists: ${moved}` : '';
-      kept.push(lineOf(seq, `${event.clock} ${doer} did (${deed.seconds} s): ${text === null ? closed(deed.text as string) : `${deed.text} Result: ${moved ? closed(text) : text}`}${lists}`));
+      const kept = state.results.get(deed.place)!;
+      kept.push(lineOf(seq, `${event.clock} ${doer} did (${deed.seconds} s): ${text === null ? closed(deed.text as string) : `${deed.text} Result: ${lists ? closed(text) : text}`}${lists ? ` In the lists: ${lists}` : ''}`));
       while (kept.length > 1 && kept.reduce((sum, line) => sum + line.size, 0) > RESULT_WORDS) kept.shift();
     }
     Object.assign(state, { deed: null, seq: seq + 1 });
