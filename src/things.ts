@@ -33,8 +33,9 @@ export const SINKS = ['eaten', 'burned'];
 // were taken from a supply, which is as it was. `out` and `into` say the two holders as anyone sees them: the
 // person who has the thing on them, or the thing of the place it lies in or on, or the place.
 export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string };
-// Why the rules refuse an answer whole: the first entry they cannot take, and the cause.
-export const CODES = ['what', 'hidden', 'fixed', 'n', 'to', 'inside', 'sink', 'full', 'state'] as const;
+// Why the rules refuse an answer whole: the first entry they cannot take, and the cause. `same` is an answer whose
+// moves moved nothing, each to where its thing already was, so that its words would tell of a move the lists never took.
+export const CODES = ['what', 'hidden', 'fixed', 'n', 'to', 'inside', 'sink', 'full', 'same', 'state'] as const;
 export type Refused = { code: typeof CODES[number]; entry: Move | Setting };
 export type Settled = { moved: Posting[]; set: { what: string; name: string; state: string }[]; found: { what: string; name: string; spot: string }[];
   lists: Map<string, Thing[]>; next: number };
@@ -116,7 +117,7 @@ const alike = (one: Thing, other: Thing) => one.name === other.name && one.food 
 // An answer's entries take effect in the place of a deed, among its things and those of the people `present`, whose
 // names `names` gives with the place's: first the hidden things `found` are hidden no longer, then each move in its
 // order, then each state. The first entry that cannot be taken refuses the whole answer, and then nothing has
-// changed. A move to where the thing already is does nothing. A whole record keeps its label and all it holds; a
+// changed. A move to where the thing already is does nothing, and an answer of such moves alone is refused. A whole record keeps its label and all it holds; a
 // part of a count leaves the rest under the old label and is a new record where it went; what is taken from a stock
 // is a new record and the stock stays; counted records of one name and kind at one holder become one. Without
 // `sinks` nothing is eaten or burned. Nothing of `things` is changed here: `keep` does that with what this gives.
@@ -172,6 +173,7 @@ export function settle(things: Things, place: string, present: string[], names: 
     for (const [id, list] of lists) if (all(list).length > (id === place ? MAX_IN_PLACE : MAX_ON_PERSON)) return { code: 'full', entry };
     settled.moved.push({ what: thing.label, name: thing.name, n: thing.n === null && !thing.stock ? null : entry.n, from: slot.key, to: entry.to, as, stock: thing.stock, out, into: where });
   }
+  if (moves.length && !settled.moved.length) return { code: 'same', entry: moves[0] };
   for (const entry of sets) {
     const slot = index().get(entry.what);
     if (slot?.top.hidden) return { code: 'hidden', entry };

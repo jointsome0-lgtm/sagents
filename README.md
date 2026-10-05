@@ -256,7 +256,8 @@ Things:
   does not find, a `fixed` thing, more than there is or more than 20 from a stock, a `to` that is none of the above,
   a thing put into itself or deeper than four, something eaten that is not `food` or burned that does not burn or
   with no fire there, money eaten or burned, more than 30 records on a person or 60 in a place, or a state the
-  thing does not have. More than 12 moves or 6 states make the answer unusable. A refused answer changes nothing
+  thing does not have. It is refused too when it lists moves and every one of them is to where its thing already
+  is, so that nothing moved and its words would tell of a move that the lists never took. Next to a move that changes something, such an entry is passed over as before. More than 12 moves or 6 states make the answer unusable. A refused answer changes nothing
   and never reaches the journal: the world is asked once more with the same request and one sentence that names
   the entry and the cause in the words of its instructions. After the second nothing came of the deed. The totals
   count the answers `refused` and the deeds and speeches left `void`.

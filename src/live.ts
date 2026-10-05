@@ -144,6 +144,7 @@ const CAUSES = {
   inside: 'a thing cannot end up in itself or in what it holds, nor more than four things deep; a thing left on the floor or the ground goes to the id of this place',
   sink: 'only a thing marked `food` is `eaten`, and only a thing marked `burns` is `burned`, with a `fire` here',
   full: `a person carries ${MAX_ON_PERSON} things at most and a place holds ${MAX_IN_PLACE}, with all that they hold`,
+  same: '`to` of this entry is where the thing already is, so nothing moved: an entry says where a thing ends up, and a thing that stays is not listed; a thing left on the floor or the ground goes to the id of this place',
   state: '`state` must be one of the states in the brackets of the `state` mark of that thing',
 };
 const againOf = ({ code, entry }: Refused) => `Your answer to this was not taken and nothing of it happened, because of the entry ${JSON.stringify(entry)}: ${CAUSES[code]}. Answer again.`;
