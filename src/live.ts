@@ -107,46 +107,64 @@ export function linesOf(world: World, event: Event): string[] {
 // `journal` is where the world's records are kept and read from: a run continues the world it finds there. `pause`
 // says that this run's end is not the story's: then nobody is told how much is left and speech does not shorten
 // towards the end. `minutes` count from where the world stands.
-export type Live = { world: World; respond: (request: Request) => Promise<Result>; model: string; minutes?: number; calls?: number;
-  onEvent?: (event: Event) => unknown; journal?: Store; pause?: boolean };
+// A connection and the model to ask of it. `name` is the model's name as it was given, which the journal and the
+// totals keep; it is `model` when it is not given.
+export type Player = { respond: (request: Request) => Promise<Result>; model: string; name?: string };
+// `respond`, `model` and `name` play everyone whom `cast` does not name by id. `onEvent` is given the event and the
+// name of the model whose answer it came of, or null.
+export type Live = Player & { world: World; cast?: { [id: string]: Player }; minutes?: number; calls?: number;
+  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean };
+export type Tally = { calls: number; invalid: number; inputTokens: number; outputTokens: number };
 // `reason` is `horizon` or `calls` for a run that ended as planned, and the failure's code for one that did not.
 // `seconds` is the story time this run played. `rewrites` counts the memories written anew and `lost` those of them
-// whose answer could not be used twice, so that the lines they were to keep are forgotten.
-export type Outcome = { status: 'done' | 'failed'; reason: string; seconds: number; calls: number; invalid: number; rewrites: number; lost: number;
-  inputTokens: number; outputTokens: number };
+// whose answer could not be used twice, so that the lines they were to keep are forgotten. `invalid` counts every
+// answer that could not be used, whatever was asked. `models` holds the same counts for each model's name.
+export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; seconds: number; rewrites: number; lost: number;
+  models: { [name: string]: Tally } };
 
 // Plays the world on from its journal until the horizon, the limit of model calls or a failure of the connection.
 // `calls` counts the answers that arrived, a memory's as well as a turn's. A failure ends the run at once: nothing is
 // tried again, and the journal holds everything up to it.
-export async function runLive({ world, respond, model, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
+export async function runLive({ world, respond, model, name, cast = {}, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
   pause = false }: Live): Promise<Outcome> {
   const state = replay(world, journal.entries());
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(world), shared = sharedOf(world);
-  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, rewrites: 0, lost: 0, inputTokens: 0, outputTokens: 0 };
+  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, rewrites: 0, lost: 0, inputTokens: 0, outputTokens: 0,
+    models: {} };
+  // Who plays whom. Every request of a character, a turn or a memory, goes to its own connection under its own model.
+  const everyone = { respond, model, name: name ?? model };
+  const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
+  const tallyOf = (player: { name: string }) => outcome.models[player.name] ??= { calls: 0, invalid: 0, inputTokens: 0, outputTokens: 0 };
+  const unusable = (player: { name: string }) => {
+    outcome.invalid += 1;
+    tallyOf(player).invalid += 1;
+  };
   // The one way anything happens: the record goes through the rules, then to the journal, then to whoever watches.
-  const happened = async (record: Record) => {
+  const happened = async (record: Record, by: string | null = null) => {
     const seq = state.seq;
     const event = advance(world, state, record);
-    journal.append([{ seq, record, event }]);
-    await onEvent(event);
+    journal.append([{ seq, record, event, by }]);
+    await onEvent(event, by);
   };
-  // One answer of the model, or null when the run ends here instead.
-  const ask = async (request: Request): Promise<string | null> => {
+  // One answer of a player's model, or null when the run ends here instead. Nobody is moved to another model.
+  const ask = async (player: Required<Player>, content: Omit<Request, 'model'>): Promise<string | null> => {
     if (outcome.calls >= most) {
       outcome.reason = 'calls';
       return null;
     }
     let answer: Result;
-    try { answer = await respond(request); } catch (error) {
+    try { answer = await player.respond({ model: player.model, ...content }); } catch (error) {
       if (!(error instanceof ModelError)) throw error;
       Object.assign(outcome, { status: 'failed', reason: error.code });
       return null;
     }
-    outcome.calls += 1;
-    outcome.inputTokens += answer.usage?.inputTokens ?? 0;
-    outcome.outputTokens += answer.usage?.outputTokens ?? 0;
+    for (const tally of [outcome, tallyOf(player)]) {
+      tally.calls += 1;
+      tally.inputTokens += answer.usage?.inputTokens ?? 0;
+      tally.outputTokens += answer.usage?.outputTokens ?? 0;
+    }
     return answer.text;
   };
 
@@ -167,23 +185,24 @@ export async function runLive({ world, respond, model, minutes = 30, calls: most
       await happened({ kind: 'wake', who, at: now });
       continue;
     }
-    const system = systemOf(world, shared, who);
+    const system = systemOf(world, shared, who), player = playerOf(who);
     // A sleeper who is due to wake folds all it lived through before the sleep. Anyone else folds its oldest lines
     // while it holds more than the short-term memory may: this is what bounds a request whatever the model chooses.
     const folding = actor.asleep ? mind.lines : mind.size > world.shortWords ? oldest(mind, world.shortWords) : null;
     if (folding) {
-      const request = { model, system, schema: MEMORY_SCHEMA,
+      const request = { system, schema: MEMORY_SCHEMA,
         messages: [{ role: 'user' as const, content: [...known(mind, folding), rewriteOf(world, clockAt(world, now), actor.asleep)].join('\n') }] };
       // An answer that cannot be used gets one more try. After that the old text stays and the lines are lost.
       let memory = null;
       for (let attempt = 0; attempt < 2 && !memory; attempt += 1) {
-        const answer = await ask(request);
+        const answer = await ask(player, request);
         if (answer === null) return outcome;
         memory = readMemory(answer, world.longWords);
+        if (!memory) unusable(player);
       }
       outcome.rewrites += 1;
       if (!memory) outcome.lost += 1;
-      await happened({ kind: 'memory', who, at: now, text: memory?.text ?? null, upTo: folding.at(-1)!.seq, cut: memory?.cut ?? false });
+      await happened({ kind: 'memory', who, at: now, text: memory?.text ?? null, upTo: folding.at(-1)!.seq, cut: memory?.cut ?? false }, player.name);
       continue;
     }
     const place = actor.place;
@@ -193,7 +212,7 @@ export async function runLive({ world, respond, model, minutes = 30, calls: most
       return person !== actor && person.place === place ? [`${tagged(character)}${person.asleep ? ', asleep' : ''}`] : [];
     });
     const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now);
-    const answer = await ask({ model, system, schema, messages: [{ role: 'user', content: [
+    const answer = await ask(player, { system, schema, messages: [{ role: 'user', content: [
       ...known(mind, mind.lines),
       `Now ${clockAt(world, now)}. You are in ${tagged(world.places.find(item => item.id === place)!)}. ${
         others.length ? `Here with you: ${others.join('; ')}.` : 'Nobody else is here.'}`,
@@ -203,7 +222,7 @@ export async function runLive({ world, respond, model, minutes = 30, calls: most
     ].join('\n') }] });
     if (answer === null) return outcome;
     const action = readAction(world, actor, answer);
-    if (typeof action === 'string') outcome.invalid += 1;
-    await happened({ kind: 'act', who, at: now, limit, action });
+    if (typeof action === 'string') unusable(player);
+    await happened({ kind: 'act', who, at: now, limit, action }, player.name);
   }
 }

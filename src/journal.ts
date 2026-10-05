@@ -19,7 +19,9 @@ export class JournalError extends Error {}
 export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal }
   | { kind: 'arrive' | 'wake'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean };
-export type Entry = { seq: number; record: Record; event: Event };
+// `by` is the name of the model whose answer the record came of, and null for a record no answer is behind. The rules
+// never read it: the same records give the same world whoever answered.
+export type Entry = { seq: number; record: Record; event: Event; by: string | null };
 // Everything a journal amounts to: where everyone is and what each one remembers. `seq` is the next record's number.
 export type State = { people: Person[]; minds: Map<string, Mind>; seq: number };
 // Where a journal is kept. `append` is one step: its entries are written together or not at all.

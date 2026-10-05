@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { StateError } from './journal.ts';
 import type { Entry, Store } from './journal.ts';
 
-const FORMAT = '1';
+const FORMAT = '2';
 // SQLite's own result codes for a file another connection holds, and for a file that is not a database.
 const BUSY = 5, NOT_A_DATABASE = 26;
 const sqliteCode = (error: unknown) => error instanceof Error && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode & 0xff : null;
@@ -26,8 +26,9 @@ export function openState(path: string, world: string): Store & { close(): void 
     throw error;
   }
   try {
+    // The format is looked at before the journal's table is touched, so a file of another shape is refused in words.
     database.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT; '
-      + 'CREATE TABLE IF NOT EXISTS journal (seq INTEGER PRIMARY KEY, record TEXT NOT NULL, event TEXT NOT NULL) STRICT');
+      + 'CREATE TABLE IF NOT EXISTS journal (seq INTEGER PRIMARY KEY, record TEXT NOT NULL, event TEXT NOT NULL, by TEXT) STRICT');
     const known = new Map(database.prepare('SELECT key, value FROM meta').all().map(row => [row.key, row.value]));
     if (!known.size) database.prepare('INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)').run('format', FORMAT, 'world', hash);
     else if (known.get('format') !== FORMAT) throw new StateError('The state file cannot be used: it was written by another version of `live`.');
@@ -38,12 +39,14 @@ export function openState(path: string, world: string): Store & { close(): void 
     if (sqliteCode(error) === NOT_A_DATABASE) throw new StateError('The state file cannot be used: it is not a state file of `live`.');
     throw error;
   }
-  const insert = database.prepare('INSERT INTO journal (seq, record, event) VALUES (?, ?, ?)');
+  const insert = database.prepare('INSERT INTO journal (seq, record, event, by) VALUES (?, ?, ?, ?)');
   return {
     // Read row by row: a journal is not held in memory whole. The texts are JSON, which keeps every character as it was.
     *entries() {
-      for (const row of database.prepare('SELECT seq, record, event FROM journal ORDER BY seq').iterate()) {
-        try { yield { seq: row.seq as number, record: JSON.parse(row.record as string), event: JSON.parse(row.event as string) }; } catch (error) {
+      for (const row of database.prepare('SELECT seq, record, event, by FROM journal ORDER BY seq').iterate()) {
+        try {
+          yield { seq: row.seq as number, record: JSON.parse(row.record as string), event: JSON.parse(row.event as string), by: row.by as string | null };
+        } catch (error) {
           if (!(error instanceof SyntaxError)) throw error;
           throw new StateError('The state file cannot be used: a record in it is damaged.');
         }
@@ -52,7 +55,7 @@ export function openState(path: string, world: string): Store & { close(): void 
     append(entries: Entry[]) {
       database.exec('BEGIN');
       try {
-        for (const { seq, record, event } of entries) insert.run(seq, JSON.stringify(record), JSON.stringify(event));
+        for (const { seq, record, event, by } of entries) insert.run(seq, JSON.stringify(record), JSON.stringify(event), by);
         database.exec('COMMIT');
       } catch (error) {
         database.exec('ROLLBACK');

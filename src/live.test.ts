@@ -106,7 +106,8 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.match(sent.anna[3].messages[0].content, /may hold 65 words at most\. 1 min 15 s of the story are left\.$/);
   // Nobody is free before the horizon any more: the run ends without another call.
   assert.deepEqual({ ...outcome, events: journal.all.length },
-    { status: 'done', reason: 'horizon', seconds: 180, calls: 8, invalid: 1, rewrites: 0, lost: 0, inputTokens: 800, outputTokens: 80, events: 8 });
+    { status: 'done', reason: 'horizon', seconds: 180, calls: 8, invalid: 1, rewrites: 0, lost: 0, inputTokens: 800, outputTokens: 80, events: 8,
+      models: { 'stand-in': { calls: 8, invalid: 1, inputTokens: 800, outputTokens: 80 } } });
 
   const short = standIn({});
   const few = memoryStore();
@@ -187,4 +188,22 @@ test('a time of day is the next moment the clock shows it, within the span the a
   assert.equal(taken(wait).seconds, 600);
   assert.equal(taken('here').seconds, 30);
   for (const action of [{ ...wait, until: '10:00' }, 'tired', null]) assert.throws(() => taken(action), JournalError);
+});
+
+test('a character with a model of its own is asked through that connection under that name, for a turn and for a memory alike', async () => {
+  const most = standIn({ boris: [act('say', { text: 'hello' })] });
+  const hers = standIn({ anna: [act('sleep', { seconds: 20 }), 'no memory', JSON.stringify({ memory: 'LONG-ANNA' }), act('wait', { seconds: 600 })] });
+  const journal = memoryStore();
+  const outcome = await runLive({ world, respond: most.respond, model: 'common', cast: { anna: { respond: hers.respond, model: 'own', name: 'api:own' } },
+    minutes: 1, journal });
+  // Anna's four requests went to her connection and nobody else's did; each carries the model of its connection.
+  assert.deepEqual([Object.keys(hers.sent), hers.sent.anna.map(request => request.model)], [['anna'], ['own', 'own', 'own', 'own']]);
+  assert.deepEqual(Object.keys(most.sent).sort(), ['boris', 'clara', 'dan']);
+  assert.ok(Object.values(most.sent).flat().every(request => request.model === 'common'));
+  // The journal says who answered, by the name as it was given, and nobody for a waking; the totals count each name.
+  assert.deepEqual(journal.all.filter(entry => entry.record.who === 'anna').map(entry => [entry.record.kind, entry.by]),
+    [['act', 'api:own'], ['memory', 'api:own'], ['wake', null], ['act', 'api:own']]);
+  assert.ok(journal.all.filter(entry => entry.record.who !== 'anna').every(entry => entry.by === 'common'));
+  assert.deepEqual(outcome.models['api:own'], { calls: 4, invalid: 1, inputTokens: 400, outputTokens: 40 });
+  assert.equal(outcome.models.common.calls, outcome.calls - 4);
 });

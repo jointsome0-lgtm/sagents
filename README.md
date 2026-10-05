@@ -90,7 +90,8 @@ sign-in and the first real request have not happened yet.
 ### A live world
 
 ```sh
-node src/cli.ts live examples/night-station.json [--model <id>] [--minutes <n>] [--calls <n>] [--state <file>] [--json]
+node src/cli.ts live examples/night-station.json [--model <id>] [--cast <character>=<id>]... \
+  [--minutes <n>] [--calls <n>] [--state <file>] [--json]
 ```
 
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
@@ -178,8 +179,19 @@ law and the record:
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again. It prints
 one line per event, or one JSON object per event with `--json`, and then one line of totals: the status and its
-reason, the story minutes played, the requests, the unusable answers, the memory rewrites and how many of them were
-lost, and the tokens. In the text output a memory rewrite is shown whole, marked as private like a note.
+reason, the story minutes played, the requests, the unusable answers of every kind, the memory rewrites and how
+many of them were lost, and the tokens. In the text output a memory rewrite is shown whole, marked as private like a
+note.
+
+A model for each resident. `--cast <character id>=<model name>`, given as many times as needed, has that character
+played by a model of its own; `--model` plays everyone else. A model name is what `--model` takes. Every request
+of a character, a turn or a memory rewrite, goes to its model's connection, so everything a resident perceives is
+sent to the service that plays it. When a connection fails the run ends with its code: nobody is moved to another
+model. Each entry of the journal keeps `by`, the name of the model whose answer it came of, or null for an arrival
+or a waking; `--json` prints it with the event, and the state file keeps it. The rules never read it: the same
+records give the same world whoever answered. The totals count requests, unusable answers and tokens for each model
+name as well: `--json` has them as `models`, and the text output adds one line for each model when more than one
+played.
 
 `npm run bench` plays a synthetic town with a stand-in that answers at once and prints what a step costs and how
 large the requests were; `node src/bench.ts 1000 100 50` is 1000 characters in 100 places with 50 calls each.
