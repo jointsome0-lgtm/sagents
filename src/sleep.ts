@@ -2,7 +2,8 @@
 // the falling asleep of someone who stayed awake to the limit. No model and no disk here.
 import type { Law } from './laws.ts';
 import { amountOf, refuse, TIME } from './reading.ts';
-import { awakeIn, clockAt, secondsUntil, timeFor } from './world.ts';
+import { awakeIn } from './action.ts';
+import { clockAt, secondsUntil, timeFor } from './time.ts';
 import type { Person, World } from './world.ts';
 
 // `dayStart` is the time of day everyone last woke before the story. After `tiredHours` awake a person is told it is

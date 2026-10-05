@@ -9,8 +9,13 @@ import { blank, idle, lineOf, remember, rewrite } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
-import { apply, arrive, clockAt, hasClock, lying, isRefusal, namesOf, readReply, reply, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, start, timeFor, wake } from './world.ts';
-import type { Action, Change, Event, Lying, Person, Refusal, World } from './world.ts';
+import { apply, arrive, isRefusal, next, readAction, start, wake } from './action.ts';
+import { lying, readReply, reply, readResult, result } from './answer.ts';
+import { clockAt, hasClock, timeFor } from './time.ts';
+import { namesOf, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, sizeOf } from './world.ts';
+import type { Action, Refusal } from './action.ts';
+import type { Change, Lying } from './answer.ts';
+import type { Event, Person, World } from './world.ts';
 
 // The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
 export class JournalError extends Error {}

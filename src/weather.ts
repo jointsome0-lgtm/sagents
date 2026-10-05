@@ -3,7 +3,8 @@
 // time: the same settings always give the same weather at the same moment. No model and no disk here.
 import type { Law } from './laws.ts';
 import { boundedOf, CHARS_PER_WORD, closed, countOf, isObject, listOf, refuse, secondsOfDay, textOf, TIME } from './reading.ts';
-import { attend, clockAt, timeFor } from './world.ts';
+import { attend } from './action.ts';
+import { clockAt, timeFor } from './time.ts';
 
 // The most words either text of one state may hold, so that a request has a largest size.
 export const SKY_WORDS = 40;

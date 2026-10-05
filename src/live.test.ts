@@ -10,7 +10,8 @@ import { advance, begin, JournalError, memoryStore, replay } from './journal.ts'
 import type { Record } from './journal.ts';
 import { INSTRUCTIONS, runLive, WORLD_INSTRUCTIONS } from './live.ts';
 import { readWorld } from './laws.ts';
-import { readAction, travelSeconds } from './world.ts';
+import { readAction } from './action.ts';
+import { travelSeconds } from './time.ts';
 
 // Sixty words a minute: one word is one second. Both rooms have a clock, so everyone reads the exact time.
 const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,

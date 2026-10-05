@@ -6,7 +6,10 @@ import { idle, oldest, readMemory } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { LAWS } from './laws.ts';
 import { closed } from './reading.ts';
-import { CHARS_PER_WORD, clockAt, DRIFT, hasClock, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, namesOf, next, readAction, readReply, readResult, sensed, SENSED, sought, travelSeconds, wordLimit } from './world.ts';
+import { next, readAction } from './action.ts';
+import { readReply, readResult, sought } from './answer.ts';
+import { clockAt, DRIFT, hasClock, sensed, SENSED, travelSeconds, wordLimit } from './time.ts';
+import { CHARS_PER_WORD, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, namesOf } from './world.ts';
 import type { Event, Person, Place, World } from './world.ts';
 
 // The `live` mode: every character of a world is played by a model, one call for one action, under the story's clock.

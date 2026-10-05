@@ -16,7 +16,8 @@ import type { Entry } from './journal.ts';
 import { requestLimit, runLive } from './live.ts';
 import { openState } from './state.ts';
 import { readWorld } from './laws.ts';
-import { clockAt, sizeOf } from './world.ts';
+import { clockAt } from './time.ts';
+import { sizeOf } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
 // The weather changes every ten minutes of the story, from the fifth on; every third change does not get under a roof.

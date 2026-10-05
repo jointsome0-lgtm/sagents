@@ -486,7 +486,7 @@ npm run size                    # how large the core is, in tokens
 ```
 
 `npm run size` counts tokens (`o200k_base`) of three things: the core of the live mode without model and disk
-(`src/world.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`), `src/live.ts`, and
+(`src/world.ts`, `time.ts`, `action.ts`, `answer.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`), `src/live.ts`, and
 all tracked text except `LICENSE` and `package-lock.json`. It reads the working tree, or the Git index with
 `npm run size -- --index`. The core is meant to stay small enough to read whole, and its count falls into one of four bands,
 around the owner's mark of 70,000 tokens, which is there to steer by: up to 56,000 tokens, four fifths of the mark,
