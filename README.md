@@ -150,6 +150,22 @@ The journal and the state file:
   another, so a world file cannot be edited while its world is under way. A second run on a file that is in use is
   refused.
 
+The laws of the world. Whatever the model answers, these hold in every journal. `npm test` plays thirty characters
+for thousands of steps with answers of every kind, checks each law from the journal alone, and a failure names the
+law and the record:
+
+- Time never goes back.
+- Nobody perceives what happened in another place, except the one a call was made to.
+- A traveller or a sleeper perceives nothing and takes no action.
+- Nobody acts before a speech they are hearing or making has ended.
+- A speech never holds more words than its turn allowed.
+- A traveller arrives in the place it set out for.
+- A long-term memory never exceeds its limit in words.
+- The record up to which a character's lines were folded never moves back.
+- No request to the model exceeds the size fixed by the world file.
+- Replaying the records gives every stored event again, and a journal that was changed is refused.
+- A run stopped and continued from its file gives the same journal as one that never stopped.
+
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again. It prints
 one line per event, or one JSON object per event with `--json`, and then one line of totals: the status and its

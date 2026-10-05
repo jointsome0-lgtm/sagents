@@ -1,11 +1,13 @@
 // The guard of the live world's rules: a world of thirty people is played for thousands of steps by a stand-in whose
 // answer is a function of the request, and then the journal alone is checked against what must hold whatever a model
-// answers. It is here because a broken rule shows one character another's life, or loses a memory, without any error.
+// answers: the laws below. It is here because a broken law shows one character another's life, or loses a memory,
+// without any error. README lists the same laws, word for word.
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { isDeepStrictEqual } from 'node:util';
 
 import type { Request } from './chatgpt.ts';
 import { JournalError, memoryStore, replay, StateError } from './journal.ts';
@@ -20,13 +22,30 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.` })) });
 const world = readWorld(JSON.parse(source));
 
+// The laws of a live world, each one sentence. A run that breaks one fails with that sentence and the record's number.
+export const LAWS = {
+  time: 'Time never goes back.',
+  place: 'Nobody perceives what happened in another place, except the one a call was made to.',
+  absent: 'A traveller or a sleeper perceives nothing and takes no action.',
+  speech: 'Nobody acts before a speech they are hearing or making has ended.',
+  limit: 'A speech never holds more words than its turn allowed.',
+  arrival: 'A traveller arrives in the place it set out for.',
+  memory: 'A long-term memory never exceeds its limit in words.',
+  folded: 'The record up to which a character\'s lines were folded never moves back.',
+  request: 'No request to the model exceeds the size fixed by the world file.',
+  replay: 'Replaying the records gives every stored event again, and a journal that was changed is refused.',
+  resume: 'A run stopped and continued from its file gives the same journal as one that never stopped.',
+};
+const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
+
 // The same request always gets the same answer, so the same world always gets the same journal. The answers are of
 // every kind, the unusable and the oversized among them.
-function standIn() {
-  const seen = { largest: 0 };
+// `record` says how many records the journal held at a request, so that the largest request can be placed.
+function standIn(record: () => number) {
+  const seen = { largest: 0, record: 0 };
   const respond = async (request: Request) => {
     const body = `${request.system}${request.messages.map(message => message.content).join('')}`;
-    seen.largest = Math.max(seen.largest, body.length);
+    if (body.length > seen.largest) Object.assign(seen, { largest: body.length, record: record() });
     let seed = 2166136261;
     for (let index = 0; index < body.length; index += 1) seed = Math.imul(seed ^ body.charCodeAt(index), 16777619) >>> 0;
     const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
@@ -50,9 +69,9 @@ function standIn() {
   return { seen, respond };
 }
 
-test('thousands of steps of any answers leave a journal in which every rule of the world and of memory holds', async () => {
-  const { seen, respond } = standIn();
+test('thousands of steps of any answers leave a journal in which every law of the world holds', async () => {
   const journal = memoryStore();
+  const { seen, respond } = standIn(() => journal.all.length);
   const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 4000, journal, pause: true });
   assert.deepEqual([whole.status, whole.reason, whole.calls], ['done', 'calls', 4000]);
 
@@ -60,26 +79,20 @@ test('thousands of steps of any answers leave a journal in which every rule of t
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, unusable: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0 };
   let at = 0;
-  for (const [index, { seq, record, event }] of journal.all.entries()) {
-    const where = `record ${index}`;
-    assert.equal(seq, index, where);
-    // Time never goes back.
-    assert.ok(event.at >= at && event.at === record.at, where);
+  for (const { seq, record, event } of journal.all) {
+    law('time', event.at >= at, seq);
     at = event.at;
-    assert.equal(event.who, record.who, where);
     if (record.kind === 'act') {
-      // A traveller or a sleeper takes no action, and nobody acts before a speech they hear or make has ended.
-      assert.ok(!away.has(record.who) && !asleep.has(record.who), where);
-      assert.ok(record.at >= (held.get(record.who) ?? 0), where);
+      law('absent', !away.has(record.who) && !asleep.has(record.who), seq);
+      law('speech', record.at >= (held.get(record.who) ?? 0), seq);
       if (!record.action) count.unusable += 1;
     }
     for (const id of event.heard) {
-      // Nobody perceives what happened in another place, except the one called; a traveller or a sleeper perceives nothing.
-      assert.ok(id !== event.who && !away.has(id) && !asleep.has(id), where);
-      assert.ok(place.get(id) === event.place || (event.kind === 'call' && id === event.to), where);
+      law('absent', !away.has(id) && !asleep.has(id), seq);
+      law('place', id !== event.who && (place.get(id) === event.place || (event.kind === 'call' && id === event.to)), seq);
     }
     if (event.kind === 'say' || event.kind === 'call') {
-      assert.ok(sizeOf(event.text as string) <= (record.kind === 'act' ? record.limit : 0), where);
+      law('limit', sizeOf(event.text as string) <= (record.kind === 'act' ? record.limit : 0), seq);
       for (const id of [event.who, ...event.heard]) held.set(id, Math.max(held.get(id) ?? 0, event.at + event.seconds));
       count[event.kind] += 1;
       if (event.cut) count.cut += 1;
@@ -88,49 +101,54 @@ test('thousands of steps of any answers leave a journal in which every rule of t
       away.set(event.who, event.to as string);
       count.go += 1;
     } else if (event.kind === 'arrive') {
-      assert.equal(away.get(event.who), event.place, where);
+      law('arrival', away.get(event.who) === event.place, seq);
       away.delete(event.who);
       place.set(event.who, event.place);
     } else if (event.kind === 'sleep') {
       asleep.add(event.who);
       count.sleep += 1;
     } else if (event.kind === 'wake') {
-      assert.ok(asleep.delete(event.who), where);
+      asleep.delete(event.who);
       count.wake += 1;
     } else if (event.kind === 'memory' && record.kind === 'memory') {
-      // A long-term text never exceeds its limit, and the folded position only moves on.
-      assert.ok(record.text === null || sizeOf(record.text) <= world.longWords, where);
-      assert.ok(record.upTo > (folded.get(record.who) ?? -1) && record.upTo < seq, where);
+      law('memory', record.text === null || sizeOf(record.text) <= world.longWords, seq);
+      law('folded', record.upTo > (folded.get(record.who) ?? -1) && record.upTo < seq, seq);
       folded.set(record.who, record.upTo);
       count.memory += 1;
       if (record.cut) count.memoryCut += 1;
       if (record.text === null) count.memoryLost += 1;
     } else if (event.kind === 'do') count.do += 1;
   }
-  // The run had all of it in it, or the checks above proved little.
+  // The run had all of it in it, or the laws above were tried on little.
   for (const [kind, times] of Object.entries(count)) assert.ok(times >= 5, `${kind} happened ${times} times`);
   assert.deepEqual([whole.rewrites, whole.lost], [count.memory, count.memoryLost]);
-  // No request exceeds the world's fixed bound.
-  assert.ok(seen.largest <= requestLimit(world), `a request of ${seen.largest} characters`);
+  law('request', seen.largest <= requestLimit(world), seen.record);
 
-  // Replaying the records gives every event again, and a journal that was touched is refused by name.
-  assert.equal(replay(world, journal.all).seq, journal.all.length);
+  // The record a replay refuses, which the journal's own sentence names, or null when it takes them all.
+  const refused = (entries: Entry[]) => {
+    try { replay(world, entries); } catch (error) {
+      if (!(error instanceof JournalError)) throw error;
+      return Number(/record (\d+)/.exec(error.message)![1]);
+    }
+    return null;
+  };
+  law('replay', refused(journal.all) === null, refused(journal.all) ?? 0);
   const touched = (change: (entries: Entry[]) => unknown) => {
     const entries = structuredClone(journal.all.slice(0, 500));
     change(entries);
-    return () => replay(world, entries);
+    return refused(entries);
   };
-  assert.throws(touched(entries => entries[400].event.heard.push('c0', 'c1', 'c2')), JournalError);
-  assert.throws(touched(entries => { entries[400].record.at += 1; }), JournalError);
-  assert.throws(touched(entries => entries.splice(300, 1)), JournalError);
+  law('replay', touched(entries => entries[400].event.heard.push('c0', 'c1', 'c2')) === 400, 400);
+  law('replay', touched(entries => { entries[400].record.at += 1; }) === 400, 400);
+  law('replay', touched(entries => entries.splice(300, 1)) === 300, 300);
 
-  // A run stopped and continued from its file, several times, gives the same journal as the one that never stopped.
   const directory = mkdtempSync(join(tmpdir(), 'sagents-test-'));
   try {
     const path = join(directory, 'world.sqlite');
     for (const calls of [300, 1, 250, 349]) {
       const state = openState(path, source);
       try {
+        // Two runs cannot write one file, and a file does not take another world.
         assert.throws(() => openState(path, source), StateError);
         await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true });
       } finally { state.close(); }
@@ -139,8 +157,14 @@ test('thousands of steps of any answers leave a journal in which every rule of t
     const state = openState(path, source);
     try {
       const continued = [...state.entries()];
+      const differs = continued.findIndex((entry, index) => !isDeepStrictEqual(entry, journal.all[index]));
+      law('resume', differs === -1, differs);
       assert.ok(continued.length > 800);
-      assert.deepEqual(continued, journal.all.slice(0, continued.length));
     } finally { state.close(); }
   } finally { rmSync(directory, { recursive: true }); }
+});
+
+test('README lists the laws as they are checked here', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  for (const sentence of Object.values(LAWS)) assert.ok(readme.includes(`- ${sentence}`), sentence);
 });
