@@ -170,6 +170,11 @@ The rules of time and hearing:
   journal keeps it as a record of its own, and the others there see it fall asleep.
 - A leaving and an arrival are seen by everyone awake in the place and end their waiting. A `do`, a falling asleep
   and a waking are seen too, and a witness learns of them at its own next turn.
+- A turn's answer follows a schema made for the world: `action` is one of the actions, without `call` where there is
+  no `remote`, and `place` is the id of one of the world's places or null. A server that holds an answer to its
+  schema therefore cannot write a `go` to a place that is not there, which cost a resident played by a weak model
+  14 turns of 28 in one run and 3 of 23 in another. From a server that does not hold to schemas such an answer is
+  read and refused as before. The other fields are a text or null, or a whole number or null for `seconds`.
 - An answer that cannot be used counts as a wait of 30 seconds. The journal keeps the reason, one of eight: it was
   not a JSON object, named no action, lacked its text, called nobody who can be called, led to the place the
   character is already in or to no place of the list, lasted no time the action allows, or was cut short at the

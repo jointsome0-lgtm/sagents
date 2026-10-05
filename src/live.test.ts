@@ -82,6 +82,8 @@ Minutes from here: Blue room (blue) 1.
 This turn the \`text\` of a say or a call may hold 57 words at most. 0 min 57 s of the story are left.`;
   assert.equal(sent.boris.length, 1);
   assert.deepEqual(Object.keys(sent.boris[0]).sort(), ['messages', 'model', 'schema', 'system']);
+  // The schema lets a `go` name a place of the world and no other: an id that is nowhere costs a turn.
+  assert.deepEqual((sent.boris[0].schema as { properties: { place: object } }).properties.place, { type: ['string', 'null'], enum: ['red', 'blue', null] });
   assert.equal(sent.boris[0].system, SYSTEM);
   assert.deepEqual(sent.boris[0].messages, [{ role: 'user', content: first }]);
   // Anna's second turn is one message again: her own speech and note, then the call as its recipient hears it.

@@ -53,8 +53,9 @@ Do not describe what other people do, feel or answer, and do not decide for them
 Write \`text\`, \`note\` and your memory in the language of your sheet.`;
 
 const text = { type: ['string', 'null'] };
+// `place` is one of the world's places or null, so that a model held to the schema names no place that is not there.
 const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'note'],
-  properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: text,
+  properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: { ...text, enum: [...world.places.map(place => place.id), null] },
     seconds: { type: ['integer', 'null'] }, until: text, note: text } });
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
 
