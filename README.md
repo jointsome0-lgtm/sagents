@@ -318,7 +318,8 @@ The run ends after `--minutes` of the story, 30 by default, or after `--calls` r
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again, with one
 exception: an answer that the model's own limit cut short (`output_limit`) is an answer that cannot be used. For a
 turn it is a lost turn like any other, for the world's answer and a memory rewrite it is one of their two tries,
-and it counts as a request, with no tokens known for it. It prints
+and it counts as a request, with no tokens known for it. Three such answers of one model in a row, with no answer
+of that model arriving whole in between, end the run as `failed (output_limit)`. It prints
 one line per event, or one JSON object per event with `--json`, and then one line of totals: the status and its
 reason, the story minutes played, the requests, the unusable answers of every kind and how many of them were cut
 at the output limit (`overlong`), the memory rewrites and how

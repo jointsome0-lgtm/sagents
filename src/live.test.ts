@@ -230,6 +230,11 @@ test('a character with a model of its own is asked through that connection under
   assert.ok(journal.all.filter(entry => entry.event.who !== 'anna').every(entry => entry.by === 'common'));
   assert.deepEqual(outcome.models['api:own'], { calls: 6, invalid: 1, overlong: 0, inputTokens: 600, outputTokens: 60 });
   assert.equal(outcome.models.common.calls, outcome.calls - 6);
+  // An answer cut at the model's limit is a lost turn, and the third in a row of one model ends the run, whatever
+  // the other models answered meanwhile.
+  const cut = standIn({ anna: Array.from({ length: 5 }, () => new ModelError('output_limit')) });
+  const ended = await runLive({ world, respond: standIn({}).respond, model: 'common', cast: { anna: { respond: cut.respond, model: 'own' } }, minutes: 60 });
+  assert.deepEqual([ended.status, ended.reason, ended.models.own], ['failed', 'output_limit', { calls: 3, invalid: 2, overlong: 3, inputTokens: 0, outputTokens: 0 }]);
 });
 
 test('the world answers a deed from facts, bodies, belongings and the weather, a resident is sent its own, what it sees of those with it and the weather that reaches it, and the answer has one place in the journal', async () => {

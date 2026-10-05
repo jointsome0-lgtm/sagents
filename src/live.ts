@@ -211,6 +211,8 @@ export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; secon
   models: { [name: string]: Tally } };
 
 const CUT = Symbol('cut');
+// How many answers of one model cut short at its limit, one after another, end a run.
+const CUT_RUN = 3;
 // Plays the world on from its journal until the horizon, the limit of model calls or a failure of the connection.
 // `calls` counts the answers that arrived or were cut short at the model's limit, a memory's as well as a turn's. Any
 // other failure ends the run at once: nothing is tried again, and the journal holds everything up to it.
@@ -239,7 +241,10 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   };
   // One answer of a player's model, or null when the run ends here instead. Nobody is moved to another model.
   // An answer that the model's own limit cut short is `CUT`: it was asked for and counts as a call, it cannot be used,
-  // and the run goes on as after any answer that cannot. Every other failure of the connection ends the run.
+  // and the run goes on as after any answer that cannot, until `CUT_RUN` answers of one model's name have been cut
+  // with none of its answers arriving whole in between: a model that only writes to its limit would spend every
+  // call the run has. Every other failure of the connection ends the run.
+  const cuts = new Map<string, number>();
   const ask = async (player: Required<Player>, content: Omit<Request, 'model'>): Promise<string | typeof CUT | null> => {
     if (outcome.calls >= most) {
       outcome.reason = 'calls';
@@ -253,11 +258,13 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
           tally.calls += 1;
           tally.overlong += 1;
         }
-        return CUT;
+        cuts.set(player.name, (cuts.get(player.name) ?? 0) + 1);
+        if (cuts.get(player.name)! < CUT_RUN) return CUT;
       }
       Object.assign(outcome, { status: 'failed', reason: error.code });
       return null;
     }
+    cuts.delete(player.name);
     for (const tally of [outcome, tallyOf(player)]) {
       tally.calls += 1;
       tally.inputTokens += answer.usage?.inputTokens ?? 0;
