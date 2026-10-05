@@ -350,7 +350,13 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   // Who plays whom. Every request of a character, a turn or a memory, goes to its own connection under its own model.
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
-  const tallyOf = (player: { name: string }) => outcome.models[player.name] ??= { calls: 0, invalid: 0, overlong: 0, unreported: 0, inputTokens: 0, outputTokens: 0 };
+  // A tally is the totals' own property under the model's name, whatever the name: one like `constructor` finds nothing that every object has.
+  const tallyOf = (player: { name: string }) => {
+    if (!Object.hasOwn(outcome.models, player.name)) {
+      Object.defineProperty(outcome.models, player.name, { value: { calls: 0, invalid: 0, overlong: 0, unreported: 0, inputTokens: 0, outputTokens: 0 }, enumerable: true, writable: true, configurable: true });
+    }
+    return outcome.models[player.name];
+  };
   const unusable = (player: { name: string }) => {
     outcome.invalid += 1;
     tallyOf(player).invalid += 1;
@@ -383,6 +389,8 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
         }
         cuts.set(player.name, (cuts.get(player.name) ?? 0) + 1);
         if (cuts.get(player.name)! < cutRun) return CUT;
+        // The cut that ends the run cannot be used either, and no caller is left to count it.
+        unusable(player);
       }
       Object.assign(outcome, { status: 'failed', reason: error.code });
       return null;
