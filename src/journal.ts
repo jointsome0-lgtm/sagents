@@ -10,7 +10,7 @@ import type { Line, Mind } from './memory.ts';
 import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
 import { apply, arrive, clockAt, hasClock, lying, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, start, timeFor, wake } from './world.ts';
-import type { Action, Change, Event, Person, Refusal, World } from './world.ts';
+import type { Action, Change, Event, Lying, Person, Refusal, World } from './world.ts';
 
 // The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
 export class JournalError extends Error {}
@@ -18,13 +18,14 @@ export class JournalError extends Error {}
 // `act`: the action as it was read from the answer, or the reason why the answer could not be used, with that turn's
 // word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
-// `at`: what came of the deed, or null, the sleepers it wakes, and what it changes of bodies and belongings.
+// `at`: what came of the deed, or null, the sleepers it wakes, what it changes of bodies and belongings, and whether
+// the deed was a search of its place.
 // A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
 // no answer is behind it.
 export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal }
   | { kind: 'arrive' | 'wake'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean }
-  | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[]; changes: Change[] }
+  | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[]; changes: Change[]; search: boolean }
   | LawRecord;
 // `by` is the name of the model whose answer the record came of, and null for a record no answer is behind. The rules
 // never read it: the same records give the same world whoever answered.
@@ -32,9 +33,9 @@ export type Entry = { seq: number; record: Record; event: Event; by: string | nu
 // Everything a journal amounts to: where everyone is and what each one remembers. `seq` is the next record's number.
 // `deed` is a `do` the world has not answered yet: its answer is the only record that can come next. `results` holds,
 // for each place, the latest of what came of the deeds done there, which the world is shown when it answers the next.
-// `things` is what lies in each place now, and `laws` holds the parts of the state that the laws of `laws.ts` keep.
-export type State = { people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
-  things: Map<string, string | null>; laws: Parts };
+// `lies` is what lies in each place now, hidden or not, with how long each person has searched each place, and `laws`
+// holds the parts of the state that the laws of `laws.ts` keep.
+export type State = { people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>; lies: Lying; laws: Parts };
 // How many words of earlier results a place keeps. The newest one stays whatever its size.
 export const RESULT_WORDS = 400;
 // Where a journal is kept. `append` is one step: its entries are written together or not at all.
@@ -95,7 +96,7 @@ function own(world: World, event: Event, when: string, span = `${event.seconds} 
 
 export const begin = (world: World): State =>
   ({ people: start(world), minds: new Map(world.characters.map(character => [character.id, blank()])), seq: 0, deed: null,
-    results: new Map(world.places.map(place => [place.id, []])), things: lying(world), laws: beginLaws(world) });
+    results: new Map(world.places.map(place => [place.id, []])), lies: lying(world), laws: beginLaws(world) });
 
 // One record applied to the world: the event it makes, with everyone moved on and every memory brought up to date.
 // A record that the rules could not have produced in this state is refused, and the state is then not to be used.
@@ -110,11 +111,11 @@ export function advance(world: World, state: State, record: Record): Event {
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
     const sleepers = people.filter(person => person.asleep && person.place === deed.place).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
-    const { text, wakes, changes } = record;
-    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, changes }), sleepers, present, deed.place), { text, wakes, changes })) {
+    const { text, wakes, changes, search } = record;
+    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, changes, search }), sleepers, present, deed.place), { text, wakes, changes, search })) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
-    const event = result(world, people, state.things, deed, text, wakes, changes);
+    const event = result(world, people, state.lies, deed, text, wakes, changes, search);
     const doer = named(world.characters, deed.who);
     remember(minds.get(deed.who)!, lineOf(seq, `${when(deed.who, event.at)} ${record.text === null ? NOTHING : `What came of it: ${record.text}`}`));
     for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} What came of what ${doer} did: ${record.text}`));

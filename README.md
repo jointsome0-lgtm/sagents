@@ -156,13 +156,22 @@ The world answers a deed:
 - A world file may give `facts` to the world, to a place and to a character: what is true there and is not seen at
   once, 300 words each at most. No resident is ever sent any of it.
 - After every `do` the world is asked once what came of it, through the model of `--world-model`, which is
-  `--model`'s unless given. It is sent the world's description and facts, the place with its things and facts, the names
+  `--model`'s unless given. It is sent the world's description and facts, the place with its things, what is hidden in it and its facts, the names
   of the other places, who is there, awake or asleep, each with looks, pose, what it holds, what it carries out of sight and its facts, what
   came of the latest earlier deeds in that place (400 words of them), the clock, and the doer's name with the deed
   and its span. It is sent no sheet, note, memory or speech.
 - It answers with `result`, one or two sentences of what the senses give, 65 words at most, or null when there is
-  nothing to notice; with `wakes`, the sleepers of that place whom the deed wakes; and with `changes`, described
-  below. Any other id is dropped.
+  nothing to notice; with `wakes`, the sleepers of that place whom the deed wakes; with `changes`, described
+  below; and with `search`, whether the deed was a search of the place. Any other id is dropped.
+- A hidden thing is found by time and not by the world's judgement. The rules keep, for each person and place, the
+  seconds of that person's deeds there that the world called a search. A thing is found by the search with which
+  they reach its `minutes`: ten minutes for the backpack in the shed of «Ночь на перевале», in one deed or in
+  several. The rules know how long a deed lasts before the world is asked, so the request lists the hidden things
+  of the place in two kinds, those this deed finds if it is a search and those it does not find whatever it is, and
+  the world counts nothing. It is told that nobody sees a hidden thing and that no result speaks of one, except of
+  one this deed finds. What is found is hidden no longer, for anyone: the rules put its text at the end of the
+  place's `things`, cut at their limit, unless the answer's `changes` wrote those things anew, which then says
+  where it went. The time one person searched does not count for another, and it is kept when the person leaves.
 - Nobody gets to another place by a deed, and the world is told so: whoever tries is still where it was, by the
   way out, and a pose never names another place. Only a `go` moves anyone. The world is told the weather so that it
   knows it, and to speak of it only when the deed meets it. Nothing checks that it kept to either.
@@ -180,7 +189,8 @@ Bodies and belongings:
   and no clothes, which can be taken off (60 words at most); `pose`, how and where in its place it is (20);
   `holds`, what is in its hands or worn, clothes included (30); and `has`,
   what it carries out of sight (60). It may give a place `things`: what lies there and can be moved, taken or
-  changed (120). `facts` are for what does not change. All are optional and in the world's language.
+  changed (120); and `hidden`, a list of `{ text, minutes }`: what lies there and is found only by a search, each
+  text 60 words at most. `facts` are for what does not change. All are optional and in the world's language.
 - `pose`, `holds`, `has` and `things` start from the world file and then belong to the world's state. They change
   only by `changes` in the world's answer to a deed: a list of `{ of, what, text }`, where `what` is `pose`, `holds`,
   `has` or `things`, `of` is the id of a person in the deed's place, awake or asleep, or for `things` the id of that
@@ -192,7 +202,7 @@ Bodies and belongings:
   clothes taken off take what is in their pockets out of what the person carries. Nothing checks that it kept to this.
 - A character's `looks` are part of its own system text. Every turn says its own pose, what it holds and what it
   carries out of sight, and for each person in its place their looks, pose and what they hold. It is never sent
-  what another person carries out of sight, anything of a person in another place, or any `things` or `facts`:
+  what another person carries out of sight, anything of a person in another place, or any `things`, `hidden` or `facts`:
   what lies in a place a character learns by a deed and the world's answer to it.
 
 The weather:
@@ -288,8 +298,8 @@ law and the record:
 - Nobody acts after being awake for the world's limit: at that turn it falls asleep instead.
 - What a person has, holds and how it is placed, and the things of a place, change only by the world's answer to a
   deed done in that place; a pose is also dropped when its owner leaves.
-- Nobody is sent what another person carries out of sight, or the looks, pose or holdings of a person in another
-  place.
+- Nobody is sent what another person carries out of sight, what is hidden in a place, or the looks, pose or
+  holdings of a person in another place.
 - The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of
   it.
 - Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place's.
@@ -320,6 +330,9 @@ What it lacks:
 - The world answers a deed and does nothing of its own accord. What people have and hold and the things of a place
   are texts that the world's answer rewrites whole: nothing counts the items in them, so nothing checks that a thing
   given was received or that the answer agrees with the facts. The facts of the world file never change.
+- A search is whatever the world calls one, and nothing checks that. A hidden thing takes the same minutes from
+  someone who knows where it lies as from someone who does not, and nobody is told how long a search has lasted or
+  that there is anything left to find.
 - A `go` takes along everything a person holds and has, whatever its size, and nobody sees what lies in a place
   without a deed.
 - A clock is a mark in the world file and not a thing: a watch that is handed over, lost or stopped still shows its

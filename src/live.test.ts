@@ -302,7 +302,7 @@ What comes of it?` }] });
   const deed = journal.all.findIndex(({ event }) => event.kind === 'do' && event.who === 'boris');
   assert.deepEqual(journal.all[deed + 1].record, { kind: 'result', who: 'boris', at: 7, text: 'RESULT-WORD', wakes: ['anna'], changes: [
     { of: 'boris', what: 'holds', text: 'HOLDS-NEW' }, { of: 'boris', what: 'has', text: '' }, { of: 'anna', what: 'pose', text: 'POSE-NEW' },
-    { of: 'red', what: 'things', text: 'THINGS-NEW' }] });
+    { of: 'red', what: 'things', text: 'THINGS-NEW' }], search: false });
   assert.throws(() => replay(withFacts, journal.all.filter((_entry, index) => index !== deed + 1).map((entry, seq) => ({ ...entry, seq }))), JournalError);
-  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [], changes: [] }), JournalError);
+  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [], changes: [], search: false }), JournalError);
 });
