@@ -52,12 +52,12 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
     ...(index === 1 ? {} : { figures: [{ id: `f${index}`, name: `Figure ${index}`, looks: `looks-f${index}-0`, facts: `facts-f${index}-0` }] }),
     ...(index === 2 ? {} : { crowd: `crowd-p${index}-0` }) })),
   // Everyone wears a coat that is not open, with a thing in it that nobody else may be sent and some money, and
-  // carries an open tray with food.
+  // carries an open tray with food and with twigs to burn.
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
     facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, clock: index % 5 === 0,
     carries: [{ name: `coat-c${index}`, holds: [{ name: `secret-c${index}` }, { name: 'coin', n: 10, money: true }] }, { name: `hat-c${index}` },
-      { name: `tray-c${index}`, open: true, holds: [{ name: 'apple', n: 3, food: 90 }] },
-      // Some carry nearly all a person may, and some a thing in a thing four deep, so that the run meets both limits.
+      { name: `tray-c${index}`, open: true, holds: [{ name: 'apple', n: 3, food: 90 }, { name: 'twig', n: 3, burns: true }] },
+      // Some carry all a person may, and some a thing in a thing four deep, so that the run meets both limits.
       ...(index % 5 === 1 ? Array.from({ length: 23 }, (_, at) => ({ name: `trinket-c${index}-${at}` })) : []),
       ...(index % 5 === 3 ? [{ name: `nest-c${index}`, holds: [{ name: `nest2-c${index}`, holds: [{ name: `nest3-c${index}`, holds: [{ name: `nest4-c${index}`, holds: [] }] }] }] }] : [])] })) });
 // The settings of sleep come from an environment, and the world file changes one of them itself.
@@ -135,8 +135,9 @@ function standIn(record: () => number) {
       if (content.includes('was not taken') && content.includes('is where the thing already is')) seen.same += 1;
       // What it moves it mostly takes from what the schema lets it name, as a model held to the schema would, and it
       // reads the marks of a thing so that most entries can be taken: a part of a count or all of it, some from a
-      // supply, food eaten and wood burned. It leaves alone what is still hidden and the things that only their
-      // carrier may be sent. Now and then an entry is wild: a label that is nowhere, a fixed thing, a place elsewhere.
+      // supply, food eaten and wood burned. It leaves alone what is still hidden, the things that only their carrier
+      // may be sent, and the trinkets and the inner things of a nest, which so stay where the world file put them.
+      // Now and then an entry is wild: a label that is nowhere, a fixed thing, a place elsewhere.
       type Named = { enum?: string[] };
       const lists = asks as unknown as { moves: { items: { properties: { what: Named; to: Named } } }; sets?: { items: { properties: { what: Named; state: Named } } } };
       const names = lists.moves.items.properties;
@@ -146,9 +147,15 @@ function standIn(record: () => number) {
       // A thing sent into the innermost of four nested things is refused for its depth and for nothing else.
       const sent = /because of the entry (\{[^}]*\}): [^\n]*four things deep/.exec(content);
       if (sent && told(JSON.parse(sent[1]).to).includes(' nest4-') && JSON.parse(sent[1]).what !== JSON.parse(sent[1]).to) seen.deep += 1;
-      const free = (names.what.enum ?? []).filter(label => !told(label).includes(' secret-')), careful = free.filter(label => !unfound.has(label));
+      const free = (names.what.enum ?? []).filter(label => !/ (?:secret|trinket|nest[234])-/.test(told(label))), careful = free.filter(label => !unfound.has(label));
       const fixed = [...content.matchAll(/\b(t\d+) [^;[\]\n]*, fixed/g)].map(match => match[1]), tos = names.to.enum ?? [];
+      // Now and then an entry is aimed where the rules stop it: into the innermost of four nested things, or at one
+      // who carries trinkets and with them all that a person may or nearly all.
+      const hard = [...tos.filter(to => told(to).includes(' nest4-')), ...[...content.matchAll(/\n- Person \d+ \((c\d+)\)[^\n]* trinket-/g)].map(match => match[1])];
+      // And now and then all that it lists puts a thing into the very thing it lies in, so that nothing moves.
+      const still = random() < 0.06 ? careful.flatMap(what => { const lies = new RegExp(`\\b(t\\d+) [^;[\\]\\n]*\\[${what} `).exec(content); return lies ? [{ what, n: 1, to: lies[1] }] : []; }) : [];
       const moves = Array.from({ length: upTo(4) - 1 }, () => {
+        if (still.length) return pick(still);
         if (random() < 0.12 || !careful.length) {
           const what = pick([...free, ...fixed, 't99999']);
           return { what, n: upTo(3) - 1, to: pick([...tos, what, `p${upTo(PLACES) - 1}`, `c${upTo(PEOPLE) - 1}`]) };
@@ -156,7 +163,7 @@ function standIn(record: () => number) {
         const what = pick(careful), has = / ×(\d+)/.exec(told(what));
         const sink = SINKS.find(to => tos.includes(to) && told(what).includes(to === 'eaten' ? ', food' : ', burns') && random() < 0.5);
         return { what, n: told(what).includes(', stock') ? upTo(5) : has ? random() < 0.3 ? Number(has[1]) : upTo(Number(has[1])) : 1,
-          to: sink ?? pick(tos.filter(to => to !== what && !unfound.has(to) && !SINKS.includes(to))) };
+          to: sink ?? pick(hard.length && random() < 0.15 ? hard : tos.filter(to => to !== what && !unfound.has(to) && !SINKS.includes(to))) };
       });
       const stated = lists.sets?.items.properties;
       const sets = Array.from({ length: stated?.what.enum ? upTo(3) - 1 : 0 }, () => {
@@ -205,8 +212,8 @@ function standIn(record: () => number) {
 test('thousands of steps of any answers leave a journal in which every law of the world holds', async () => {
   const journal = memoryStore();
   const { seen, respond } = standIn(() => journal.all.length);
-  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 4000, journal, pause: true, cutRun: Infinity });
-  assert.deepEqual([whole.status, whole.reason, whole.calls], ['done', 'calls', 4000]);
+  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, cutRun: Infinity });
+  assert.deepEqual([whole.status, whole.reason, whole.calls], ['done', 'calls', 6000]);
   const turns = seen.turns!;
   seen.turns = null;
 
@@ -442,7 +449,9 @@ test('thousands of steps of any answers leave a journal in which every law of th
       if (record.text === null) count.memoryLost += 1;
     } else if (event.kind === 'do') count.do += 1;
   }
-  // The run had all of it in it, or the laws above were tried on little.
+  // The run had all of it in it, or the laws above were tried on little. The stand-in's answer comes from the text of
+  // the request, so any change of a request's wording plays another run: a kind that then falls short is too rare in
+  // the stand-in, and the cure is to make it less rare there, not to ask for fewer.
   for (const [kind, times] of Object.entries(count)) assert.ok(times >= 5, `${kind} happened ${times} times`);
   assert.deepEqual([whole.rewrites, whole.lost], [count.memory, count.memoryLost]);
   // Answers were refused and each was asked again with the reason, and some deeds were left with nothing.
