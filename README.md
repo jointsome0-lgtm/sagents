@@ -117,6 +117,22 @@ The rules of time and hearing:
   nothing and does not act. A call to it is delivered when it arrives.
 - A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
   next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours.
+- A place of a world file may have `"clock": true`, and so may a character, for a watch or a phone. A resident knows
+  the clock only with one at hand, its own or its place's: then a turn opens with `Now 21:04:10.` and the lines of
+  its memory open with the clock. With none the turn says the part of the day, `Now evening, as far as you can tell:
+  no clock is at hand.`, a line opens with `[evening]`, and nothing the rules send it holds a time of the clock. A
+  time that someone says aloud is speech and stays. A line keeps the time as its owner could tell it when it
+  happened, so what was seen by a clock is remembered by the clock.
+- The parts of the day are, under the open sky: early morning from 05:00, morning from 07:00, late morning from
+  10:00, around midday from 12:00, afternoon from 14:00, late afternoon from 16:00, early evening from 18:00, late
+  evening from 20:00 and night from 23:00; under a roof and on the way: morning from 05:00, the middle of the day
+  from 11:00, afternoon from 15:00, evening from 18:00 and night from 23:00. From the second day on the day is
+  named, as the clock names it.
+- With a clock at hand an action `until` a time of day ends at that time: the clock is the alarm. With none it ends
+  early or late by a number of seconds that follows from who acts, when and until what time, so a replay gives it
+  again: at most a tenth of the span and half an hour for a `sleep`, a twentieth of the span and three minutes for a
+  `do` or a `wait`, and never outside the span the action allows. The resident's own line then says `until about
+  06:00` in place of the seconds. The world is always told the clock.
 - A sleeper hears and sees nothing and interrupts nobody. Only a deed that the world says wakes it ends its sleep
   early. A call to it is delivered when it wakes. The others see it fall asleep and wake,
   and are told that it is asleep when they are told who is with them.
@@ -220,7 +236,7 @@ What a character knows:
   own name and sheet, and one message with what the character remembers, what happened since, and where it is now.
   No earlier request or answer is sent again. A character is never sent another character's sheet, note or memory,
   or an event it did not perceive.
-- The short-term memory is the lines since the last rewrite, with clock times: what the character heard and saw, its
+- The short-term memory is the lines since the last rewrite, each under its time as the character could tell it: what the character heard and saw, its
   own actions and notes, and the calls that waited for it.
 - The long-term memory is one text of at most `longWords` words, 400 unless the world file says otherwise. The
   character writes it itself, through the model, from the old text and the lines being folded into it. What it
@@ -276,6 +292,7 @@ law and the record:
   place.
 - The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of
   it.
+- Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place's.
 
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again. It prints
@@ -305,6 +322,9 @@ What it lacks:
   given was received or that the answer agrees with the facts. The facts of the world file never change.
 - A `go` takes along everything a person holds and has, whatever its size, and nobody sees what lies in a place
   without a deed.
+- A clock is a mark in the world file and not a thing: a watch that is handed over, lost or stopped still shows its
+  first owner the time, and a clock carried out of a place stays in it. A span in seconds is said exactly to
+  everyone, and a sleeper who is woken early is not told by how much.
 - Tiredness is one number. It does not slow anyone or change what a character can do before the limit, and a
   character who is on the way when it reaches the limit falls asleep only at its turn after the arrival.
 - A seeded series of weather knows no time of day and no season: its states must read true at any hour.
@@ -321,14 +341,14 @@ What it lacks:
 #### What comes next for the live world
 
 1. A crowd through the world: people of a place who have no turns of their own, for whom the world answers, while the
-   journal keeps what a resident perceived of them; coordinates for places, with travel time from distance; and a
-   seaside example world of four residents, houses, a sports pool, a beach and cafés.
+   journal keeps what a resident perceived of them; coordinates for places, with travel time from distance.
 2. Things as the engine's state: items with amounts, owners and places; food with calories and tags; money.
-3. An energy balance: hunger from the day's shortfall, weight and fitness from the same count over weeks.
-4. `examine` as an action the engine answers by a table, more detailed for a resident with a doctor's skill; skills
+3. A seaside example world of four residents, houses, a sports pool, a beach and cafés.
+4. An energy balance: hunger from the day's shortfall, weight and fitness from the same count over weeks.
+5. `examine` as an action the engine answers by a table, more detailed for a resident with a doctor's skill; skills
    in the world file; injury and illness; a person's own reactions to kinds of food.
-5. Ordinary days that cost no model calls.
-6. After that: training, learning a skill in the story, a farm, ecology.
+6. Ordinary days that cost no model calls.
+7. After that: training, learning a skill in the story, a farm, ecology.
 
 ## The model connection
 

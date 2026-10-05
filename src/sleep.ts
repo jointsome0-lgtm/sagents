@@ -2,7 +2,7 @@
 // the falling asleep of someone who stayed awake to the limit. No model and no disk here.
 import type { Law } from './laws.ts';
 import { amountOf, refuse, TIME } from './reading.ts';
-import { awakeIn, clockAt, secondsUntil } from './world.ts';
+import { awakeIn, clockAt, secondsUntil, timeFor } from './world.ts';
 import type { Person, World } from './world.ts';
 
 // `dayStart` is the time of day everyone last woke before the story. After `tiredHours` awake a person is told it is
@@ -49,10 +49,9 @@ export const sleep: Law<'sleep', 'debts'> = {
   put(world, _parts, people, record) {
     const person = people.find(item => record.kind === 'spent' && item.id === record.who)!, place = person.place as string;
     Object.assign(person, { asleep: true, began: record.at, freeAt: record.at + SPENT_SLEEP });
-    const clock = clockAt(world, record.at);
-    return { event: { at: record.at, clock, kind: 'sleep', who: person.id, place, to: null, text: null, seconds: SPENT_SLEEP, cut: false,
+    return { event: { at: record.at, clock: clockAt(world, record.at), kind: 'sleep', who: person.id, place, to: null, text: null, seconds: SPENT_SLEEP, cut: false,
       heard: awakeIn(people, place, person).map(witness => witness.id), note: null },
-    lines: new Map([[person.id, { text: `${clock} ${SPENT} (${SPENT_SLEEP} s)`, idle: true }]]) };
+    lines: new Map([[person.id, { text: `${timeFor(world, person.id, place, record.at)} ${SPENT} (${SPENT_SLEEP} s)`, idle: true }]]) };
   },
   after(parts, event) {
     if (event.kind !== 'sleep' && event.kind !== 'wake') return;

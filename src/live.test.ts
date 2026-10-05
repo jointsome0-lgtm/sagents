@@ -12,9 +12,9 @@ import { INSTRUCTIONS, runLive, WORLD_INSTRUCTIONS } from './live.ts';
 import { readWorld } from './laws.ts';
 import { readAction } from './world.ts';
 
-// Sixty words a minute: one word is one second.
+// Sixty words a minute: one word is one second. Both rooms have a clock, so everyone reads the exact time.
 const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
-  places: [{ id: 'red', name: 'Red room', about: 'Red walls.' }, { id: 'blue', name: 'Blue room', about: 'Blue walls.' }],
+  places: [{ id: 'red', name: 'Red room', about: 'Red walls.', clock: true }, { id: 'blue', name: 'Blue room', about: 'Blue walls.', clock: true }],
   characters: [{ id: 'anna', name: 'Anna', place: 'red', sheet: 'SHEET-ANNA' }, { id: 'boris', name: 'Boris', place: 'red', sheet: 'SHEET-BORIS' },
     { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA' }, { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN' }] });
 const act = (action: string, more: object = {}) => JSON.stringify({ action, text: null, to: null, place: null, seconds: null, until: null, note: null, ...more });
@@ -168,7 +168,7 @@ This turn the \`text\` of a say or a call may hold 65 words at most.` }]);
   assert.match(sent.dan[4].messages[0].content, /^So far:\n09:01:40 You wake\.\n\nNow 09:01:40\./);
 });
 
-test('a time of day is the next moment the clock shows it, within the span the action allows, and the journal takes nothing else', () => {
+test('a time of day is the next moment the clock shows it, within the span the action allows, and the journal takes nothing else; without a clock it is missed within bounds and no clock is told', async () => {
   // The clock began at 09:00, so 53,400 seconds on it is 23:50.
   const late = 53_400;
   const read = (more: object, at = late) => {
@@ -194,6 +194,23 @@ test('a time of day is the next moment the clock shows it, within the span the a
   assert.equal(taken(wait).seconds, 600);
   assert.equal(taken('here').seconds, 30);
   for (const action of [{ ...wait, until: '10:00' }, 'tired', null]) assert.throws(() => taken(action), JournalError);
+  // With no clock in the rooms only Boris, who has a watch, ends at the minute. Anna is off, within a twentieth of a
+  // wait and a tenth of a sleep, and is told the part of the day and never the clock.
+  const dark = { ...world, places: world.places.map(place => ({ ...place, clock: false })), characters: world.characters.map(character => ({ ...character, clock: character.id === 'boris' })) };
+  const { sent, respond } = standIn({ anna: [act('wait', { until: '09:20' }), act('sleep', { until: '11:00' })], boris: [act('wait', { until: '09:20' })] });
+  const journal = memoryStore();
+  await runLive({ world: dark, respond, model: 'stand-in', minutes: 200, calls: 8, journal });
+  const [waited, slept] = journal.all.filter(entry => entry.event.who === 'anna' && entry.record.kind === 'act').map(entry => entry.event.seconds);
+  assert.ok(waited !== 1200 && Math.abs(waited - 1200) <= 60, `a wait of ${waited} s`);
+  const whole = 7200 - waited;
+  assert.ok(slept !== whole && Math.abs(slept - whole) <= whole / 10, `a sleep of ${slept} s`);
+  assert.equal(journal.all.find(entry => entry.event.who === 'boris')!.event.seconds, 1200);
+  assert.equal(sent.anna[1].messages[0].content.split('\n').slice(0, 4).join('\n'), `So far:
+[morning] You wait (until about 09:20).
+
+Now morning, as far as you can tell: no clock is at hand. You are in Red room (red). Here with you:`);
+  assert.match(sent.boris[1].messages[0].content, /^So far:\n09:00:00 You wait \(1200 s\)\.\n09:\d\d:\d\d Anna falls asleep\.\n\nNow 09:20:00\. You are in Red room/);
+  assert.doesNotMatch(JSON.stringify(sent.anna), /\d\d:\d\d:\d\d/);
 });
 
 test('a character with a model of its own is asked through that connection under that name, for a turn and for a memory alike', async () => {
@@ -217,8 +234,8 @@ test('a character with a model of its own is asked through that connection under
 
 test('the world answers a deed from facts, bodies, belongings and the weather, a resident is sent its own, what it sees of those with it and the weather that reaches it, and the answer has one place in the journal', async () => {
   const withFacts = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', facts: 'FACT-WORLD', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
-    places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED', things: 'THINGS-RED' },
-      { id: 'blue', name: 'Blue yard', about: 'Blue walls.', facts: 'FACT-BLUE', things: 'THINGS-BLUE', open: true }],
+    places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED', things: 'THINGS-RED', clock: true },
+      { id: 'blue', name: 'Blue yard', about: 'Blue walls.', facts: 'FACT-BLUE', things: 'THINGS-BLUE', open: true, clock: true }],
     // The second weather does not get under a roof.
     weather: { start: { text: 'SKY-ONE', indoors: 'ROOF-ONE' }, changes: [{ day: 1, at: '09:01', text: 'SKY-TWO', indoors: null }] },
     characters: [{ id: 'anna', name: 'Anna', place: 'red', sheet: 'SHEET-ANNA', facts: 'FACT-ANNA', looks: 'LOOKS-ANNA', pose: 'POSE-ANNA', holds: 'HOLDS-ANNA', has: 'HAS-ANNA' },

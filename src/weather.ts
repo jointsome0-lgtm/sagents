@@ -3,7 +3,7 @@
 // time: the same settings always give the same weather at the same moment. No model and no disk here.
 import type { Law } from './laws.ts';
 import { boundedOf, CHARS_PER_WORD, closed, countOf, isObject, listOf, refuse, secondsOfDay, textOf, TIME } from './reading.ts';
-import { attend, clockAt } from './world.ts';
+import { attend, clockAt, timeFor } from './world.ts';
 
 // The most words either text of one state may hold, so that a request has a largest size.
 export const SKY_WORDS = 40;
@@ -98,7 +98,7 @@ export const weather: Law<'weather', 'skies'> = {
     for (const witness of here) attend(witness, record.at);
     return { event: { at: record.at, clock, kind: 'weather', who: '', place: '', to: null, text: sky.text, seconds: 0, cut: false, heard: here.map(person => person.id),
       note: null, indoors: sky.indoors },
-    lines: new Map(here.map(person => [person.id, { text: `${clock} ${WEATHER} ${reaches(sky, open.has(person.place as string))}`, idle: false }])) };
+    lines: new Map(here.map(person => [person.id, { text: `${timeFor(world, person.id, person.place, record.at)} ${WEATHER} ${reaches(sky, open.has(person.place as string))}`, idle: false }])) };
   },
   // A turn says the weather as the place gives it, and nothing when none of it gets under the roof.
   turn(world, { skies }, actor) {

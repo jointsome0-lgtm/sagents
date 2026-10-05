@@ -9,7 +9,7 @@ import { blank, idle, lineOf, remember, rewrite } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
-import { apply, arrive, clockAt, lying, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, start, wake } from './world.ts';
+import { apply, arrive, clockAt, hasClock, lying, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, start, timeFor, wake } from './world.ts';
 import type { Action, Change, Event, Person, Refusal, World } from './world.ts';
 
 // The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
@@ -66,8 +66,9 @@ const NOTHING = 'Nothing came of it that could be noticed.';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
 
-// An event as one who perceived it remembers it. A note is never part of it.
-function perceived(world: World, event: Event, viewer: string): string {
+// An event as one who perceived it remembers it, under the time as that one could tell it, `when`. A note is never
+// part of it.
+function perceived(world: World, event: Event, viewer: string, when: string): string {
   const who = named(world.characters, event.who);
   const what = event.kind === 'say' ? `${who} says: "${event.text}"`
     : event.kind === 'call' ? `${who} calls ${event.to === viewer ? 'you' : named(world.characters, event.to)} (${world.remote}): "${event.text}"`
@@ -75,20 +76,21 @@ function perceived(world: World, event: Event, viewer: string): string {
         : event.kind === 'arrive' ? `${who} arrives.`
           : event.kind === 'sleep' ? `${who} falls asleep.`
             : event.kind === 'wake' ? `${who} wakes.` : `${who} does (${event.seconds} s): ${event.text}`;
-  return `${event.clock} ${what}`;
+  return `${when} ${what}`;
 }
 
 // What a character remembers of its own action: the action, its note, and the sentence about a speech that was cut.
-// The first line is the action itself.
-function own(world: World, event: Event): string[] {
+// The first line is the action itself. `when` is the time as the character could tell it, and `span` how long the
+// action lasts as the character knows it.
+function own(world: World, event: Event, when: string, span = `${event.seconds} s`): string[] {
   const what = event.kind === 'say' ? `You say: "${event.text}"`
     : event.kind === 'call' ? `You call ${named(world.characters, event.to)} (${world.remote}): "${event.text}"`
       : event.kind === 'go' ? `You leave towards ${named(world.places, event.to)}.`
         : event.kind === 'arrive' ? `You arrive in ${named(world.places, event.place)}.`
-          : event.kind === 'sleep' ? `You lie down to sleep (${event.seconds} s).`
+          : event.kind === 'sleep' ? `You lie down to sleep (${span}).`
             : event.kind === 'wake' ? 'You wake.'
-              : event.kind === 'do' ? `You do (${event.seconds} s): ${event.text}` : `You wait (${event.seconds} s).`;
-  return [what, ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : [])].map(line => `${event.clock} ${line}`);
+              : event.kind === 'do' ? `You do (${span}): ${event.text}` : `You wait (${span}).`;
+  return [what, ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : [])].map(line => `${when} ${line}`);
 }
 
 export const begin = (world: World): State =>
@@ -100,6 +102,8 @@ export const begin = (world: World): State =>
 export function advance(world: World, state: State, record: Record): Event {
   const { people, minds, seq } = state;
   const refuse = (problem: string): never => { throw new JournalError(`The journal cannot be used: record ${seq} ${problem}.`); };
+  // The time of a line as its owner can tell it where it is: the clock only when one is at hand.
+  const when = (id: string, at: number) => timeFor(world, id, people.find(person => person.id === id)!.place, at);
   const deed = state.deed;
   if (deed || record.kind === 'result') {
     // A deed is followed by the world's answer and by nothing else, and the world answers nothing but a deed.
@@ -112,9 +116,9 @@ export function advance(world: World, state: State, record: Record): Event {
     }
     const event = result(world, people, state.things, deed, text, wakes, changes);
     const doer = named(world.characters, deed.who);
-    remember(minds.get(deed.who)!, lineOf(seq, `${event.clock} ${record.text === null ? NOTHING : `What came of it: ${record.text}`}`));
-    for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, `${event.clock} What came of what ${doer} did: ${record.text}`));
-    for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${clockAt(world, deed.at + deed.seconds)} ${doer} woke you by this: ${deed.text}`));
+    remember(minds.get(deed.who)!, lineOf(seq, `${when(deed.who, event.at)} ${record.text === null ? NOTHING : `What came of it: ${record.text}`}`));
+    for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} What came of what ${doer} did: ${record.text}`));
+    for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${doer} woke you by this: ${deed.text}`));
     if (record.text !== null) {
       // The place keeps what came of the deeds done in it, the latest ones.
       const kept = state.results.get(deed.place)!;
@@ -132,7 +136,7 @@ export function advance(world: World, state: State, record: Record): Event {
     if (!isDeepStrictEqual(record, put)) return refuse('comes where the rules put a record of their own by the clock');
     const { event, lines } = law.put(world, state.laws, people, put);
     for (const [id, line] of lines) remember(minds.get(id)!, { ...lineOf(seq, line.text), ...(line.idle ? { idle: true as const } : {}) });
-    for (const id of event.heard) if (!lines.has(id)) remember(minds.get(id)!, lineOf(seq, perceived(world, event, id)));
+    for (const id of event.heard) if (!lines.has(id)) remember(minds.get(id)!, lineOf(seq, perceived(world, event, id, when(id, event.at))));
     for (const other of LAWS) other.after?.(state.laws, event);
     state.seq += 1;
     return event;
@@ -160,7 +164,11 @@ export function advance(world: World, state: State, record: Record): Event {
     }
     const action = typeof record.action === 'string' ? { action: 'wait' as const, text: null, to: null, place: null, seconds: LOST_SECONDS, until: null, note: null } : record.action;
     event = apply(world, people, actor, action, record.at, record.limit);
-    const lines = (reason ? [`${event.clock} ${refused(world, reason)}`] : own(world, event)).map(line => lineOf(seq, line));
+    // The actor may have left: its own lines are of the place where it acted. An action `until` a time of day is
+    // remembered by its seconds only with a clock at hand; otherwise by the time it aimed at, which it may miss.
+    const told = timeFor(world, actor.id, event.place, event.at);
+    const span = action.until === null || hasClock(world, actor.id, event.place) ? undefined : `until about ${action.until}`;
+    const lines = (reason ? [`${told} ${refused(world, reason)}`] : own(world, event, told, span)).map(line => lineOf(seq, line));
     if (event.kind === 'sleep') lines[0].idle = true;
     remember(mind, ...lines);
     if (event.kind === 'do') state.deed = event;
@@ -169,13 +177,13 @@ export function advance(world: World, state: State, record: Record): Event {
     const due = record.kind === 'wake' ? actor.asleep && idle(mind) : actor.place === null;
     if (!due) return refuse('is a waking or an arrival of someone who is not due one');
     event = record.kind === 'wake' ? wake(world, people, actor, record.at) : arrive(world, people, actor, record.at);
-    remember(mind, ...mind.waiting.splice(0), ...own(world, event).map(line => ({ ...lineOf(seq, line), ...(record.kind === 'wake' ? { idle: true as const } : {}) })));
+    remember(mind, ...mind.waiting.splice(0), ...own(world, event, when(actor.id, event.at)).map(line => ({ ...lineOf(seq, line), ...(record.kind === 'wake' ? { idle: true as const } : {}) })));
   }
-  for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, perceived(world, event, id)));
+  for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, perceived(world, event, id, when(id, event.at))));
   if (event.kind === 'call' && !event.heard.includes(event.to as string)) {
     // The call was not heard: it waits for the arrival or the waking of the one called.
     const callee = people.find(person => person.id === event.to)!;
-    minds.get(callee.id)!.waiting.push(lineOf(seq, `${event.clock} ${named(world.characters, event.who)} called you (${world.remote}) while you were ${
+    minds.get(callee.id)!.waiting.push(lineOf(seq, `${when(callee.id, event.at)} ${named(world.characters, event.who)} called you (${world.remote}) while you were ${
       callee.asleep ? 'asleep' : 'on the way'}: "${event.text}"`));
   }
   for (const law of LAWS) law.after?.(state.laws, event);

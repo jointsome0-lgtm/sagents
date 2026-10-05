@@ -6,7 +6,7 @@ import { idle, oldest, readMemory } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { LAWS } from './laws.ts';
 import { closed } from './reading.ts';
-import { CHARS_PER_WORD, clockAt, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, travelSeconds, wordLimit } from './world.ts';
+import { CHARS_PER_WORD, clockAt, DRIFT, hasClock, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, sensed, SENSED, travelSeconds, wordLimit } from './world.ts';
 import type { Event, Person, World } from './world.ts';
 
 // The `live` mode: every character of a world is played by a model, one call for one action, under the story's clock.
@@ -27,6 +27,8 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - note: with any action, a private line you keep for yourself. Nobody else ever reads it. Null when you have none.
 
 Speak the way people speak: briefly, one thought at a time, and leave room for an answer. Words cost the story's time: each takes part of a second, and those who listen are held until you finish. Each turn says how many words \`text\` may hold; a longer speech is cut there. A note, and the \`text\` of a do, keep their first ${MAX_WORDS} words.
+
+Each turn says the time. With a clock at hand, your own or one in the place you are in, it is the clock's time, and an action \`until\` a time of day ends at that time. With none you know only the part of the day, and such an action ends when you guess that the time has come: up to ${DRIFT.wait.most / 60} minutes early or late after an hour's wait, up to ${DRIFT.sleep.most / 60} after a night's sleep.
 
 Each turn says how your body feels. People need sleep: an hour of it makes up for two awake, and one who stays awake too long falls asleep on the spot.
 
@@ -78,7 +80,7 @@ ${self.sheet}${self.looks === null ? '' : `\nHow you look: ${self.looks}`}`;
 const known = (mind: Mind, lines: Line[]) => [...(mind.long ? ['What you remember:', mind.long, ''] : []),
   ...(lines.length ? [mind.long ? 'Since then:' : 'So far:', ...lines.map(line => line.text), ''] : [])];
 // The request to write the long-term memory anew. It keeps or drops: a memory must not gain what did not happen.
-const rewriteOf = (world: World, clock: string, waking: boolean) => `Now ${clock}. This is not a turn and you take no action: ${
+const rewriteOf = (world: World, time: string, waking: boolean) => `${time} This is not a turn and you take no action: ${
   waking ? 'you are waking, and what you lived through before your sleep stays with you only as your memory' : 'much has happened, and its oldest part stays with you only as your memory'}.
 Write your memory anew as one text of at most ${world.longWords} words, in the language of your sheet, from what you remember and the lines above: what you know about people, what you want, what was promised and by whom, what has changed in you. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten. A longer text is cut at the limit.
 Answer with one JSON object that has the single field \`memory\`.`;
@@ -103,6 +105,10 @@ const worldSystemOf = (world: World) => `${WORLD_INSTRUCTIONS}
 
 The world: ${world.title}
 ${world.about}${world.facts === null ? '' : `\nFacts: ${world.facts}`}`;
+// The time as a request to a resident opens its last part with it: the clock when the resident has one at hand, and
+// the part of the day otherwise.
+const nowOf = (world: World, actor: Person, at: number) => hasClock(world, actor.id, actor.place) ? `Now ${clockAt(world, at)}.`
+  : `Now ${sensed(world, at, world.places.some(place => place.id === actor.place && place.open))}, as far as you can tell: no clock is at hand.`;
 // One text under its name, closed as a sentence, or nothing when there is none.
 const part = (name: string, value: string | null) => value === null ? '' : ` ${name}: ${closed(value)}`;
 // What anyone in a person's place sees of it. What it carries out of sight is not here.
@@ -126,7 +132,7 @@ function deedOf(world: World, state: State, deed: Event): string {
 }
 
 // No request of a world is longer than this many characters, system text and message together, however long the
-// world has run. A line holds a speech, a note or a deed of `MAX_WORDS` words under a head of names and a clock, a
+// world has run. A line holds a speech, a note or a deed of `MAX_WORDS` words under a head of names and a time, a
 // character's own action is four lines at most with what came of it, and the lines of one request are `shortWords` and one such action.
 // A body's text is as long as its limit of words lets it be, since the world's answer may make it so, and every law
 // adds what it says it may.
@@ -135,11 +141,11 @@ export function requestLimit(world: World): number {
   const people = world.characters.map(tagged), places = world.places.map(tagged);
   const looks = (character: { looks: string | null }) => (character.looks?.length ?? 0) + 20;
   const system = sharedOf(world).length + longest(people) + longest(world.characters.map(character => character.sheet)) + Math.max(...world.characters.map(looks)) + 40;
-  const head = 2 * longest(world.characters.map(character => character.name)) + longest(world.places.map(place => place.name)) + (world.remote?.length ?? 0) + 120;
+  const head = 2 * longest(world.characters.map(character => character.name)) + longest(world.places.map(place => place.name)) + (world.remote?.length ?? 0) + SENSED + 140;
   const lines = (world.shortWords + 4 * (head + MAX_WORDS)) * (CHARS_PER_WORD + 1);
   const laws = LAWS.reduce((sum, law) => sum + law.size(world), 0);
   const visible = (LIMITS.pose + LIMITS.holds) * CHARS_PER_WORD + 60;
-  const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + 800
+  const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + SENSED + 900
     + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + LIMITS.has * CHARS_PER_WORD + laws;
   const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
   // The world's request: every person could be in one place, each with its body, belongings and facts, under the
@@ -289,7 +295,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const folding = actor.asleep ? mind.lines : mind.size > world.shortWords ? oldest(mind, world.shortWords) : null;
     if (folding) {
       const request = { system, schema: MEMORY_SCHEMA,
-        messages: [{ role: 'user' as const, content: [...known(mind, folding), rewriteOf(world, clockAt(world, now), actor.asleep)].join('\n') }] };
+        messages: [{ role: 'user' as const, content: [...known(mind, folding), rewriteOf(world, nowOf(world, actor, now), actor.asleep)].join('\n') }] };
       // An answer that cannot be used gets one more try. After that the old text stays and the lines are lost.
       let memory = null;
       for (let attempt = 0; attempt < 2 && !memory; attempt += 1) {
@@ -318,7 +324,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const body = `${part('Your pose', actor.pose)}${own('You hold', actor.holds, self.holds)}${own('You carry out of sight', actor.has, self.has)}`.slice(1);
     const answer = await ask(player, { system, schema, messages: [{ role: 'user', content: [
       ...known(mind, mind.lines),
-      `Now ${clockAt(world, now)}. You are in ${tagged(spot)}. ${others.length ? 'Here with you:' : 'Nobody else is here.'}`,
+      `${nowOf(world, actor, now)} You are in ${tagged(spot)}. ${others.length ? 'Here with you:' : 'Nobody else is here.'}`,
       ...others,
       ...(body ? [body] : []),
       ...LAWS.flatMap(law => law.turn(world, state.laws, actor, now) ?? []),

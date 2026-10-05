@@ -21,9 +21,12 @@ export const LOST_SECONDS = 30;
 // and never changes, the body and the face and no clothes, `pose` how and where in the place it is, `holds` what is in its hands or worn, and `has`
 // what it carries out of sight. The world file gives how these begin; `things`, `pose`, `holds` and `has` then belong
 // to the run's state and change only by the world's answer to a deed. A place that is `open` lies under the open sky.
-export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; open: boolean; minutesTo: { [place: string]: number } };
+// A place with a `clock` shows the time to everyone in it, and a character with one, a watch or a phone, reads it
+// anywhere. Neither changes in a run: a clock is not yet a thing that can be handed over.
+export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; open: boolean; clock: boolean;
+  minutesTo: { [place: string]: number } };
 export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null; looks: string | null; pose: string | null;
-  holds: string | null; has: string | null };
+  holds: string | null; has: string | null; clock: boolean };
 // The most words each of these texts may hold, in the world file and in the world's answer alike.
 export const LIMITS = { looks: 60, pose: 20, holds: 30, has: 60, things: 120 };
 // One change the world's answer makes: the whole new text of what a person of the deed's place has, holds or how it
@@ -82,12 +85,13 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     const field = `places[${index}]`;
     if (!isObject(place)) return refuse(field, 'must be an object');
     if (place.open !== undefined && typeof place.open !== 'boolean') return refuse(`${field}.open`, 'must be true or false');
+    if (place.clock !== undefined && typeof place.clock !== 'boolean') return refuse(`${field}.clock`, 'must be true or false');
     if (place.minutesTo !== undefined && !isObject(place.minutesTo)) return refuse(`${field}.minutesTo`, 'must be an object');
     const minutesTo: { [place: string]: number } = {};
     for (const [to, minutes] of Object.entries(place.minutesTo ?? {})) minutesTo[to] = amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0);
     places.push({ id: idOf(place.id, `${field}.id`, places.map(known => known.id)), name: textOf(place.name, `${field}.name`),
       about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
-      things: boundedOf(place.things, `${field}.things`, LIMITS.things), open: place.open === true, minutesTo });
+      things: boundedOf(place.things, `${field}.things`, LIMITS.things), open: place.open === true, clock: place.clock === true, minutesTo });
   }
   for (const [index, place] of places.entries()) {
     const unknown = Object.keys(place.minutesTo).find(to => to === place.id || !places.some(known => known.id === to));
@@ -98,10 +102,12 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     const field = `characters[${index}]`;
     if (!isObject(character)) return refuse(field, 'must be an object');
     if (!places.some(place => place.id === character.place)) return refuse(`${field}.place`, 'must name a place of the list');
+    if (character.clock !== undefined && typeof character.clock !== 'boolean') return refuse(`${field}.clock`, 'must be true or false');
     characters.push({ id: idOf(character.id, `${field}.id`, characters.map(known => known.id)), name: textOf(character.name, `${field}.name`),
       place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), facts: factsOf(character.facts, `${field}.facts`),
       looks: boundedOf(character.looks, `${field}.looks`, LIMITS.looks), pose: boundedOf(character.pose, `${field}.pose`, LIMITS.pose),
-      holds: boundedOf(character.holds, `${field}.holds`, LIMITS.holds), has: boundedOf(character.has, `${field}.has`, LIMITS.has) });
+      holds: boundedOf(character.holds, `${field}.holds`, LIMITS.holds), has: boundedOf(character.has, `${field}.has`, LIMITS.has),
+      clock: character.clock === true });
   }
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
@@ -115,6 +121,49 @@ export function clockAt(world: World, at: number): string {
   const since = hours * 3600 + minutes * 60 + at, second = since % 86_400, day = Math.floor(since / 86_400) + 1;
   const time = [Math.floor(second / 3600), Math.floor(second / 60) % 60, second % 60].map(part => String(part).padStart(2, '0')).join(':');
   return day > 1 ? `day ${day} ${time}` : time;
+}
+
+// Whether the person `id` can read the clock in `place`: by a clock of its own or by the place's. On the way it is in
+// no place, and `place` is null.
+export const hasClock = (world: World, id: string, place: string | null) =>
+  world.characters.some(character => character.id === id && character.clock) || world.places.some(item => item.id === place && item.clock);
+// The parts of a day as someone without a clock tells them, each from its first hour on and the last one over
+// midnight until the first: finer under the open sky, where the light shows the hour, than under a roof, and the
+// night is one part in both.
+const PARTS: { [where in 'open' | 'roof']: [number, string][] } = {
+  open: [[5, 'early morning'], [7, 'morning'], [10, 'late morning'], [12, 'around midday'], [14, 'afternoon'], [16, 'late afternoon'],
+    [18, 'early evening'], [20, 'late evening'], [23, 'night']],
+  roof: [[5, 'morning'], [11, 'the middle of the day'], [15, 'afternoon'], [18, 'evening'], [23, 'night']],
+};
+// The most characters `sensed` gives beyond the number of the day.
+export const SENSED = Math.max(...[...PARTS.open, ...PARTS.roof].map(([, name]) => name.length)) + 10;
+// The time of the story as a body knows it with no clock at hand: the part of the day, and the day as the clock counts it.
+export function sensed(world: World, at: number, open: boolean): string {
+  const since = secondsOfDay(world.clock) + at, hour = Math.floor(since % 86_400 / 3600), day = Math.floor(since / 86_400) + 1;
+  const parts = PARTS[open ? 'open' : 'roof'], part = (parts.findLast(([from]) => hour >= from) ?? parts.at(-1)!)[1];
+  return day > 1 ? `day ${day}, ${part}` : part;
+}
+// The time as the person `id` in `place` can tell it, as a line of its memory opens with it: the clock when one is at
+// hand, and the part of the day otherwise. The engine sends a resident no time in any other form.
+export function timeFor(world: World, id: string, place: string | null, at: number): string {
+  return hasClock(world, id, place) ? clockAt(world, at) : `[${sensed(world, at, world.places.some(item => item.id === place && item.open))}]`;
+}
+
+// How far from the time of day it aimed at an action `until` that time ends for someone with no clock at hand: by at
+// most one part in `part` of the span to that time, and by `most` seconds at most, either way. A sleeper is off by up
+// to half an hour after a night, and one who waits or does something by up to three minutes after an hour.
+export const DRIFT = { sleep: { part: 10, most: 1800 }, wait: { part: 20, most: 180 }, do: { part: 20, most: 180 } };
+// The seconds an action `until` a time of day lasts when it begins at `now`. With a clock at hand it ends at that
+// time: the clock is the alarm. Without one the end is off by a number that follows from who acts, when and until
+// what time, and from nothing else, so the same journal always gives the same end. The span stays one the action allows.
+function lasting(world: World, actor: Person, kind: 'do' | 'wait' | 'sleep', now: number, until: string): number {
+  const span = secondsUntil(world, now, until);
+  if (hasClock(world, actor.id, actor.place)) return span;
+  const { part, most } = DRIFT[kind], off = Math.min(Math.floor(span / part), most);
+  let mixed = 2166136261;
+  for (const letter of `${actor.id} ${now} ${until}`) mixed = Math.imul(mixed ^ letter.codePointAt(0)!, 16777619) >>> 0;
+  mixed = Math.imul(mixed ^ (mixed >>> 15), 0x846CA68B) >>> 0;
+  return Math.max(1, Math.min(kind === 'sleep' ? MAX_SLEEP : MAX_SECONDS, span - off + ((mixed ^ (mixed >>> 16)) >>> 0) % (2 * off + 1)));
 }
 
 export const speechSeconds = (world: World, words: number) => Math.max(2, Math.ceil(words / world.wordsPerMinute * 60));
@@ -200,7 +249,8 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
   const place = actor.place as string;
   const here = awakeIn(people, place, actor);
   const event: Event = { at: now, clock: clockAt(world, now), kind: action.action, who: actor.id, place, to: null, text: action.text,
-    seconds: action.until === null ? action.seconds ?? 0 : secondsUntil(world, now, action.until), cut: false, heard: here.map(person => person.id),
+    seconds: action.until === null ? action.seconds ?? 0 : lasting(world, actor, action.action as 'do' | 'wait' | 'sleep', now, action.until), cut: false,
+    heard: here.map(person => person.id),
     note: action.note };
   actor.began = now;
   if (action.action === 'say' || action.action === 'call') {

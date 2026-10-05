@@ -15,7 +15,7 @@ import type { Entry } from './journal.ts';
 import { requestLimit, runLive } from './live.ts';
 import { openState } from './state.ts';
 import { readWorld } from './laws.ts';
-import { sizeOf } from './world.ts';
+import { clockAt, sizeOf } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
 // The weather changes every ten minutes of the story, from the fifth on; every third change does not get under a roof.
@@ -27,12 +27,13 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
   tiredHours: 13.1,
   weather: { start: { text: 'sky-0-0', indoors: 'roof-0-0' }, changes: SKIES.map(({ at, text, indoors }) => ({ text, indoors, day: Math.floor((START + at) / 86_400) + 1,
     at: [Math.floor((START + at) % 86_400 / 3600), Math.floor((START + at) / 60) % 60].map(part => String(part).padStart(2, '0')).join(':') })) },
+  // Two places of the six have a clock and every fifth person carries one.
   // Every text of a body, of belongings, of things and of facts is one word that names its kind and its owner, so
   // that a request shows whose it holds.
-  places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {}, open: index % 2 === 1,
+  places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {}, open: index % 2 === 1, clock: index % 3 === 0,
     things: `things-p${index}-0`, facts: `facts-p${index}-0` })),
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
-    facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, holds: `holds-c${index}-0`, ...(index % 4 ? { has: `has-c${index}-0` } : {}) })) });
+    facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, holds: `holds-c${index}-0`, ...(index % 4 ? { has: `has-c${index}-0` } : {}), clock: index % 5 === 0 })) });
 // The settings of sleep come from an environment, and the world file changes one of them itself.
 const ENVIRONMENT = JSON.stringify({ dayStart: '07:00', tiredHours: 2, spentHours: 13.25 });
 const world = readWorld(JSON.parse(source), JSON.parse(ENVIRONMENT));
@@ -56,6 +57,7 @@ export const LAWS = {
   body: 'What a person has, holds and how it is placed, and the things of a place, change only by the world\'s answer to a deed done in that place; a pose is also dropped when its owner leaves.',
   unseen: 'Nobody is sent what another person carries out of sight, or the looks, pose or holdings of a person in another place.',
   weather: 'The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of it.',
+  clock: 'Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place\'s.',
 };
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
@@ -65,13 +67,14 @@ const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.
 // `seen.turns` is a list, it gains for every request who was asked, a resident or for the world the deed's place, at
 // which record, whether for a turn, and the words of bodies, belongings, things and facts that the request held.
 // `sky` holds the words of the weather in the whole request, and `now` those after its history, where a turn says
-// the weather of the moment.
-type Asked = { record: number; who: string; turn: boolean; marks: string[]; sky: string[]; now: string[] };
-const SKY = /\b(?:sky|roof)-\d+-0/g;
+// the weather of the moment. `clocks` holds every time of the clock in the request, as the engine writes one.
+type Asked = { record: number; who: string; turn: boolean; marks: string[]; sky: string[]; now: string[]; clocks: string[] };
+const SKY = /\b(?:sky|roof)-\d+-0/g, CLOCK = /(?:day \d+ )?\d\d:\d\d:\d\d/g;
 const asker = (request: Request) => /\nYou are Person \d+ \((c\d+)\)\./.exec(request.system!)![1];
 const askedOf = (request: Request, record: number, who: string, turn: boolean): Asked => {
   const content = request.messages[0].content, body = `${request.system}${content}`;
-  return { record, who, turn, marks: body.match(MARK) ?? [], sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [] };
+  return { record, who, turn, marks: body.match(MARK) ?? [], sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [],
+    clocks: body.match(CLOCK) ?? [] };
 };
 const MARK = /\b(?:looks|pose|holds|has|things|facts)-[cp]\d+-\d+/g;
 function standIn(record: () => number) {
@@ -133,7 +136,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
-    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0, weather: 0, roofless: 0 };
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0, changed: 0, emptied: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0 };
   const sleepEnds = new Map<string, number>();
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
@@ -146,14 +149,26 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const open = new Set(world.places.filter(item => item.open).map(item => item.id));
   const felt = new Map(world.characters.map(character => [character.id, new Set<string>()]));
   const reaching = (state: number, spot: string) => open.has(spot) ? `sky-${state}-0` : state && !SKIES[state - 1].indoors ? null : `roof-${state}-0`;
+  // The times of the clock each one could read: those of the records that came while a clock was at hand.
+  const timed = new Map(world.characters.map(character => [character.id, new Set<string>()]));
+  const clocks = new Set(world.places.filter(item => item.clock).map(item => item.id));
+  const reads = ({ id, clock }: { id: string; clock: boolean }) => clock || (!away.has(id) && clocks.has(place.get(id)!));
+  const read = (...times: string[]) => { for (const character of world.characters) if (reads(character)) for (const time of times) timed.get(character.id)!.add(time); };
   let at = 0, asked = 0, sky = 0;
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
+    // A sleeper a deed wakes is told the moment the deed ends.
+    const ends = record.kind === 'result' ? [clockAt(world, journal.all[seq - 1].event.at + journal.all[seq - 1].event.seconds)] : [];
+    read(event.clock, ...ends);
     // A request made when the journal held this many records shows bodies, belongings and things as they stood then.
     // The world is sent everything of the deed's place and of those in it. A resident is sent its own looks and, for
     // a turn, its pose, holdings and what it carries, with what is seen of those in its place.
     for (; asked < turns.length && turns[asked].record === seq; asked += 1) {
       const { who, turn, marks } = turns[asked], spot = who.startsWith('p') ? who : place.get(who);
+      if (who !== spot) {
+        for (const time of turns[asked].clocks) law('clock', timed.get(who)!.has(time), seq);
+        if (turn) count[turns[asked].clocks.includes(event.clock) ? 'clocked' : 'clockless'] += 1;
+      }
       const near = turn ? world.characters.filter(({ id }) => id !== who && !away.has(id) && place.get(id) === spot) : [];
       const seen = (id: string) => [`looks-${id}-0`, bodies.get(id)!.pose, bodies.get(id)!.holds];
       const due = new Set((who === spot ? [things.get(who)!, `facts-${who}-0`, ...near.flatMap(({ id }) => [...seen(id), bodies.get(id)!.has, `facts-${id}-0`])]
@@ -228,6 +243,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
       law('arrival', away.get(event.who) === event.place, seq);
       away.delete(event.who);
       place.set(event.who, event.place);
+      // The one who arrives reads the clock of the place it came to.
+      read(event.clock);
     } else if (event.kind === 'sleep') {
       asleep.add(event.who);
       sleepEnds.set(event.who, event.at + event.seconds);
