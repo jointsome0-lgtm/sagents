@@ -7,8 +7,10 @@ import { StateError } from './journal.ts';
 import type { Entry, Store } from './journal.ts';
 
 const FORMAT = '13';
-// SQLite's own result codes for a file another connection holds, and for a file that is not a database.
-const BUSY = 5, NOT_A_DATABASE = 26;
+// SQLite's own result codes for a statement that names what the file does not have, for a file another connection
+// holds, and for a file that is not a database.
+const NO_SUCH = 1, BUSY = 5, NOT_A_DATABASE = 26;
+const FOREIGN = 'The state file cannot be used: it is not a state file of `live`.';
 const sqliteCode = (error: unknown) => error instanceof Error && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode & 0xff : null;
 
 // Opens the journal of the world whose file holds `world` and whose environment's file holds `environment`, or begins
@@ -20,24 +22,36 @@ export function openState(path: string, world: string, environment = ''): Store 
   let database: DatabaseSync;
   try {
     database = new DatabaseSync(path, { timeout: 0 });
-    database.exec('PRAGMA locking_mode = EXCLUSIVE; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; BEGIN EXCLUSIVE');
+    database.exec('PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE');
   } catch (error) {
     if (sqliteCode(error) === BUSY) throw new StateError('The state file is in use by another run. Wait until that run ends.');
-    if (sqliteCode(error) === NOT_A_DATABASE) throw new StateError('The state file cannot be used: it is not a state file of `live`.');
+    if (sqliteCode(error) === NOT_A_DATABASE) throw new StateError(FOREIGN);
     throw error;
   }
   try {
-    // The format is looked at before the journal's table is touched, so a file of another shape is refused in words.
-    database.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT; '
-      + 'CREATE TABLE IF NOT EXISTS journal (seq INTEGER PRIMARY KEY, record TEXT NOT NULL, event TEXT NOT NULL, by TEXT) STRICT');
-    const known = new Map(database.prepare('SELECT key, value FROM meta').all().map(row => [row.key, row.value]));
-    if (!known.size) database.prepare('INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)').run('format', FORMAT, 'world', hash);
-    else if (known.get('format') !== FORMAT) throw new StateError('The state file cannot be used: it was written by another version of `live`.');
-    else if (known.get('world') !== hash) throw new StateError('The state file belongs to another world file, or the world file has changed since.');
-    database.exec('COMMIT');
+    // Nothing is written before the file is known for a new one, with no table in it, or for a state file: a database
+    // of something else is refused as it was found, and a file of another format in words. The lock stays through.
+    const fresh = !database.prepare('SELECT 1 FROM sqlite_schema LIMIT 1').get();
+    if (!fresh) {
+      let known: Map<unknown, unknown>;
+      try { known = new Map(database.prepare('SELECT key, value FROM meta').all().map(row => [row.key, row.value])); } catch (error) {
+        if (sqliteCode(error) !== NO_SUCH) throw error;
+        throw new StateError(FOREIGN);
+      }
+      if (!known.has('format')) throw new StateError(FOREIGN);
+      if (known.get('format') !== FORMAT) throw new StateError('The state file cannot be used: it was written by another version of `live`.');
+      if (known.get('world') !== hash) throw new StateError('The state file belongs to another world file, or the world file has changed since.');
+    }
+    database.exec('COMMIT; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL');
+    if (fresh) {
+      database.exec('BEGIN; CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT; '
+        + 'CREATE TABLE journal (seq INTEGER PRIMARY KEY, record TEXT NOT NULL, event TEXT NOT NULL, by TEXT) STRICT');
+      database.prepare('INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)').run('format', FORMAT, 'world', hash);
+      database.exec('COMMIT');
+    }
   } catch (error) {
     database.close();
-    if (sqliteCode(error) === NOT_A_DATABASE) throw new StateError('The state file cannot be used: it is not a state file of `live`.');
+    if (sqliteCode(error) === NOT_A_DATABASE) throw new StateError(FOREIGN);
     throw error;
   }
   const insert = database.prepare('INSERT INTO journal (seq, record, event, by) VALUES (?, ?, ?, ?)');

@@ -3,9 +3,10 @@
 // answers: the laws below. It is here because a broken law shows one character another's life, or loses a memory,
 // without any error. The laws are written here and nowhere else.
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -504,6 +505,13 @@ test('thousands of steps of any answers leave a journal in which every law of th
     assert.throws(() => openState(path, `${source} `, ENVIRONMENT), StateError);
     assert.throws(() => openState(path, source, `${ENVIRONMENT} `), StateError);
     assert.throws(() => openState(path, source), StateError);
+    // A database of something else is refused as it was found: not one byte of it is changed.
+    const foreign = join(directory, 'other.sqlite'), other = new DatabaseSync(foreign);
+    other.exec('CREATE TABLE notes (body TEXT)');
+    other.close();
+    const before = readFileSync(foreign);
+    assert.throws(() => openState(foreign, source, ENVIRONMENT), StateError);
+    assert.deepEqual(readFileSync(foreign), before);
     const state = openState(path, source, ENVIRONMENT);
     try {
       const continued = [...state.entries()];
