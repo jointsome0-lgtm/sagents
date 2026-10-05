@@ -318,34 +318,8 @@ The journal and the state file:
 
 The laws of the world. Whatever the model answers, these hold in every journal. `npm test` plays thirty characters
 for thousands of steps with answers of every kind, checks each law from the journal alone, and a failure names the
-law and the record:
-
-- Time never goes back.
-- Nobody perceives what happened in another place, except the one a call was made to.
-- A traveller or a sleeper perceives nothing and takes no action.
-- Nobody acts before a speech they are hearing or making has ended.
-- A speech never holds more words than its turn allowed.
-- A traveller arrives in the place it set out for.
-- A long-term memory never exceeds its limit in words.
-- The record up to which a character's lines were folded never moves back.
-- No request to the model exceeds the size fixed by the world file.
-- Replaying the records gives every stored event again, and a journal that was changed is refused.
-- A run stopped and continued from its file gives the same journal as one that never stopped.
-- Every deed is followed by the world's answer and by nothing else.
-- A sleeper wakes only when its sleep ends or a deed's result wakes it.
-- Nobody acts after being awake for the world's limit: at that turn it falls asleep instead.
-- What a person has, holds and how it is placed, and the things of a place, change only by the world's answer to a
-  deed done in that place or to a speech addressed to someone of that place; a pose is also dropped when its owner
-  leaves or falls asleep.
-- Nobody is sent what another person carries out of sight, what is hidden in a place, the facts of the people of a
-  place whom nobody plays, or the looks, pose or holdings of a person in another place.
-- Someone of a place whom nobody plays speaks only in answer to a speech addressed to it in its place, once and
-  right after that speech.
-- A hidden thing is found only where it lies, by a search of its finder that has lasted its minutes or by a deed the
-  world says went straight to it, and then it is hidden for nobody.
-- The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of
-  it.
-- Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place's.
+law and the record. Each law is one sentence, and they are written in one place: `LAWS` in
+`src/invariants.test.ts`.
 
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again, with one
@@ -356,7 +330,8 @@ of that model arriving whole in between, end the run as `failed (output_limit)`.
 one line per event, or one JSON object per event with `--json`, and then one line of totals: the status and its
 reason, the story minutes played, the requests, the unusable answers of every kind and how many of them were cut
 at the output limit (`overlong`), the memory rewrites and how
-many of them were lost, and the tokens. In the text output a memory rewrite is shown whole, marked as private like a
+many of them were lost, and the tokens. The tokens are summed over the answers that reported their usage: when some
+reported none, the totals say how many (`unreported`) and do not count them as zero. In the text output a memory rewrite is shown whole, marked as private like a
 note.
 
 A model for each resident. `--cast <character id>=<model name>`, given as many times as needed, has that character

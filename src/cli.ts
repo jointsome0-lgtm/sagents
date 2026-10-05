@@ -164,14 +164,16 @@ if (command === 'ask') {
           worldPlayer: typeof given.values['world-model'] === 'string' ? playerOf(given.values['world-model']) : undefined, minutes, calls, journal: state, pause: state !== undefined,
           onEvent: (event, by) => { for (const line of json ? [JSON.stringify({ ...event, by })] : linesOf(world, event)) console.log(line); } });
         const played = Math.round(seconds / 6) / 10;
+        // Tokens are a sum over the answers that reported them, and the line says when some did not.
+        const unreported = (count: number) => count ? `, without ${count} answers that reported no usage` : '';
         console.log(json ? JSON.stringify({ status: totals.status, reason: totals.reason, minutes: played, calls: totals.calls, invalid: totals.invalid, overlong: totals.overlong,
-          rewrites: totals.rewrites, lost: totals.lost, inputTokens: totals.inputTokens, outputTokens: totals.outputTokens, models: totals.models })
+          rewrites: totals.rewrites, lost: totals.lost, unreported: totals.unreported, inputTokens: totals.inputTokens, outputTokens: totals.outputTokens, models: totals.models })
           : `${totals.status} (${totals.reason}): ${played} story minutes, ${totals.calls} calls, ${totals.invalid} invalid, ${totals.overlong} of them cut at the output limit, ${totals.rewrites} memory rewrites, ${
-            totals.lost} lost, ${totals.inputTokens} input tokens, ${totals.outputTokens} output tokens`);
+            totals.lost} lost, ${totals.inputTokens} input tokens, ${totals.outputTokens} output tokens${unreported(totals.unreported)}`);
         const models = Object.entries(totals.models);
         if (!json && models.length > 1) {
           for (const [name, tally] of models) {
-            console.log(`  ${name}: ${tally.calls} calls, ${tally.invalid} invalid, ${tally.overlong} of them cut at the output limit, ${tally.inputTokens} input tokens, ${tally.outputTokens} output tokens`);
+            console.log(`  ${name}: ${tally.calls} calls, ${tally.invalid} invalid, ${tally.overlong} of them cut at the output limit, ${tally.inputTokens} input tokens, ${tally.outputTokens} output tokens${unreported(tally.unreported)}`);
           }
         }
         if (totals.status === 'failed') process.exitCode = 1;

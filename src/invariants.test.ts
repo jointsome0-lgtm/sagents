@@ -1,9 +1,9 @@
 // The guard of the live world's rules: a world of thirty people is played for thousands of steps by a stand-in whose
 // answer is a function of the request, and then the journal alone is checked against what must hold whatever a model
 // answers: the laws below. It is here because a broken law shows one character another's life, or loses a memory,
-// without any error. README lists the same laws, word for word.
+// without any error. The laws are written here and nowhere else.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -381,9 +381,4 @@ test('thousands of steps of any answers leave a journal in which every law of th
       assert.ok(continued.length > 800);
     } finally { state.close(); }
   } finally { rmSync(directory, { recursive: true }); }
-});
-
-test('README lists the laws as they are checked here', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ');
-  for (const sentence of Object.values(LAWS)) assert.ok(readme.includes(`- ${sentence}`), sentence);
 });

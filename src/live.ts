@@ -254,12 +254,13 @@ export type Player = { respond: (request: Request) => Promise<Result>; model: st
 // after another, end a run: 3 when it is not given.
 export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number;
   onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number };
-export type Tally = { calls: number; invalid: number; overlong: number; inputTokens: number; outputTokens: number };
+export type Tally = { calls: number; invalid: number; overlong: number; unreported: number; inputTokens: number; outputTokens: number };
 // `reason` is `horizon` or `calls` for a run that ended as planned, and the failure's code for one that did not.
 // `seconds` is the story time this run played. `rewrites` counts the memories written anew and `lost` those of them
 // whose answer could not be used twice, so that the lines they were to keep are forgotten. `invalid` counts every
 // answer that could not be used, whatever was asked, and `overlong` those of them that the model's own limit of one
-// answer cut short, for which no tokens are known. `models` holds the same counts for each model's name.
+// answer cut short, for which no tokens are known. `unreported` counts the answers that arrived whole and came with no
+// usage, so that the tokens are the sum over the others and not a total that looks whole. `models` holds the same counts for each model's name.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; seconds: number; rewrites: number; lost: number;
   models: { [name: string]: Tally } };
 
@@ -273,12 +274,12 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(world), shared = sharedOf(world);
-  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, rewrites: 0, lost: 0, inputTokens: 0, outputTokens: 0,
+  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, unreported: 0, rewrites: 0, lost: 0, inputTokens: 0, outputTokens: 0,
     models: {} };
   // Who plays whom. Every request of a character, a turn or a memory, goes to its own connection under its own model.
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
-  const tallyOf = (player: { name: string }) => outcome.models[player.name] ??= { calls: 0, invalid: 0, overlong: 0, inputTokens: 0, outputTokens: 0 };
+  const tallyOf = (player: { name: string }) => outcome.models[player.name] ??= { calls: 0, invalid: 0, overlong: 0, unreported: 0, inputTokens: 0, outputTokens: 0 };
   const unusable = (player: { name: string }) => {
     outcome.invalid += 1;
     tallyOf(player).invalid += 1;
@@ -318,6 +319,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     cuts.delete(player.name);
     for (const tally of [outcome, tallyOf(player)]) {
       tally.calls += 1;
+      if (!answer.usage) tally.unreported += 1;
       tally.inputTokens += answer.usage?.inputTokens ?? 0;
       tally.outputTokens += answer.usage?.outputTokens ?? 0;
     }
