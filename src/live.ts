@@ -274,6 +274,9 @@ function deedOf(world: World, state: State, deed: Event): string {
 // A pose is as long as its limit of words lets it be, since the world's answer may make it so, a person carries and
 // a place holds as many records as the rules of things let them, each as long as a record can be, and every law adds
 // what it says it may. One answer of the world adds one line of what it moved, set and found, and one of what was heard next door.
+// That line names, for each move, the thing and two holders at most, each a thing, a person or the place: a resident
+// reads them by name, and the world, in the newest line its place keeps, under labels and with the id of a person or
+// the place, after the name of the one whose deed it was. A name of a person or a place has no limit, so the longest counts.
 // The facts of a thing are listed once wherever the thing is, and those of a counted thing or a stock go with every
 // part taken off it, so each record that one request can list may have the longest of such facts.
 export function requestLimit(world: World): number {
@@ -283,7 +286,8 @@ export function requestLimit(world: World): number {
   const system = sharedOf(world).length + longest(people) + longest(world.characters.map(character => character.sheet)) + Math.max(...world.characters.map(looks)) + 40;
   const head = 2 * longest(namesOf(world).map(character => character.name)) + longest(world.places.map(place => place.name)) + (world.remote?.length ?? 0) + SENSED + 140;
   const spots = Math.max(...world.places.map(place => place.things.reduce((sum, thing) => sum + (thing.hidden ? thing.hidden.spot.length + 160 : 0), 0)));
-  const told = (MAX_MOVES + MAX_SETS) * (3 * NAME_WORDS * CHARS_PER_WORD + 80) + spots + MAX_IN_PLACE * NAME_WORDS * CHARS_PER_WORD;
+  const holder = Math.max(longest(people), longest(places), NAME_WORDS * CHARS_PER_WORD);
+  const told = (MAX_MOVES + MAX_SETS) * (NAME_WORDS * CHARS_PER_WORD + 2 * holder + 80) + spots + MAX_IN_PLACE * NAME_WORDS * CHARS_PER_WORD + longest(people);
   const lines = (world.shortWords + 4 * (head + MAX_WORDS) + head + LIMITS.feels + head + LIMITS.beyond) * (CHARS_PER_WORD + 1) + told;
   const laws = LAWS.reduce((sum, law) => sum + law.size(world), 0);
   const visible = LIMITS.pose * CHARS_PER_WORD + MAX_ON_PERSON * RECORD + 60;
