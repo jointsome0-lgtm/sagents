@@ -2,7 +2,7 @@ import { ModelError } from './chatgpt.ts';
 import type { Request, Result } from './chatgpt.ts';
 import { advance, memoryStore, replay, RESULT_WORDS } from './journal.ts';
 import type { Record, State, Store } from './journal.ts';
-import { oldest, readMemory } from './memory.ts';
+import { idle, oldest, readMemory } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { CHARS_PER_WORD, clockAt, debtAt, spentAt, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, travelSeconds, wordLimit } from './world.ts';
 import type { Event, World } from './world.ts';
@@ -19,7 +19,7 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - call: you speak \`text\` to one person, \`to\` (that person's id), by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
 - go: you walk to another place of the list, \`place\` (its id). Moving about inside the place you are in is a do. On the way you hear and see nothing and cannot act.
 - do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it: the world tells you that.
-- wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). Speech near you, or someone coming or leaving, ends the wait early.
+- wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). The wait ends at once when someone speaks near you, comes or leaves, so a long wait loses nothing: do not wait in short steps.
 - sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}), or \`until\` a time of day. Asleep you hear and see nothing, and only someone's deed can wake you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
 - until: for do, wait and sleep, in place of \`seconds\`: a time of day like 06:30, the next moment the clock shows it. It must fall within the action's span.
 - note: with any action, a private line you keep for yourself. Nobody else ever reads it. Null when you have none.
@@ -81,10 +81,10 @@ Answer with one JSON object that has the single field \`memory\`.`;
 // memory or speech, and what it answers is held to the people and the place the rules know.
 export const WORLD_INSTRUCTIONS = `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.
 
-Answer only from the facts given. What the facts do not hold does not exist: a search for something they do not mention finds nothing of the kind.
+You are told what is there, and nothing else exists: a search for something you were not told of finds nothing of the kind. Say what is there as the world itself. Never speak of facts, of what was mentioned or listed, or of your task.
 
 Answer with one JSON object.
-- result: what the senses give as the direct result of the deed, in one or two plain sentences, in the language of the world's description. Say only what is seen, heard or felt, never what anyone thinks, says or does next: people who are awake answer on their own turns. Null when there is nothing to notice beyond the deed.
+- result: what the senses give as the direct result of the deed, in one or two plain sentences, in the language of the world's description. It never retells the deed: when there is nothing to notice beyond the deed itself, it is null. Say only what is seen, heard or felt, never what anyone thinks, says or does next: people who are awake answer on their own turns.
 - wakes: the ids of the sleepers here whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not.`;
 const worldSystemOf = (world: World) => `${WORLD_INSTRUCTIONS}
 
@@ -238,7 +238,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       await happened({ kind: 'arrive', who, at: now });
       continue;
     }
-    if (actor.asleep && !mind.lines.length) {
+    if (actor.asleep && idle(mind)) {
       await happened({ kind: 'wake', who, at: now });
       continue;
     }

@@ -5,7 +5,7 @@
 // at that moment. No model and no disk here.
 import { isDeepStrictEqual } from 'node:util';
 
-import { blank, lineOf, remember, rewrite } from './memory.ts';
+import { blank, idle, lineOf, remember, rewrite } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { apply, arrive, clockAt, drop, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, spentAt, start, wake } from './world.ts';
 import type { Action, Event, Person, Refusal, World } from './world.ts';
@@ -74,6 +74,7 @@ function perceived(world: World, event: Event, viewer: string): string {
 }
 
 // What a character remembers of its own action: the action, its note, and the sentence about a speech that was cut.
+// The first line is the action itself.
 function own(world: World, event: Event): string[] {
   const what = event.kind === 'say' ? `You say: "${event.text}"`
     : event.kind === 'call' ? `You call ${named(world.characters, event.to)} (${world.remote}): "${event.text}"`
@@ -140,19 +141,21 @@ export function advance(world: World, state: State, record: Record): Event {
     }
     const action = typeof record.action === 'string' ? { action: 'wait' as const, text: null, to: null, place: null, seconds: LOST_SECONDS, until: null, note: null } : record.action;
     event = apply(world, people, actor, action, record.at, record.limit);
-    remember(mind, ...(reason ? [`${event.clock} ${refused(world, reason)}`] : own(world, event)).map(line => lineOf(seq, line)));
+    const lines = (reason ? [`${event.clock} ${refused(world, reason)}`] : own(world, event)).map(line => lineOf(seq, line));
+    if (event.kind === 'sleep') lines[0].idle = true;
+    remember(mind, ...lines);
     if (event.kind === 'do') state.deed = event;
   } else {
-    // A sleeper wakes with nothing but its long-term memory, so its lines were folded first.
-    const due = record.kind === 'wake' ? actor.asleep && !mind.lines.length : record.kind === 'arrive' ? actor.place === null
+    // A sleeper wakes with its long-term memory and no line of anything it lived through, so those were folded first.
+    const due = record.kind === 'wake' ? actor.asleep && idle(mind) : record.kind === 'arrive' ? actor.place === null
       : record.kind === 'spent' && !actor.asleep && actor.place !== null && spentAt(world, actor, record.at);
     if (!due) return refuse('is a waking, an arrival or a falling asleep of someone who is not due one');
     if (record.kind === 'spent') {
       event = drop(world, people, actor, record.at);
-      remember(mind, lineOf(seq, `${event.clock} ${SPENT} (${event.seconds} s)`));
+      remember(mind, { ...lineOf(seq, `${event.clock} ${SPENT} (${event.seconds} s)`), idle: true });
     } else {
       event = record.kind === 'wake' ? wake(world, people, actor, record.at) : arrive(world, people, actor, record.at);
-      remember(mind, ...mind.waiting.splice(0), ...own(world, event).map(line => lineOf(seq, line)));
+      remember(mind, ...mind.waiting.splice(0), ...own(world, event).map(line => ({ ...lineOf(seq, line), ...(record.kind === 'wake' ? { idle: true as const } : {}) })));
     }
   }
   for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, perceived(world, event, id)));

@@ -3,14 +3,17 @@
 // size in words that the world sets, and that is what keeps a request to the model from growing with the story.
 import { cut, sizeOf } from './world.ts';
 
-// `seq` is the journal record the line came from.
-export type Line = { seq: number; text: string; size: number };
+// `seq` is the journal record the line came from. An `idle` line says only that the character fell asleep or woke.
+export type Line = { seq: number; text: string; size: number; idle?: true };
 // `folded` is the record up to which the lines were folded into `long`, or -1; `waiting` holds the calls made to the
 // character while it was on the way or asleep, which become lines when it arrives or wakes.
 export type Mind = { long: string; lines: Line[]; size: number; folded: number; waiting: Line[] };
 
 export const blank = (): Mind => ({ long: '', lines: [], size: 0, folded: -1, waiting: [] });
 export const lineOf = (seq: number, text: string): Line => ({ seq, text, size: sizeOf(text) });
+// Whether the character lived through nothing since its last rewrite but falling asleep and waking: then a waking has
+// nothing to fold, and asks no model.
+export const idle = (mind: Mind) => mind.lines.every(line => line.idle);
 
 export function remember(mind: Mind, ...lines: Line[]): void {
   mind.lines.push(...lines);

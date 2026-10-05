@@ -161,7 +161,8 @@ What a character knows:
   leaves out is forgotten. A longer answer is cut at the limit. It is asked to write in the past tense, without
   where it is at that moment, and to give a deed a result only where the lines show one.
 - A character rewrites its memory when it wakes: everything before the sleep is folded, and the waking and the calls
-  that waited begin the new lines. It also rewrites it at the start of a turn while the lines hold more than
+  that waited begin the new lines. A sleeper who has lived through nothing since its last rewrite but falling
+  asleep and waking wakes without one, and no model is asked. A character also rewrites its memory at the start of a turn while the lines hold more than
   `shortWords` words, 2000 by default: the oldest lines are folded until about half of that is left.
 - If the answer to a rewrite cannot be used, it is asked for once more. After that the old text stays, the lines are
   dropped all the same, and the journal and the totals say that a rewrite was lost.

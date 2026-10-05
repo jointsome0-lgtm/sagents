@@ -133,7 +133,7 @@ test('a sleeper perceives nothing and wakes with the memory it wrote and the cal
     anna: [act('say', { text: 'SECRET-WORD before sleep', note: 'NOTE-ANNA' }), act('sleep', { seconds: 600 }), JSON.stringify({ memory: 'LONG-ANNA' })],
     boris: [act('wait', { seconds: 30 }), act('say', { text: 'NIGHT-WORD' })],
     clara: [act('wait', { seconds: 60 }), act('call', { to: 'anna', text: 'WAITING-WORD' })],
-    dan: [act('sleep', { seconds: 100 }), 'no memory', JSON.stringify({ memory: ' ' })],
+    dan: [act('wait', { seconds: 3 }), act('sleep', { seconds: 97 }), 'no memory', JSON.stringify({ memory: ' ' })],
   });
   const journal = memoryStore();
   const outcome = await runLive({ world, respond, model: 'stand-in', minutes: 11, journal, pause: true });
@@ -161,8 +161,8 @@ Minutes from here: Blue room (blue) 1.
 This turn the \`text\` of a say or a call may hold 65 words at most.` }]);
   // Dan's two answers could not be used: the journal says the rewrite was lost, and he wakes knowing only that he woke.
   const lost = journal.all.find(({ record }) => record.kind === 'memory' && record.who === 'dan');
-  assert.deepEqual([lost?.event.kind, lost?.event.text, sent.dan.length], ['memory', null, 4]);
-  assert.match(sent.dan[3].messages[0].content, /^So far:\n09:01:40 You wake\.\n\nNow 09:01:40\./);
+  assert.deepEqual([lost?.event.kind, lost?.event.text, sent.dan.length], ['memory', null, 5]);
+  assert.match(sent.dan[4].messages[0].content, /^So far:\n09:01:40 You wake\.\n\nNow 09:01:40\./);
 });
 
 test('a time of day is the next moment the clock shows it, within the span the action allows, and the journal takes nothing else', () => {
@@ -195,20 +195,21 @@ test('a time of day is the next moment the clock shows it, within the span the a
 
 test('a character with a model of its own is asked through that connection under that name, for a turn and for a memory alike', async () => {
   const most = standIn({ boris: [act('say', { text: 'hello' })] });
-  const hers = standIn({ anna: [act('sleep', { seconds: 20 }), 'no memory', JSON.stringify({ memory: 'LONG-ANNA' }), act('wait', { seconds: 600 })] });
+  const hers = standIn({ anna: [act('sleep', { seconds: 5 }), act('wait', { seconds: 1 }), act('sleep', { seconds: 20 }), 'no memory', JSON.stringify({ memory: 'LONG-ANNA' }), act('wait', { seconds: 600 })] });
   const journal = memoryStore();
   const outcome = await runLive({ world, respond: most.respond, model: 'common', cast: { anna: { respond: hers.respond, model: 'own', name: 'api:own' } },
     minutes: 1, journal });
-  // Anna's four requests went to her connection and nobody else's did; each carries the model of its connection.
-  assert.deepEqual([Object.keys(hers.sent), hers.sent.anna.map(request => request.model)], [['anna'], ['own', 'own', 'own', 'own']]);
+  // Anna's six requests went to her connection and nobody else's did; each carries the model of its connection.
+  assert.deepEqual([Object.keys(hers.sent), hers.sent.anna.map(request => request.model)], [['anna'], Array(6).fill('own')]);
   assert.deepEqual(Object.keys(most.sent).sort(), ['boris', 'clara', 'dan']);
   assert.ok(Object.values(most.sent).flat().every(request => request.model === 'common'));
   // The journal says who answered, by the name as it was given, and nobody for a waking; the totals count each name.
+  // Her first sleep had nothing before it to remember, so she woke from it without a rewrite and no model was asked.
   assert.deepEqual(journal.all.filter(entry => entry.record.who === 'anna').map(entry => [entry.record.kind, entry.by]),
-    [['act', 'api:own'], ['memory', 'api:own'], ['wake', null], ['act', 'api:own']]);
+    [['act', 'api:own'], ['wake', null], ['act', 'api:own'], ['act', 'api:own'], ['memory', 'api:own'], ['wake', null], ['act', 'api:own']]);
   assert.ok(journal.all.filter(entry => entry.record.who !== 'anna').every(entry => entry.by === 'common'));
-  assert.deepEqual(outcome.models['api:own'], { calls: 4, invalid: 1, inputTokens: 400, outputTokens: 40 });
-  assert.equal(outcome.models.common.calls, outcome.calls - 4);
+  assert.deepEqual(outcome.models['api:own'], { calls: 6, invalid: 1, inputTokens: 600, outputTokens: 60 });
+  assert.equal(outcome.models.common.calls, outcome.calls - 6);
 });
 
 test('the world answers a deed from facts no resident is sent, knowing no sheet, note, memory or speech, and its answer has one place in the journal', async () => {
