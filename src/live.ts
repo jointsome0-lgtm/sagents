@@ -102,7 +102,8 @@ const NOTATION = `Every thing here is listed once, under a label like t7. What a
 // What the world is told to be when it is asked what came of a deed. It is sent facts, bodies and things and no
 // person's sheet, note, memory or speech, and what it answers is held to the people, the place and the things the
 // rules know. This text has changed since it was measured and is to be measured anew: it now tells of the facts of
-// things, of the places next door and of the field `beyond`, and `wakes` reaches next door. What was measured is
+// things, of the places next door and of the field `beyond`, `wakes` reaches next door, and the point on `feels` says
+// how an entry begins and gives none for the ordinary handling of a thing. What was measured is
 // form `A1f` of the check of 2026-10-05, the text without those, on a strong model and
 // on two weak ones: over the deeds done to a body every entry of `feels` that was due was there in 25 answers of 25
 // on each, none was for one who only watched, both deeds that only look or speak gave none, and the entries for
@@ -130,8 +131,8 @@ Answer with one JSON object, its fields in this order.
 - sets: the things whose state the deed changed, or an empty list. An entry has \`what\`, the label of a thing with a \`state\` mark, and \`state\`, one of the states in its brackets.
 - poses: the pose of each person here whose pose the deed changed, or an empty list. An entry has \`of\`, the id of the person, and \`text\`: how and where in the place the person now is, 20 words at most, in the language of the world's description. A pose names no thing that is held or worn: the lists say that.
 - wakes: the ids of the sleepers here or next door whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not. A sleeper next door is woken only by what \`beyond\` says is heard there, when it is loud enough to wake.
-- feels: what the deed makes a person here feel in their own body, or an empty list. An entry has \`of\`, the id of a person who is awake, and \`text\`: what that body feels, 20 words at most, in the language of the world's description. Only that person is told it. An entry is due where the deed does something to a body: effort, a pose held long, a blow, a touch, heat, cold, food, drink, smoke. One who is touched feels it, and so does the one who touches. When hands feel a body or a thing to judge it, the entry of their owner says what they find, in keeping with what you were told of that body or thing. Name what the body registers, such as pressure, weight, warmth, cold, pain, stretch, tiredness, breath, heartbeat or taste, never what the person thinks or wants, whether they like it, or what they do next. A deed that only looks, listens or speaks gives no entry, and one who only watches gets none.
-- beyond: what of the deed is heard in the places next door, in one sentence of ${LIMITS.beyond} words at most, in the language of the world's description, or null when nothing carries that far, as with most deeds. A knock at a door or on a wall, a shout, a crash or a door slammed is heard there; steps, quiet talk and the handling of things are not. It says the sound and not who made it, unless it is a voice, and then with its words.
+- feels: what the deed makes a person here feel in their own body, or an empty list. An entry has \`of\`, the id of a person who is awake, and \`text\`: what that body feels, 20 words at most, in the language of the world's description. Only that person is told it, right after the words \`You feel:\`, so the text begins with what is felt and never names the person or says that they feel. An entry is due where the deed does something to a body: effort, a pose held long, a blow, the touch of another body, heat, cold, food, drink, smoke. One who is touched feels it, and so does the one who touches. When hands feel a body or a thing to judge it, the entry of their owner says what they find, in keeping with what you were told of that body or thing. Name what the body registers, such as pressure, weight, warmth, cold, pain, stretch, tiredness, breath, heartbeat or taste, never what the person thinks or wants, whether they like it, or what they do next. A deed that only looks, listens or speaks gives no entry, and one who only watches gets none. The ordinary handling of a thing, taking it, carrying it, putting it down or handing it over, gives no entry either.
+- beyond: what of the deed is heard in the places next door, in one sentence of ${LIMITS.beyond} words at most, in the language of the world's description, or null when nothing carries that far, as with most deeds, and always when you are told of no place next door. A knock at a door or on a wall, a shout, a crash or a door slammed is heard there; steps, quiet talk and the handling of things are not. It says the sound and not who made it, unless it is a voice, and then with its words.
 - result: what the senses give as the direct result of the deed, in one or two plain sentences, in the language of the world's description. It never retells the deed: when there is nothing to notice beyond the deed itself, it is null. Say only what anyone here could see, hear or smell, never what one body alone feels, which goes to \`feels\`, and never what anyone thinks, says or does next: people who are awake answer on their own turns. It agrees with \`moves\` and \`sets\`: no thing changes hands, place or state in it without an entry there. It gives no numbers of things or of money.
 
 You may be told what is hidden here, each thing under its label. A hidden thing is seen by nobody, and no result, pose or entry of \`feels\` speaks of it or hints at it, whoever looks and wherever, until it is found. It is found in two ways. By a search that has lasted long enough: you are told which things this deed finds if it is a search, and you never decide whether a search has been long enough. Or by a deed that goes straight to the very spot named for it, however short the deed is: its label then goes into \`finds\`. A deed that names another spot, or names the thing and not the spot where it lies, does not go straight to it. When a thing is found either way, the result says where it turned up and what is seen of it, and from then on it lies in the place in sight. Only a deed that finds a hidden thing can move it or what it holds.`;
@@ -221,7 +222,7 @@ const hereOf = (world: World, state: State, place: Place) => world.characters.fl
     carriedOf(state.things.people.get(person.id)!)}${part('Facts', character.facts)}`];
 });
 // What the world is reminded of when it answers in a place, for a deed and for a figure alike: what came of the
-// latest deeds there, and what was said to the figures of the place and answered.
+// latest deeds there, in its own words and in what the rules moved, and what was said to the figures of the place and answered.
 const earlierOf = (state: State, place: Place) => {
   const results = state.results.get(place.id)!, said = state.said.get(place.id)!;
   return [...(results.length ? ['What came of earlier deeds here:', ...results.map(line => line.text)] : []),
@@ -292,7 +293,8 @@ export function requestLimit(world: World): number {
     + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + laws + local(false);
   const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
   // The world's request: every person could be in one place, each with its body, what it carries and facts, under the
-  // things, what is hidden, the results and the exchanges with its figures that the place keeps, and the weather.
+  // things, what is hidden, the results and the exchanges with its figures that the place keeps, the newest result
+// with what the rules moved, and the weather.
   // An answer that the rules refused is asked again with one sentence more.
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
   const lore = all([...world.places.flatMap(place => place.things), ...world.characters.flatMap(character => character.carries)]).filter(thing => thing.facts !== null);
@@ -303,7 +305,7 @@ export function requestLimit(world: World): number {
     + MAX_IN_PLACE * RECORD
     + 2 * places.reduce((sum, item) => sum + item.length + 20, 0) + people.reduce((sum, item) => sum + item.length + 12, 0) + 80 + ofThings
     + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + 40, 0)
-    + (RESULT_WORDS + SAID_WORDS + 4 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + laws + local(true) + 1200;
+    + (RESULT_WORDS + SAID_WORDS + 4 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + told + laws + local(true) + 1200;
   // A figure's answer is asked for with the same place, people and reminders, without what is hidden.
   const answer = deed + FIGURE_INSTRUCTIONS.length - WORLD_INSTRUCTIONS.length;
   return Math.max(resident, deed, answer);
@@ -481,7 +483,11 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       // A deed waits for the world's answer, and nothing else can happen before it.
       const place = world.places.find(item => item.id === deed.place)!, present = state.people.filter(person => person.place === deed.place);
       const sleepers = sleepersNear(state.people, place).map(person => person.id), hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
-      const got = await answered(deed, worldSystem, resultSchemaOf(state, place), deedOf(world, state, deed), answer => readResult(answer, sleepers, present.map(person => person.id), hidden));
+      const got = await answered(deed, worldSystem, resultSchemaOf(state, place), deedOf(world, state, deed), answer => {
+        // What is heard next door of a deed in a place with no place next door is nothing, whatever the answer says.
+        const came = readResult(answer, sleepers, present.map(person => person.id), hidden);
+        return came && { ...came, beyond: place.nextDoor.length ? came.beyond : null };
+      });
       if (!got) return outcome;
       await happened({ kind: 'result', who: deed.who, at: deed.at, ...(got.came ?? { text: null, wakes: [], moves: [], sets: [], poses: [], feels: [], beyond: null, search: false, finds: [] }) }, judge.name);
       continue;

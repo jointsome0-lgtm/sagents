@@ -194,7 +194,8 @@ The world answers a deed:
   of the other places, for each place next door who is there, by name and id and awake or asleep, or that nobody
   is, who is in the deed's place, awake or asleep, each with looks, pose, what it carries and its facts, the facts
   of the things listed, what
-  came of the latest earlier deeds in that place (400 words of them), the clock, and the doer's name with the deed
+  came of the latest earlier deeds in that place, in the world's words and in what the rules moved (400 words of
+  them), the clock, and the doer's name with the deed
   and its span. It is sent no sheet, note, memory or speech, and of those next door no looks, pose or things.
 - It answers with `search`, whether the deed was a search of the place; `finds`, the labels of the hidden things
   the deed went straight to; `moves`, `sets` and `poses`, described under «Things» below; `wakes`, the sleepers of
@@ -217,13 +218,15 @@ The world answers a deed:
   is told it, as a line `You feel: …` after what came of the deed, also when nothing else came of it. Nobody else in
   the place is told it and no figure is. A sleeper gets none, the one whom that deed wakes included, and so does
   someone elsewhere; an entry with no words is dropped. It is not kept for the world: what a place keeps of its
-  earlier deeds holds the `result` and no feeling, so no later request to the world has it. The transcript of
+  earlier deeds holds the `result`, what the rules moved and no feeling, so no later request to the world has it. The transcript of
   `live` shows it as a `private feeling of …` line, like a note. The text of the field passed the check of
   2026-10-05 on a strong model and on two weak ones. In two whole runs of that day with the weak local model as the
   world, 120 requests each, 9 deeds of 52 got a feeling and each was told to its doer alone: three where one was
   due, cold, smoke and the heat of a stove, and six for the ordinary handling of a thing, such as keys taken into
   the hand or boots pulled on. Nobody touched anybody in those runs, so entries for two bodies have been seen only
-  in single requests. This is the first of three planned layers of sensation. The
+  in single requests. The sentence of the field is narrower since those runs: it says that an entry is read right
+  after `You feel:`, so that it begins with what is felt and names nobody, that the touch is of another body, and
+  that the ordinary handling of a thing gives no entry. This wording has not been run on a real model. This is the first of three planned layers of sensation. The
   other two are not built: what a body feels from its own state over time, such as an arm tired by an hour of
   carrying, and a body that changes and is kept as a record.
 - `beyond` is a string or null: what of the deed is heard in the places next door, one sentence of 20 words at
@@ -236,8 +239,9 @@ The world answers a deed:
   with `… woke you.` when `beyond` is null: a weak world fills the old field sooner than the new one, so the
   waking is taken without the text. A sleeper next door whom `wakes` does not name is told nothing, and so is
   someone on the way. Nobody in the deed's own place is told the text, the doer included, and it is not kept for
-  the world: what a place keeps of its earlier deeds has none of it. A text for a place with no place next door is
-  kept in the record and told to nobody. The transcript of `live` shows it as a `heard next door: …` line under
+  the world: what a place keeps of its earlier deeds has none of it. The world is told to answer null when it
+  is told of no place next door, and a text for a deed in such a place is read as null all the same: the record
+  holds none, nobody is told, nothing is printed, and the answer is neither refused nor asked for again. The transcript of `live` shows it as a `heard next door: …` line under
   the result. The world's text with the facts of things, the places next door and this field has not been run on
   a real model: what was measured is the text before them.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
@@ -261,6 +265,16 @@ The world answers a deed:
 - The doer and everyone awake in the place read what came of it at their own next turn; it interrupts nobody. A
   sleeper it wakes has its sleep end when the deed ends, and one of the deed's own place reads who woke it and by
   what deed.
+- A place keeps for the world what came of the deeds done in it, the latest 400 words of lines and the newest line
+  whatever its size. A line is the clock, the doer, the deed and its span, then `Result:` with the world's words
+  when there were any, then `In the lists:` with what the rules say went where, was eaten or burned, is in another
+  state or was found, which is the line that those in the place are told, when there was any of that. So a deed
+  whose answer had entries and no words leaves a line too, and a deed that left neither leaves none. The line is
+  written from the postings and not from the answer's words, and every later request to the world in that place
+  has it, for a deed and for a figure's answer alike. In two whole runs of 2026-10-05, when a place kept only the
+  deeds whose result had words, a weak model twice answered by an earlier line against the lists: money still on
+  a counter after it had been pocketed, and keys gone from a box after they had been put back. Whether a weak
+  model reads the lists better with the new lines has not been seen in a whole run.
 - The answer is a record of its own, right after its deed: the journal takes nothing else there, so a run that
   stopped between the two asks the world first when it continues. An answer that cannot be used is asked for once
   more; after that nothing came of the deed, and the answer counts as unusable. An answer that the rules of things
@@ -480,10 +494,9 @@ What it lacks:
   what is there, but whether a deed moved a thing at all is the world's reading: a weak model leaves a move out, and
   then its words say that a jacket was hung up while the lists keep it on its owner. Nothing compares the words of
   a result with its moves. The facts of the world file never change.
-- A place keeps for the world only the deeds whose result had words. A deed that only moved a thing leaves no line
-  there, so the lines can fall behind the lists, and a weak model then answers by the line: in two whole runs it
-  did so twice, with money still on a counter after it had been pocketed and keys gone from a box after they had
-  been put back.
+- What a place keeps of its earlier deeds says what the rules moved and never where a thing is now: a thing that
+  left the place on its carrier, or was moved by a figure's answer, leaves no line there, and an older line of
+  the world's own words may still speak of it. The lists are the truth, and the world is told so.
 - Speech does not pass a door: a `say` is heard in the speaker's place and nowhere else, however loud. Someone
   who calls through a door does it by a `do`, and the one inside reads only what the world put into `beyond`, and
   can answer the same way. Whether a deed is heard next door is the world's reading, and nothing checks it; every

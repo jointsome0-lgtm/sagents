@@ -13,6 +13,7 @@ import { apply, arrive, isRefusal, next, readAction, sleepersNear, start, wake }
 import { readReply, reply, readResult, result } from './answer.ts';
 import { stocked } from './things.ts';
 import { clockAt, hasClock, timeFor } from './time.ts';
+import { closed } from './reading.ts';
 import { namesOf, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, sizeOf } from './world.ts';
 import type { Action, Refusal } from './action.ts';
 import type { Answer } from './answer.ts';
@@ -42,8 +43,8 @@ export type Record = { kind: 'act'; who: string; at: number; limit: number; acti
 export type Entry = { seq: number; record: Record; event: Event; by: string | null };
 // Everything a journal amounts to: where everyone is and what each one remembers. `seq` is the next record's number.
 // `deed` is a `do`, or a `say` to a figure, that the world has not answered yet: its answer is the only record that
-// can come next. `results` holds, for each place, the latest of what came of the deeds done there, which the world is
-// shown when it answers the next, and `said` the latest of what was said to the figures of the place and answered.
+// can come next. `results` holds, for each place, the latest of what came of the deeds done there, in the world's
+// words and in what the rules moved, set and found, which the world is shown when it answers the next, and `said` the latest of what was said to the figures of the place and answered.
 // `things` is what each place and each person holds now, with how long each person has searched each place, and `laws`
 // holds the parts of the state that the laws of `laws.ts` keep.
 export type State = { people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
@@ -155,11 +156,13 @@ export function advance(world: World, state: State, record: Record): Event {
   if (deed || record.kind === 'result') {
     // A deed is followed by the world's answer and by nothing else, and the world answers nothing but a deed.
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
-    const sleepers = sleepersNear(people, world.places.find(place => place.id === deed.place)!).map(person => person.id);
+    const spot = world.places.find(place => place.id === deed.place)!, sleepers = sleepersNear(people, spot).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
     const { text, wakes, moves, sets, poses, feels, beyond, search, finds } = record, answer = { text, wakes, moves, sets, poses, feels, beyond, search, finds };
     const hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
-    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, beyond, search, finds }), sleepers, present, hidden), answer)) {
+    // Nothing is heard next door of a deed in a place that has no place next door.
+    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, beyond, search, finds }), sleepers, present, hidden), answer)
+      || (beyond !== null && !spot.nextDoor.length)) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
     const event = result(world, people, state.things, deed, answer);
@@ -182,10 +185,12 @@ export function advance(world: World, state: State, record: Record): Event {
     for (const id of event.nearby!) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} From ${from}, next door: ${beyond}`));
     for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${present.includes(id) ? `${doer} woke you by this: ${deed.text}`
       : `Something from ${from}, next door, woke you${beyond === null ? '.' : `: ${beyond}`}`}`));
-    if (record.text !== null) {
-      // The place keeps what came of the deeds done in it, the latest ones.
-      const kept = state.results.get(deed.place)!;
-      kept.push(lineOf(seq, `${event.clock} ${doer} did (${deed.seconds} s): ${deed.text} Result: ${record.text}`));
+    if (text !== null || moved) {
+      // The place keeps what came of the deeds done in it, the latest ones: the world's words, and after them what the
+      // rules say went where, so that a deed that only moved a thing leaves a line and no older line is the last word
+      // about a thing that has gone since.
+      const kept = state.results.get(deed.place)!, lists = moved ? ` In the lists: ${moved}` : '';
+      kept.push(lineOf(seq, `${event.clock} ${doer} did (${deed.seconds} s): ${text === null ? closed(deed.text as string) : `${deed.text} Result: ${moved ? closed(text) : text}`}${lists}`));
       while (kept.length > 1 && kept.reduce((sum, line) => sum + line.size, 0) > RESULT_WORDS) kept.shift();
     }
     Object.assign(state, { deed: null, seq: seq + 1 });
