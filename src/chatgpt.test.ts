@@ -183,6 +183,16 @@ test('failures of the API become codes, a used up limit is budget_exceeded, and 
     assert.equal(error.code, code);
     assert.deepEqual(leaks(error), []);
   }
+  // The service says which model answers. Another one than was asked for is a failure, before any of its text is
+  // passed on and whatever it wrote; the same one, and a stream that names none, are an answer.
+  const naming = (model?: string) => sse([{ type: 'response.created', response: model === undefined ? {} : { model } }, { type: 'response.output_text.delta', delta: 'ok' },
+    { type: 'response.completed', response: { ...(model === undefined ? {} : { model }), usage: { input_tokens: 5, output_tokens: 1 } } }]);
+  const passed: string[] = [];
+  const moved = await createChatgpt({ path, fetch: async () => naming('gpt-6.1-luna') }).respond(request, { onText: (delta: string) => { passed.push(delta); } })
+    .catch((thrown: unknown) => thrown) as { code?: string };
+  assert.deepEqual([moved.code, passed], ['wrong_model', []]);
+  assert.equal((await createChatgpt({ path, fetch: async () => naming('gpt-6.1-sol') }).respond(request)).text, 'ok');
+  assert.equal((await createChatgpt({ path, fetch: async () => naming() }).respond(request)).text, 'ok');
   // The service's own code and the field it names are kept when they are identifiers, and dropped when they are text.
   const refused = async (body: object) => await createChatgpt({ path, fetch: async () => json(400, body) }).respond(request)
     .catch((thrown: unknown) => thrown) as { code?: string; httpStatus?: number; providerCode?: string; param?: string };

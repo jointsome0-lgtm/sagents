@@ -79,7 +79,7 @@ type Failure = { code?: unknown; param?: unknown } | null;
 type StreamEvent = {
   type?: unknown; delta?: unknown; code?: unknown; param?: unknown; error?: Failure; item?: { type?: unknown } | null;
   response?: {
-    error?: Failure; incomplete_details?: { reason?: unknown } | null;
+    model?: unknown; error?: Failure; incomplete_details?: { reason?: unknown } | null;
     usage?: { input_tokens?: unknown; output_tokens?: unknown; input_tokens_details?: { cached_tokens?: unknown } | null;
       output_tokens_details?: { reasoning_tokens?: unknown } | null } | null;
   } | null;
@@ -353,7 +353,7 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
 
   return {
     async respond(request: Request, { onText = async () => {}, signal, timeoutMs = 180_000 }: Controls = {}): Promise<Result> {
-      const body = JSON.stringify(responsesBody(request));
+      const sent = responsesBody(request), body = JSON.stringify(sent);
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
       const current = signal ? AbortSignal.any([signal, timer]) : timer;
@@ -386,6 +386,10 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
           try { event = JSON.parse(data); } catch { throw new ModelError('invalid_stream'); }
           if (!isObject(event)) throw new ModelError('invalid_stream');
           if (event.type === 'error') throw failure(event.code ?? event.error?.code, undefined, event.param ?? event.error?.param);
+          // Nobody is moved to another model unnoticed: an event that names the model that answers must name the one
+          // asked for. An event that names none leaves nothing to compare.
+          const answering = isObject(event.response) ? event.response.model : undefined;
+          if (typeof answering === 'string' && answering && answering !== sent.model) throw new ModelError('wrong_model');
           if (event.type === 'response.failed') throw failure(event.response?.error?.code, undefined, event.response?.error?.param);
           // An answer that stopped short is no answer, whatever was written by then.
           if (event.type === 'response.incomplete') throw new ModelError(event.response?.incomplete_details?.reason === 'max_output_tokens' ? 'output_limit' : 'incomplete_stream');
@@ -417,7 +421,8 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       }
     },
 
-    // The models the signed-in account may use, by the names a request takes.
+    // The names the plan's list of models shows for the signed-in account. It is not the set of names a request
+    // takes: a name that is not in it may be served all the same, so its absence says nothing about a request.
     async models(): Promise<string[]> {
       let response: Response;
       const token = await accessToken();

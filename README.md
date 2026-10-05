@@ -54,8 +54,9 @@ echo '{"model":"gpt-6.1-sol@low","messages":[{"role":"user","content":"Say hi"}]
 on `127.0.0.1` for the browser's way back, checks the answer and saves the tokens. `login --new` registers sagents
 again, for another account or when signing in with the saved registration no longer works.
 
-`status` says whether this computer is signed in. For a signed-in account it also asks OpenAI which models the plan
-offers.
+`status` says whether this computer is signed in. For a signed-in account it also asks OpenAI for the plan's list of
+models and says whether the name is in it. The list is not the set of names a request takes: a name that is not in it
+may be served all the same.
 
 `ask` reads one request as JSON from stdin and prints one JSON line. `--timeout <seconds>` limits the whole call and is
 180 by default.
@@ -82,6 +83,7 @@ limit cut short comes back as `output_limit`, without the text written by then.
 | `rate_limited`, `model_unavailable`, `provider_failed` | The service did not serve the request this time. `provider_failed` without `httpStatus` means it could not be reached. |
 | `invalid_request`, `context_limit` | The request cannot be served as it is. `param` names the field when the service did, and for `api:` the setting or the field that sagents itself refused, before anything was sent. |
 | `output_limit`, `incomplete_stream`, `invalid_stream`, `invalid_response`, `empty_response` | The answer did not arrive whole or cannot be read. |
+| `wrong_model` | The plan's service said that another model answers than the one asked for. Nothing of that answer is passed on. Checked only for the ChatGPT plan, and only when the stream names a model: a stream that names none is taken as it is, and an `api:` server's answer is not checked. |
 | `timeout`, `cancelled` | The call's own limit, or its caller, stopped it. |
 | `storage_failed` | The account file or its lock could not be read or written. An account file that cannot be read or understood is left as it is; repair or remove it by hand in `~/.config/sagents/`. |
 

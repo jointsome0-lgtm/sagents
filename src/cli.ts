@@ -10,7 +10,7 @@ import { environmentOf, isEnvironmentName, readWorld } from './laws.ts';
 import { WorldError } from './world.ts';
 
 const USAGE = `node src/cli.ts login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
-node src/cli.ts status [<model>]       whether this computer is signed in, and whether the plan offers the model
+node src/cli.ts status [<model>]       whether this computer is signed in, and whether the plan's list of models has the model
 node src/cli.ts ask [--timeout <s>]    one request as JSON on stdin, one JSON line on stdout
 node src/cli.ts live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>] [--state <file>]
                           [--environment <name>] [--json]
@@ -71,7 +71,8 @@ async function report(chatgpt: ReturnType<typeof createChatgpt>, name: string) {
   if (!status.signedIn || !status.planUse) return;
   const offered = await chatgpt.models();
   const model = name.split('@')[0];
-  console.log(`models offered: ${offered.length}; ${model}: ${offered.includes(model) ? 'yes' : 'no'}`);
+  // The list is not the set of names a request takes, so a name that is not in it is not said to be refused.
+  console.log(`models in the plan's list: ${offered.length}; ${model}: ${offered.includes(model) ? 'in the list' : 'not in the list, which does not say that a request with it fails'}`);
 }
 
 const [command, ...rest] = process.argv.slice(2);
