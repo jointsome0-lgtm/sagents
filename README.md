@@ -90,7 +90,7 @@ sign-in and the first real request have not happened yet.
 ### A live world
 
 ```sh
-node src/cli.ts live examples/night-station.json [--model <id>] [--cast <character>=<id>]... \
+node src/cli.ts live examples/night-station.json [--model <id>] [--cast <character>=<id>]... [--world-model <id>] \
   [--minutes <n>] [--calls <n>] [--state <file>] [--json]
 ```
 
@@ -114,8 +114,8 @@ The rules of time and hearing:
   nothing and does not act. A call to it is delivered when it arrives.
 - A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
   next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours.
-- A sleeper hears and sees nothing, interrupts
-  nobody and is woken by nothing. A call to it is delivered when it wakes. The others see it fall asleep and wake,
+- A sleeper hears and sees nothing and interrupts nobody. Only a deed that the world says wakes it ends its sleep
+  early. A call to it is delivered when it wakes. The others see it fall asleep and wake,
   and are told that it is asleep when they are told who is with them.
 - A leaving and an arrival are seen by everyone awake in the place and end their waiting. A `do`, a falling asleep
   and a waking are seen too, and a witness learns of them at its own next turn.
@@ -123,6 +123,24 @@ The rules of time and hearing:
   not a JSON object, named no action, lacked its text, called nobody who can be called, led to the place the
   character is already in or to no place of the list, or lasted no time the action allows. The character's next turn
   says which, and what to do instead.
+
+The world answers a deed:
+
+- A world file may give `facts` to the world, to a place and to a character: what is true there and is not seen at
+  once, 300 words each at most. No resident is ever sent any of it.
+- After every `do` the world is asked once what came of it, through the model of `--world-model`, which is
+  `--model`'s unless given. It is sent the world's description and facts, the place with its facts, who is there,
+  awake or asleep, with their facts, what came of the latest earlier deeds in that place (400 words of them), the
+  clock, and the doer's name with the deed and its span. It is sent no sheet, note, memory or speech.
+- It answers with `result`, one or two sentences of what the senses give, 65 words at most, or null when there is
+  nothing to notice; and with `wakes`, the sleepers of that place whom the deed wakes. Any other id is dropped.
+- The doer and everyone awake in the place read what came of it at their own next turn; it interrupts nobody. A
+  sleeper it wakes has its sleep end when the deed ends, and reads who woke it and by what deed.
+- The answer is a record of its own, right after its deed: the journal takes nothing else there, so a run that
+  stopped between the two asks the world first when it continues. An answer that cannot be used is asked for once
+  more; after that nothing came of the deed, and the answer counts as unusable.
+- What a model tells in a `do` does not by itself make anything true: the deed is what was tried, and what came of
+  it is what the world answered from the facts.
 
 What a character knows:
 
@@ -147,7 +165,7 @@ What a character knows:
 The journal and the state file:
 
 - Everything that happens is a record in an append-only journal: an action as it was read from the answer, or the
-  reason why the answer could not be used, an
+  reason why the answer could not be used, the world's answer to a deed, an
   arrival or a waking, a memory rewrite. Each record is stored with the event the rules made of it. There is no
   other state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
   plays the world. Any beginning of a journal is a whole world at that moment.
@@ -175,6 +193,8 @@ law and the record:
 - No request to the model exceeds the size fixed by the world file.
 - Replaying the records gives every stored event again, and a journal that was changed is refused.
 - A run stopped and continued from its file gives the same journal as one that never stopped.
+- Every deed is followed by the world's answer and by nothing else.
+- A sleeper wakes only when its sleep ends or a deed's result wakes it.
 
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again. It prints
@@ -199,9 +219,10 @@ large the requests were; `node src/bench.ts 1000 100 50` is 1000 characters in 1
 What it lacks:
 
 - There is no author above the characters. Nothing happens in the world unless a character does it.
-- Nobody judges what a `do` achieves. It is seen and takes time, and it changes nothing else.
-- Nobody can wake a sleeper, and a sleeper cannot be made to hear anything. A character chooses how long it sleeps
-  before it falls asleep.
+- The world answers a deed and does nothing of its own accord. The facts of the world file never change: that a
+  thing was taken or broken is known to the world only from the latest results it is shown for that place, and
+  nothing checks its answer against the facts.
+- The world answers only a `do`. What is claimed in a speech or a note is checked by nobody.
 - A rewrite is the model's own summary, and nothing checks that it adds no facts. What a character forgets cannot be
   looked up again: the journal keeps it, the character has no way to it.
 - The calls that wait for a sleeper or a traveller are kept until it wakes or arrives, however many they are. If

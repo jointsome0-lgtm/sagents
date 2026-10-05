@@ -6,9 +6,9 @@ import { test } from 'node:test';
 
 import { ModelError } from './chatgpt.ts';
 import type { Request } from './chatgpt.ts';
-import { advance, begin, JournalError, memoryStore } from './journal.ts';
+import { advance, begin, JournalError, memoryStore, replay } from './journal.ts';
 import type { Record } from './journal.ts';
-import { INSTRUCTIONS, runLive } from './live.ts';
+import { INSTRUCTIONS, runLive, WORLD_INSTRUCTIONS } from './live.ts';
 import { readAction, readWorld } from './world.ts';
 
 // Sixty words a minute: one word is one second.
@@ -18,13 +18,14 @@ const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', 
     { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA' }, { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN' }] });
 const act = (action: string, more: object = {}) => JSON.stringify({ action, text: null, to: null, place: null, seconds: null, until: null, note: null, ...more });
 const words = (count: number) => Array.from({ length: count }, (_, index) => `w${index + 1}`).join(' ');
-// Each character answers from its own list, then waits. The requests are kept as they were sent, per character.
+// Each character answers from its own list, then waits; the world answers from the list `world`, then that nothing came
+// of the deed. The requests are kept as they were sent, per character.
 function standIn(script: { [id: string]: (string | Error)[] }) {
   const sent: { [id: string]: Request[] } = {};
   const respond = async (request: Request) => {
-    const id = /\nYou are \w+ \((\w+)\)\.\n/.exec(request.system ?? '')![1];
+    const id = /\nYou are \w+ \((\w+)\)\.\n/.exec(request.system ?? '')?.[1] ?? 'world';
     (sent[id] ??= []).push(structuredClone(request));
-    const answer = script[id]?.shift() ?? act('wait', { seconds: 600 });
+    const answer = script[id]?.shift() ?? (id === 'world' ? JSON.stringify({ result: null, wakes: [] }) : act('wait', { seconds: 600 }));
     if (answer instanceof Error) throw answer;
     return { text: answer, usage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 } };
   };
@@ -92,7 +93,7 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   const journal = memoryStore();
   const outcome = await runLive({ world, respond, model: 'stand-in', minutes: 3, journal });
   const anna = journal.all.map(entry => entry.event).filter(event => event.who === 'anna');
-  const boris = journal.all.map(entry => entry.event).filter(event => event.who === 'boris');
+  const boris = journal.all.map(entry => entry.event).filter(event => event.who === 'boris' && event.kind !== 'result');
   // Ten words are ten seconds. Boris, held by them, acts when they end and before Anna, who spoke last.
   assert.deepEqual([anna[0].at, anna[0].seconds, anna[0].cut, anna[0].heard], [0, 10, false, ['boris']]);
   assert.deepEqual([boris[0].kind, boris[0].at], ['do', 10]);
@@ -106,8 +107,8 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.match(sent.anna[3].messages[0].content, /may hold 65 words at most\. 1 min 15 s of the story are left\.$/);
   // Nobody is free before the horizon any more: the run ends without another call.
   assert.deepEqual({ ...outcome, events: journal.all.length },
-    { status: 'done', reason: 'horizon', seconds: 180, calls: 8, invalid: 1, rewrites: 0, lost: 0, inputTokens: 800, outputTokens: 80, events: 8,
-      models: { 'stand-in': { calls: 8, invalid: 1, inputTokens: 800, outputTokens: 80 } } });
+    { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, rewrites: 0, lost: 0, inputTokens: 900, outputTokens: 90, events: 9,
+      models: { 'stand-in': { calls: 9, invalid: 1, inputTokens: 900, outputTokens: 90 } } });
 
   const short = standIn({});
   const few = memoryStore();
@@ -206,4 +207,41 @@ test('a character with a model of its own is asked through that connection under
   assert.ok(journal.all.filter(entry => entry.record.who !== 'anna').every(entry => entry.by === 'common'));
   assert.deepEqual(outcome.models['api:own'], { calls: 4, invalid: 1, inputTokens: 400, outputTokens: 40 });
   assert.equal(outcome.models.common.calls, outcome.calls - 4);
+});
+
+test('the world answers a deed from facts no resident is sent, knowing no sheet, note, memory or speech, and its answer has one place in the journal', async () => {
+  const withFacts = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', facts: 'FACT-WORLD', clock: '09:00', wordsPerMinute: 60, remote: 'telephone',
+    places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED' }, { id: 'blue', name: 'Blue room', about: 'Blue walls.', facts: 'FACT-BLUE' }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'red', sheet: 'SHEET-ANNA', facts: 'FACT-ANNA' }, { id: 'boris', name: 'Boris', place: 'red', sheet: 'SHEET-BORIS', facts: 'FACT-BORIS' },
+      { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA' }, { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN', facts: 'FACT-DAN' }] });
+  const { sent, respond } = standIn({
+    anna: [act('say', { text: 'SPEECH-WORD', note: 'NOTE-ANNA' }), act('sleep', { seconds: 600 }), JSON.stringify({ memory: 'LONG-ANNA' })],
+    boris: [act('wait', { seconds: 5 }), act('do', { text: 'shakes Anna', seconds: 10 })],
+    clara: [act('do', { text: 'opens the window', seconds: 5 })],
+    dan: [act('wait', { seconds: 3 })],
+    // The second answer names a sleeper of the place, someone awake there and someone elsewhere: only the first is woken.
+    world: [JSON.stringify({ result: 'COLD-WORD', wakes: [] }), JSON.stringify({ result: 'RESULT-WORD', wakes: ['dan', 'boris', 'anna'] })],
+  });
+  const journal = memoryStore();
+  await runLive({ world: withFacts, respond, model: 'stand-in', minutes: 1, journal, pause: true });
+  // The world is sent the facts of the world, of the place and of those in it, and the deed.
+  assert.deepEqual(sent.world[1], { model: 'stand-in', system: `${WORLD_INSTRUCTIONS}\n\nThe world: Two rooms\nA house with two rooms.\nFacts: FACT-WORLD`,
+    schema: sent.world[0].schema, messages: [{ role: 'user', content: `The place: Red room (red). Red walls. Facts: FACT-RED
+Here:
+- Anna (anna), asleep. Facts: FACT-ANNA
+- Boris (boris), awake. Facts: FACT-BORIS
+Now 09:00:07. Boris does, for 10 s: shakes Anna
+What comes of it?` }] });
+  for (const mark of ['SHEET-', 'NOTE-', 'LONG-', 'SPEECH-']) assert.equal(JSON.stringify(sent.world).includes(mark), false, `${mark} in the requests to the world`);
+  const { world: _, ...residents } = sent;
+  assert.equal(JSON.stringify(residents).includes('FACT-'), false);
+  // The doer and a witness read what came of the deed; the sleeper it woke reads who woke it and wakes when the deed ends.
+  assert.match(sent.boris[2].messages[0].content, /\n09:00:07 You do \(10 s\): shakes Anna\n09:00:07 What came of it: RESULT-WORD\n/);
+  assert.match(sent.dan[1].messages[0].content, /\n09:00:00 Clara does \(5 s\): opens the window\n09:00:00 What came of what Clara did: COLD-WORD\n/);
+  assert.match(sent.anna[3].messages[0].content, /\nSince then:\n09:00:17 Boris woke you by this: shakes Anna\n09:00:17 You wake\.\n\nNow 09:00:17\./);
+  // The answer is the record right after its deed, and the journal takes it nowhere else and nothing else there.
+  const deed = journal.all.findIndex(({ event }) => event.kind === 'do' && event.who === 'boris');
+  assert.deepEqual(journal.all[deed + 1].record, { kind: 'result', who: 'boris', at: 7, text: 'RESULT-WORD', wakes: ['anna'] });
+  assert.throws(() => replay(withFacts, journal.all.filter((_entry, index) => index !== deed + 1).map((entry, seq) => ({ ...entry, seq }))), JournalError);
+  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [] }), JournalError);
 });

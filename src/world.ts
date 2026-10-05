@@ -4,6 +4,8 @@
 export const MAX_WORDS = 65;
 export const MAX_SECONDS = 3600;
 export const MAX_SLEEP = 43_200;
+// The most words one `facts` of a world file may hold, so that the request to the world has a largest size.
+export const MAX_FACTS = 300;
 // A text of so many words holds at most this many characters for each of them, so that a limit in words is a limit
 // in characters too, whatever a model writes.
 export const CHARS_PER_WORD = 10;
@@ -13,11 +15,13 @@ export const LOST_SECONDS = 30;
 // The sentences about a world file that cannot be used; they are this file's own and may be shown.
 export class WorldError extends Error {}
 
-export type Place = { id: string; name: string; about: string; minutesTo: { [place: string]: number } };
-export type Character = { id: string; name: string; place: string; sheet: string };
+// `facts` is what is true of the world, of a place or of a person and is not seen at once. It is for the world's own
+// answers to what people do and never for a character: no character is sent any of it.
+export type Place = { id: string; name: string; about: string; facts: string | null; minutesTo: { [place: string]: number } };
+export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null };
 // `remote` names the means by which people reach each other from afar; a world with null has none.
 // `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps.
-export type World = { title: string; about: string; clock: string; wordsPerMinute: number; remote: string | null;
+export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null;
   travelMinutes: number; shortWords: number; longWords: number; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
@@ -33,8 +37,10 @@ export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(rea
 // `place` is where it happened; `to` is the character called, or the place a `go` leads to; `heard` holds the ids of
 // those who perceived it when it happened, without the one who did it. A `memory` is a character's long-term text
 // written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
-export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory'; who: string; place: string; to: string | null; text: string | null;
-  seconds: number; cut: boolean; heard: string[]; note: string | null };
+// A `result` is the world's answer to the `do` before it, of the same `who`: `text` is what came of the deed, or null
+// when nothing did that could be noticed, and `wakes`, which only a result has, the sleepers the deed wakes.
+export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result'; who: string; place: string; to: string | null;
+  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[] };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
 // is the start of its own last action.
@@ -50,6 +56,11 @@ const amountOf = (value: unknown, field: string, absent: number): number => valu
 const countOf = (value: unknown, field: string, absent: number): number => value === undefined ? absent
   : typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : refuse(field, 'must be a whole number above zero');
 const listOf = (value: unknown, field: string): unknown[] => Array.isArray(value) && value.length ? value : refuse(field, 'must be a list that is not empty');
+function factsOf(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) return null;
+  const facts = textOf(value, field);
+  return sizeOf(facts) <= MAX_FACTS ? facts : refuse(field, `must hold ${MAX_FACTS} words at most`);
+}
 function idOf(value: unknown, field: string, taken: string[]): string {
   if (typeof value !== 'string' || !ID.test(value)) return refuse(field, 'must be a short id of Latin letters, digits, `_` and `-`');
   return taken.includes(value) ? refuse(field, 'repeats an id') : value;
@@ -68,7 +79,7 @@ export function readWorld(value: unknown): World {
     const minutesTo: { [place: string]: number } = {};
     for (const [to, minutes] of Object.entries(place.minutesTo ?? {})) minutesTo[to] = amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0);
     places.push({ id: idOf(place.id, `${field}.id`, places.map(known => known.id)), name: textOf(place.name, `${field}.name`),
-      about: textOf(place.about, `${field}.about`), minutesTo });
+      about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`), minutesTo });
   }
   for (const [index, place] of places.entries()) {
     const unknown = Object.keys(place.minutesTo).find(to => to === place.id || !places.some(known => known.id === to));
@@ -80,9 +91,9 @@ export function readWorld(value: unknown): World {
     if (!isObject(character)) return refuse(field, 'must be an object');
     if (!places.some(place => place.id === character.place)) return refuse(`${field}.place`, 'must name a place of the list');
     characters.push({ id: idOf(character.id, `${field}.id`, characters.map(known => known.id)), name: textOf(character.name, `${field}.name`),
-      place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`) });
+      place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), facts: factsOf(character.facts, `${field}.facts`) });
   }
-  return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), clock: value.clock,
+  return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
     travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), shortWords: countOf(value.shortWords, 'shortWords', 2000),
     longWords: countOf(value.longWords, 'longWords', 400), places, characters };
@@ -242,4 +253,27 @@ export function wake(world: World, people: Person[], sleeper: Person, now: numbe
   sleeper.asleep = false;
   return { at: now, clock: clockAt(world, now), kind: 'wake', who: sleeper.id, place, to: null, text: null, seconds: 0, cut: false,
     heard: awakeIn(people, place, sleeper).map(person => person.id), note: null };
+}
+
+// The world's answer to a deed as it can be taken, or null when it cannot be used. `text` becomes one line of
+// `MAX_WORDS` words at most, and null when there is nothing in it; of `wakes` only the ids in `sleepers` are kept,
+// each once, in their order.
+export function readResult(answer: string, sleepers: string[]): { text: string | null; wakes: string[] } | null {
+  let value: unknown;
+  try { value = JSON.parse(answer); } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return null;
+  }
+  if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || !Array.isArray(value.wakes)) return null;
+  const named: unknown[] = value.wakes;
+  return { text: cut(wordsOf(value.result ?? '').join(' '), MAX_WORDS).text || null, wakes: sleepers.filter(id => named.includes(id)) };
+}
+
+// The world's answer to a deed takes effect: each sleeper it wakes has its sleep end when the deed ends, at `end`.
+// The waking itself comes at that sleeper's turn, as every waking does. Those awake in the place perceive the answer.
+export function result(world: World, people: Person[], deed: Event, text: string | null, wakes: string[]): Event {
+  const doer = people.find(person => person.id === deed.who)!;
+  for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + deed.seconds);
+  return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
+    heard: text === null ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null, wakes };
 }

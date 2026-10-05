@@ -1,10 +1,10 @@
 import { ModelError } from './chatgpt.ts';
 import type { Request, Result } from './chatgpt.ts';
-import { advance, memoryStore, replay } from './journal.ts';
-import type { Record, Store } from './journal.ts';
+import { advance, memoryStore, replay, RESULT_WORDS } from './journal.ts';
+import type { Record, State, Store } from './journal.ts';
 import { oldest, readMemory } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
-import { CHARS_PER_WORD, clockAt, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, travelSeconds, wordLimit } from './world.ts';
+import { CHARS_PER_WORD, clockAt, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, travelSeconds, wordLimit } from './world.ts';
 import type { Event, World } from './world.ts';
 
 // The `live` mode: every character of a world is played by a model, one call for one action, under the story's clock.
@@ -18,9 +18,9 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - say: you speak \`text\` aloud. Everyone in your place hears it.
 - call: you speak \`text\` to one person, \`to\` (that person's id), by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
 - go: you walk to another place of the list, \`place\` (its id). Moving about inside the place you are in is a do. On the way you hear and see nothing and cannot act.
-- do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it.
+- do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it: the world tells you that.
 - wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). Speech near you, or someone coming or leaving, ends the wait early.
-- sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}), or \`until\` a time of day. Asleep you hear and see nothing, and nothing and nobody wakes you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
+- sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}), or \`until\` a time of day. Asleep you hear and see nothing, and only someone's deed can wake you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
 - until: for do, wait and sleep, in place of \`seconds\`: a time of day like 06:30, the next moment the clock shows it. It must fall within the action's span.
 - note: with any action, a private line you keep for yourself. Nobody else ever reads it. Null when you have none.
 
@@ -38,6 +38,8 @@ const text = { type: ['string', 'null'] };
 const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'note'],
   properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: text,
     seconds: { type: ['integer', 'null'] }, until: text, note: text } });
+const RESULT_SCHEMA = { type: 'object', additionalProperties: false, required: ['result', 'wakes'],
+  properties: { result: text, wakes: { type: 'array', items: { type: 'string' } } } };
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
@@ -73,17 +75,49 @@ const rewriteOf = (world: World, clock: string, waking: boolean) => `Now ${clock
 Write your memory anew as one text of at most ${world.longWords} words, in the language of your sheet, from what you remember and the lines above: what you know about people, what you want, what was promised and by whom, what has changed in you. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten. A longer text is cut at the limit.
 Answer with one JSON object that has the single field \`memory\`.`;
 
+// What the world is told to be when it is asked what came of a deed. It is sent facts and no person's sheet, note,
+// memory or speech, and what it answers is held to the people and the place the rules know.
+export const WORLD_INSTRUCTIONS = `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.
+
+Answer only from the facts given. What the facts do not hold does not exist: a search for something they do not mention finds nothing of the kind.
+
+Answer with one JSON object.
+- result: what the senses give as the direct result of the deed, in one or two plain sentences, in the language of the world's description. Say only what is seen, heard or felt, never what anyone thinks, says or does next: people who are awake answer on their own turns. Null when there is nothing to notice beyond the deed.
+- wakes: the ids of the sleepers here whom the deed wakes, or an empty list. A sleeper breathes and is alive unless the facts say otherwise. Touch, shaking or a loud noise right by a sleeper wakes them; quiet steps do not.`;
+const worldSystemOf = (world: World) => `${WORLD_INSTRUCTIONS}
+
+The world: ${world.title}
+${world.about}${world.facts === null ? '' : `\nFacts: ${world.facts}`}`;
+// One deed as the world is asked about it: the place, who is there, what came of earlier deeds there, and the deed.
+function deedOf(world: World, state: State, deed: Event): string {
+  const place = world.places.find(item => item.id === deed.place)!;
+  const facts = (item: { facts: string | null }) => item.facts === null ? '' : ` Facts: ${item.facts}`;
+  const here = world.characters.flatMap((character, index) => state.people[index].place !== place.id ? []
+    : [`- ${tagged(character)}, ${state.people[index].asleep ? 'asleep' : 'awake'}.${facts(character)}`]);
+  const earlier = state.results.get(place.id)!;
+  return [`The place: ${tagged(place)}. ${place.about}${facts(place)}`, 'Here:', ...here,
+    ...(earlier.length ? ['What came of earlier deeds here:', ...earlier.map(line => line.text)] : []),
+    `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`, 'What comes of it?'].join('\n');
+}
+
 // No request of a world is longer than this many characters, system text and message together, however long the
 // world has run. A line holds a speech, a note or a deed of `MAX_WORDS` words under a head of names and a clock, a
-// character's own action is three lines at most, and the lines of one request are `shortWords` and one such action.
+// character's own action is four lines at most with what came of it, and the lines of one request are `shortWords` and one such action.
 export function requestLimit(world: World): number {
   const longest = (texts: string[]) => Math.max(...texts.map(item => item.length));
   const people = world.characters.map(tagged), places = world.places.map(tagged);
   const system = sharedOf(world).length + longest(people) + longest(world.characters.map(character => character.sheet)) + 20;
   const head = 2 * longest(world.characters.map(character => character.name)) + longest(world.places.map(place => place.name)) + (world.remote?.length ?? 0) + 120;
-  const lines = (world.shortWords + 3 * (head + MAX_WORDS)) * (CHARS_PER_WORD + 1);
+  const lines = (world.shortWords + 4 * (head + MAX_WORDS)) * (CHARS_PER_WORD + 1);
   const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + 400;
-  return system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
+  const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
+  // The world's request: every person could be in one place, each with facts, under the results the place keeps.
+  const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
+  const deed = worldSystemOf(world).length
+    + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place)))
+    + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character), 0)
+    + (RESULT_WORDS + 2 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + 400;
+  return Math.max(resident, deed);
 }
 
 // One event of a live run as lines for a person, or none for a wait that left no note. A note and a memory are the
@@ -99,7 +133,9 @@ export function linesOf(world: World, event: Event): string[] {
             : event.kind === 'wake' ? `${who} wakes`
               : event.kind === 'memory' ? `private memory of ${who}${event.cut ? ' (cut)' : ''}: ${
                 event.text?.replaceAll('\n', '\n         ') ?? 'the rewrite was lost, and what it was to hold is forgotten'}`
-                : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}` : `${who} waits (${event.seconds} s)`;
+                : event.kind === 'result' ? `what came of what ${who} did: ${event.text ?? 'nothing that could be noticed'}${
+                  event.wakes?.length ? ` (wakes ${event.wakes.map(id => named(world.characters, id)).join(', ')})` : ''}`
+                  : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}` : `${who} waits (${event.seconds} s)`;
   return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} [${named(world.places, event.place)}] ${what}`]),
     ...(event.note ? [`         private note of ${who}: ${event.note}`] : [])];
 }
@@ -111,8 +147,9 @@ export function linesOf(world: World, event: Event): string[] {
 // totals keep; it is `model` when it is not given.
 export type Player = { respond: (request: Request) => Promise<Result>; model: string; name?: string };
 // `respond`, `model` and `name` play everyone whom `cast` does not name by id. `onEvent` is given the event and the
-// name of the model whose answer it came of, or null.
-export type Live = Player & { world: World; cast?: { [id: string]: Player }; minutes?: number; calls?: number;
+// name of the model whose answer it came of, or null. `worldPlayer` answers what came of a deed, and is the same
+// player as everyone's when it is not given.
+export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number;
   onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean };
 export type Tally = { calls: number; invalid: number; inputTokens: number; outputTokens: number };
 // `reason` is `horizon` or `calls` for a run that ended as planned, and the failure's code for one that did not.
@@ -125,7 +162,7 @@ export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; secon
 // Plays the world on from its journal until the horizon, the limit of model calls or a failure of the connection.
 // `calls` counts the answers that arrived, a memory's as well as a turn's. A failure ends the run at once: nothing is
 // tried again, and the journal holds everything up to it.
-export async function runLive({ world, respond, model, name, cast = {}, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
+export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
   pause = false }: Live): Promise<Outcome> {
   const state = replay(world, journal.entries());
   const stands = next(state.people).freeAt;
@@ -172,7 +209,25 @@ export async function runLive({ world, respond, model, name, cast = {}, minutes 
   // so a run that stops between any two steps continues as if it had not. Characters in different places who are free
   // at the same moment cannot perceive each other's actions, apart from a call: their calls to the model could run in
   // parallel here.
+  const judge = { ...(worldPlayer ?? everyone), name: worldPlayer ? worldPlayer.name ?? worldPlayer.model : everyone.name };
+  const worldSystem = worldSystemOf(world);
   for (;;) {
+    const deed = state.deed;
+    if (deed) {
+      // A deed waits for the world's answer, and nothing else can happen before it. An answer that cannot be used
+      // gets one more try; after that nothing came of the deed.
+      const request = { system: worldSystem, schema: RESULT_SCHEMA, messages: [{ role: 'user' as const, content: deedOf(world, state, deed) }] };
+      const sleepers = state.people.filter(person => person.asleep && person.place === deed.place).map(person => person.id);
+      let came = null;
+      for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
+        const answer = await ask(judge, request);
+        if (answer === null) return outcome;
+        came = readResult(answer, sleepers);
+        if (!came) unusable(judge);
+      }
+      await happened({ kind: 'result', who: deed.who, at: deed.at, text: came?.text ?? null, wakes: came?.wakes ?? [] }, judge.name);
+      continue;
+    }
     const actor = next(state.people);
     const now = actor.freeAt, who = actor.id, mind = state.minds.get(who)!;
     outcome.seconds = Math.min(now, horizon) - stands;

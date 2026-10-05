@@ -1,7 +1,8 @@
 // How much of a step of the live mode is this program's own work, and does a request stop growing?
 //   node src/bench.ts [characters] [places] [turns] [--memory]
 // A synthetic town is played by a stand-in that answers at once, so every millisecond here is the harness's and the
-// disk's. `turns` is the number of model calls for each character, the memory rewrites among them. The journal goes
+// disk's. `turns` is the number of model calls for each character, the memory rewrites and the world's answers to
+// deeds among them. The journal goes
 // to a state file in the temporary directory, as a long run's would, or stays in memory with `--memory`. One JSON
 // line comes out: the requests in characters over the first quarter, the first half and the whole run, and the
 // process memory at the end of each.
@@ -30,7 +31,7 @@ const memory = JSON.stringify({ memory: Array.from({ length: Math.ceil(world.lon
 const none = { text: null, to: null, place: null, seconds: null, until: null, note: null };
 // The marks at a quarter, a half and the whole of the calls: the requests up to each, and the memory then.
 const marks = [calls / 4, calls / 2, calls].map(until => ({ until, characters: 0, largest: 0, rssMB: 0 }));
-let count = 0, rewrites = 0;
+let count = 0, rewrites = 0, results = 0;
 const respond = async (request: Request) => {
   // What the transport would do with it: build the body of the request.
   const size = JSON.stringify(request).length;
@@ -42,6 +43,10 @@ const respond = async (request: Request) => {
     if (count === Math.floor(mark.until)) mark.rssMB = Math.round(process.memoryUsage().rss / 1e6);
   }
   const usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+  if ('result' in (request.schema as { properties: object }).properties) {
+    results += 1;
+    return { text: JSON.stringify({ result: speech, wakes: [] }), usage };
+  }
   if ('memory' in (request.schema as { properties: object }).properties) {
     rewrites += 1;
     return { text: memory, usage };
@@ -49,7 +54,8 @@ const respond = async (request: Request) => {
   const roll = random();
   const answer = roll < 0.55 ? { ...none, action: 'say', text: speech, note: 'заметка для себя' }
     : roll < 0.6 ? { ...none, action: 'call', to: `c${Math.floor(random() * people)}`, text: speech }
-      : roll < 0.78 ? { ...none, action: 'wait', seconds: 30 }
+      : roll < 0.7 ? { ...none, action: 'do', text: speech, seconds: 30 }
+        : roll < 0.78 ? { ...none, action: 'wait', seconds: 30 }
         : roll < 0.8 ? { ...none, action: 'sleep', seconds: 1 + Math.floor(random() * 28_800) } : { ...none, action: 'go', place: `p${Math.floor(random() * places)}` };
   return { text: JSON.stringify(answer), usage };
 };
@@ -63,7 +69,7 @@ try {
     onEvent: () => { records += 1; } });
   const ms = performance.now() - started;
   const [quarter, half, whole] = marks.map(mark => ({ mean: Math.round(mark.characters / Math.floor(mark.until)), largest: mark.largest, rssMB: mark.rssMB }));
-  console.log(JSON.stringify({ characters: people, places, journal: state ? 'file' : 'memory', reason: outcome.reason, calls: outcome.calls, turns: outcome.calls - rewrites,
+  console.log(JSON.stringify({ characters: people, places, journal: state ? 'file' : 'memory', reason: outcome.reason, calls: outcome.calls, turns: outcome.calls - rewrites - results, results,
     rewrites: outcome.rewrites, lost: outcome.lost, invalid: outcome.invalid, records, storyMinutes: Math.round(outcome.seconds / 60),
     seconds: +(ms / 1000).toFixed(1), msPerStep: +(ms / outcome.calls).toFixed(3), requestLimit: requestLimit(world), quarter, half, whole }));
 } finally {

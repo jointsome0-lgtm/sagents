@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { StateError } from './journal.ts';
 import type { Entry, Store } from './journal.ts';
 
-const FORMAT = '2';
+const FORMAT = '3';
 // SQLite's own result codes for a file another connection holds, and for a file that is not a database.
 const BUSY = 5, NOT_A_DATABASE = 26;
 const sqliteCode = (error: unknown) => error instanceof Error && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode & 0xff : null;

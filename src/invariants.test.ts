@@ -35,6 +35,8 @@ export const LAWS = {
   request: 'No request to the model exceeds the size fixed by the world file.',
   replay: 'Replaying the records gives every stored event again, and a journal that was changed is refused.',
   resume: 'A run stopped and continued from its file gives the same journal as one that never stopped.',
+  deed: 'Every deed is followed by the world\'s answer and by nothing else.',
+  waking: 'A sleeper wakes only when its sleep ends or a deed\'s result wakes it.',
 };
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
@@ -53,7 +55,11 @@ function standIn(record: () => number) {
     const words = (count: number) => Array.from({ length: count }, () => `w${upTo(999)}`).join(' ');
     const roll = random();
     let answer: unknown;
-    if ('memory' in (request.schema as { properties: object }).properties) {
+    if ('result' in (request.schema as { properties: object }).properties) {
+      // The world: sometimes no answer, sometimes nothing to notice, and it wakes some of the sleepers and names others.
+      const sleepers = [...body.matchAll(/\((c\d+)\), asleep/g)].map(match => match[1]);
+      answer = roll < 0.1 ? 'no answer' : { result: roll < 0.4 ? null : words(upTo(90)), wakes: [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`] };
+    } else if ('memory' in (request.schema as { properties: object }).properties) {
       answer = roll < 0.08 ? { memory: '' } : roll < 0.12 ? { memory: 'x'.repeat(5000) } : { memory: words(roll < 0.3 ? 61 + upTo(100) : upTo(60)) };
     } else {
       const none = { text: null, to: null, place: null, seconds: null, until: null, note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
@@ -83,10 +89,22 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
-    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0 };
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0 };
+  const sleepEnds = new Map<string, number>();
   let at = 0;
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
+    const before = journal.all[seq - 1]?.event;
+    law('deed', (before?.kind === 'do') === (record.kind === 'result') && (record.kind !== 'result' || (before.who === record.who && before.at === record.at)), seq);
+    if (record.kind === 'result') {
+      for (const id of record.wakes) {
+        law('waking', asleep.has(id) && place.get(id) === event.place, seq);
+        sleepEnds.set(id, Math.min(sleepEnds.get(id)!, before.at + before.seconds));
+      }
+      count.result += 1;
+      count.woken += record.wakes.length;
+      if (record.text === null) count.nothing += 1;
+    }
     at = event.at;
     if (record.kind === 'act') {
       law('absent', !away.has(record.who) && !asleep.has(record.who), seq);
@@ -113,9 +131,10 @@ test('thousands of steps of any answers leave a journal in which every law of th
       place.set(event.who, event.place);
     } else if (event.kind === 'sleep') {
       asleep.add(event.who);
+      sleepEnds.set(event.who, event.at + event.seconds);
       count.sleep += 1;
     } else if (event.kind === 'wake') {
-      asleep.delete(event.who);
+      law('waking', asleep.delete(event.who) && event.at === sleepEnds.get(event.who), seq);
       count.wake += 1;
     } else if (event.kind === 'memory' && record.kind === 'memory') {
       law('memory', record.text === null || sizeOf(record.text) <= world.longWords, seq);
@@ -152,14 +171,19 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const directory = mkdtempSync(join(tmpdir(), 'sagents-test-'));
   try {
     const path = join(directory, 'world.sqlite');
-    for (const calls of [300, 1, 250, 349]) {
+    // Many of the runs are one call long, so that some stop between a deed and the world's answer to it.
+    const stops: string[] = [];
+    for (const calls of [300, ...Array.from({ length: 40 }, () => 1), 250, 310]) {
       const state = openState(path, source);
       try {
         // Two runs cannot write one file, and a file does not take another world.
         assert.throws(() => openState(path, source), StateError);
-        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true });
+        let last = '';
+        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, onEvent: event => { last = event.kind; } });
+        stops.push(last);
       } finally { state.close(); }
     }
+    assert.ok(stops.includes('do'), 'no run stopped between a deed and its result');
     assert.throws(() => openState(path, `${source} `), StateError);
     const state = openState(path, source);
     try {

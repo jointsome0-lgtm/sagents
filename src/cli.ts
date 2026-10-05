@@ -11,9 +11,9 @@ import { readWorld, WorldError } from './world.ts';
 const USAGE = `node src/cli.ts login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
 node src/cli.ts status [<model>]       whether this computer is signed in, and whether the plan offers the model
 node src/cli.ts ask [--timeout <s>]    one request as JSON on stdin, one JSON line on stdout
-node src/cli.ts live <world.json> [--model <id>] [--cast <character>=<id>]... [--minutes <n>] [--calls <n>] [--state <file>] [--json]
+node src/cli.ts live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>] [--state <file>] [--json]
                                        the characters of a world file, each played by the model, under the story's clock;
-                                       --cast gives one character a model of its own;
+                                       --cast gives one character a model of its own; --world-model answers what comes of a deed;
                                        with --state the world is kept in that file and continues from it
 
 A request: {"model": "<id>", "<id>@<effort>" or "api:<id>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}}
@@ -100,7 +100,7 @@ if (command === 'ask') {
   }
 } else if (command === 'live') {
   try {
-    const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, minutes: { type: 'string' }, calls: { type: 'string' },
+    const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, 'world-model': { type: 'string' }, minutes: { type: 'string' }, calls: { type: 'string' },
       state: { type: 'string' }, json: { type: 'boolean' } }, 1);
     const minutes = Number(given?.values.minutes ?? 30);
     const calls = Number(given?.values.calls ?? 60);
@@ -141,7 +141,8 @@ if (command === 'ask') {
           return players.get(name)!;
         };
         const { seconds, ...totals } = await runLive({ world, ...playerOf((given.values.model as string | undefined) ?? LIVE_MODEL),
-          cast: Object.fromEntries([...names].map(([id, name]) => [id, playerOf(name)])), minutes, calls, journal: state, pause: state !== undefined,
+          cast: Object.fromEntries([...names].map(([id, name]) => [id, playerOf(name)])),
+          worldPlayer: typeof given.values['world-model'] === 'string' ? playerOf(given.values['world-model']) : undefined, minutes, calls, journal: state, pause: state !== undefined,
           onEvent: (event, by) => { for (const line of json ? [JSON.stringify({ ...event, by })] : linesOf(world, event)) console.log(line); } });
         const played = Math.round(seconds / 6) / 10;
         console.log(json ? JSON.stringify({ status: totals.status, reason: totals.reason, minutes: played, calls: totals.calls, invalid: totals.invalid,
