@@ -67,9 +67,11 @@ test('settings that cannot be used are refused by name before anything is sent',
     return error.param;
   };
   assert.equal(await refusedBy({}), 'SAGENTS_API_URL');
-  // A key goes over https or stays on this computer.
-  assert.equal(await refusedBy({ ...env, SAGENTS_API_URL: 'http://203.0.113.7:8000/v1' }), 'SAGENTS_API_KEY');
-  assert.equal(await refusedBy({ ...env, SAGENTS_API_URL: 'http://localhost.example.com/v1' }), 'SAGENTS_API_KEY');
+  // The key and the text go over https or stay on this computer, with a key and without one.
+  assert.equal(await refusedBy({ ...env, SAGENTS_API_URL: 'http://203.0.113.7:8000/v1' }), 'SAGENTS_API_URL');
+  assert.equal(await refusedBy({ ...env, SAGENTS_API_URL: 'http://localhost.example.com/v1' }), 'SAGENTS_API_URL');
+  assert.equal(await refusedBy({ SAGENTS_API_URL: 'http://203.0.113.7:8000/v1' }), 'SAGENTS_API_URL');
+  assert.equal(await refusedBy({ ...env, SAGENTS_API_KEY: 'two\nlines' }), 'SAGENTS_API_KEY');
   assert.equal(await refusedBy({ ...env, SAGENTS_API_URL: `https://user:${KEY}@openrouter.ai/api/v1` }), 'SAGENTS_API_URL');
   // An extra field does not replace one that this module sets, the output limit above all.
   for (const extra of ['{"max_tokens":100000}', '{"model":"another"}', '{"messages":[]}', '{"stream":true}', '{"response_format":{}}', '[1]', '{'])

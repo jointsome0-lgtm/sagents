@@ -138,10 +138,10 @@ What sagents sends and to whom:
   as a strict `json_schema` `response_format`, and the fields of `SAGENTS_API_EXTRA`. sagents adds no text of its own.
   An extra field cannot replace `model`, `messages`, `max_tokens`, `max_completion_tokens`, `response_format`, `stream`
   or `n`: a setting that names one is refused.
-- The key goes in the `authorization` header, and only over `https` or to this computer (`localhost`, `127.0.0.1`,
-  `::1`). With any other address the request is refused before it is made. sagents does not store the key.
-- An address without a key is used as it is, plain `http` to another computer included: then the text travels
-  unencrypted. Reach a rented card through an SSH tunnel to `127.0.0.1` or over `https`.
+- The key goes in the `authorization` header. sagents does not store it.
+- The address is `https`, or plain `http` to this computer only (`localhost`, `127.0.0.1`, `::1`), with a key or
+  without one: neither the key nor the text travels unencrypted. Any other address is refused before a request is
+  made. Reach a rented card through an SSH tunnel to a local port or over `https`.
 - sagents writes no log of requests or answers. What the server keeps is the server's own matter: a hosted service may
   store requests, so real stories go only to a model you run yourself.
 - A failure is a code, with the HTTP status and the server's own error code and field name when they are plain

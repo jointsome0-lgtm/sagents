@@ -33,9 +33,10 @@ function settingsOf(env: Env) {
     // A TypeError is how URL says that this is no address.
     if (!(error instanceof TypeError)) throw error;
   }
-  if (!base || !['https:', 'http:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw refused('SAGENTS_API_URL');
-  // A key travels encrypted or does not leave this computer.
-  if (key && (!KEY.test(key) || (base.protocol !== 'https:' && !LOOPBACK.test(base.hostname)))) throw refused('SAGENTS_API_KEY');
+  // The key and the text travel encrypted or do not leave this computer: plain http is for a loopback address only.
+  if (!base || !(base.protocol === 'https:' || (base.protocol === 'http:' && LOOPBACK.test(base.hostname)))
+    || base.username || base.password || base.search || base.hash) throw refused('SAGENTS_API_URL');
+  if (key && !KEY.test(key)) throw refused('SAGENTS_API_KEY');
   const maxTokens = env.SAGENTS_API_MAX_TOKENS ? Number(env.SAGENTS_API_MAX_TOKENS) : DEFAULT_MAX_TOKENS;
   if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) throw refused('SAGENTS_API_MAX_TOKENS');
   let extra: unknown = {};
