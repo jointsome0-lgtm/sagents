@@ -9,6 +9,9 @@ import { boundedOf, isObject, refuse, textOf } from './reading.ts';
 export const MAX_MOVES = 12, MAX_SETS = 6, MAX_STOCK = 20, MAX_DEPTH = 4, MAX_ON_PERSON = 30, MAX_IN_PLACE = 60;
 // The most words a thing's name and the spot of a hidden thing may hold, and the most states a thing may have.
 export const NAME_WORDS = 8, SPOT_WORDS = 20, MAX_STATES = 4;
+// The most a world file may give of one counted thing. All the counts of a file together are then far inside the
+// whole numbers that are exact, and what a stock adds, `MAX_STOCK` at a time, never gets near their end.
+export const MAX_N = 1_000_000_000;
 
 // One record. `n` is how many there are of a thing that is counted, and null for a single thing. `holds` is what a
 // thing that can hold others holds, and null for one that never does; a counted thing holds nothing. `fixed` is a
@@ -43,8 +46,9 @@ export type Settled = { moved: Posting[]; set: { what: string; name: string; sta
 const SIGNS = /[,;[\]×]/;
 const flag = (value: unknown, field: string) => value === undefined || typeof value === 'boolean' ? value === true : refuse(field, 'must be true or false');
 // The things of one holder as a world file gives them, each under the next label. `top` says that these are the
-// things of a place itself, the only ones that can be hidden.
-export function readThings(value: unknown, field: string, labels: { next: number }, top = false, level = 1): Thing[] {
+// things of a place itself, the only ones that can be hidden. `fixable` says that these can be `fixed`: the things of
+// a place itself and those inside a fixed thing, so that nothing fixed is carried or lies in what can be moved.
+export function readThings(value: unknown, field: string, labels: { next: number }, top = false, level = 1, fixable = top): Thing[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) return refuse(field, 'must be a list of things');
   return value.map((item, at): Thing => {
@@ -54,10 +58,11 @@ export function readThings(value: unknown, field: string, labels: { next: number
     const name = boundedOf(textOf(item.name, `${here}.name`), `${here}.name`, NAME_WORDS) as string;
     if (SIGNS.test(name)) return refuse(`${here}.name`, 'must hold none of `, ; [ ] ×`');
     const label = `t${labels.next++}`;
-    const n = item.n === undefined ? null : typeof item.n === 'number' && Number.isSafeInteger(item.n) && item.n > 0 ? item.n : refuse(`${here}.n`, 'must be a whole number above zero');
+    const n = item.n === undefined ? null : typeof item.n === 'number' && Number.isInteger(item.n) && item.n > 0 && item.n <= MAX_N ? item.n : refuse(`${here}.n`, 'must be a whole number from 1 to 1,000,000,000');
     const stock = flag(item.stock, `${here}.stock`), money = flag(item.money, `${here}.money`), open = flag(item.open, `${here}.open`);
     const food = item.food === undefined ? null : typeof item.food === 'number' && item.food >= 0 ? item.food : refuse(`${here}.food`, 'must be the calories of one, zero or more');
-    const burns = flag(item.burns, `${here}.burns`);
+    const burns = flag(item.burns, `${here}.burns`), fixed = flag(item.fixed, `${here}.fixed`);
+    if (fixed && !fixable) return refuse(`${here}.fixed`, 'is for a thing of a place itself or a thing inside a fixed one');
     const states = item.states === undefined ? null : Array.isArray(item.states) && item.states.length >= 2 && item.states.length <= MAX_STATES
       && item.states.every(state => typeof state === 'string' && /^[^\s/()]{1,30}$/.test(state) && !SIGNS.test(state)) && new Set(item.states).size === item.states.length
       ? item.states as string[] : refuse(`${here}.states`, `must be two to ${MAX_STATES} different words`);
@@ -65,7 +70,7 @@ export function readThings(value: unknown, field: string, labels: { next: number
       : item.state === undefined ? states[0] : states.find(known => known === item.state) ?? refuse(`${here}.state`, 'must be one of `states`');
     const fire = item.fire === undefined || item.fire === false ? false : item.fire === true ? true
       : states?.find(known => known === item.fire) ?? refuse(`${here}.fire`, 'must be true or one of `states`');
-    const holds = item.holds === undefined ? null : readThings(item.holds, `${here}.holds`, labels, false, level + 1);
+    const holds = item.holds === undefined ? null : readThings(item.holds, `${here}.holds`, labels, false, level + 1, fixed);
     if (holds && (n !== null || stock || food !== null || burns)) return refuse(`${here}.holds`, 'is not for a thing that is counted, a stock, food or something that burns');
     if (stock && (n !== null || money)) return refuse(`${here}.stock`, 'is a supply with no count, and never of money');
     if (money && n === null) return refuse(`${here}.money`, 'needs `n`');
@@ -78,7 +83,7 @@ export function readThings(value: unknown, field: string, labels: { next: number
       const minutes = typeof item.hidden.minutes === 'number' && item.hidden.minutes > 0 ? item.hidden.minutes : refuse(`${here}.hidden.minutes`, 'must be a number above zero');
       hidden = { spot, minutes };
     }
-    return { label, name, n, fixed: flag(item.fixed, `${here}.fixed`), open, stock, food, burns, fire, states, state, money, holds, hidden };
+    return { label, name, n, fixed, open, stock, food, burns, fire, states, state, money, holds, hidden };
   });
 }
 

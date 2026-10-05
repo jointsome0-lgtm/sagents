@@ -327,4 +327,6 @@ What comes of it?` }] });
     { what: 't7', name: 'COINS-BORIS', n: 4, from: 't6', to: 't1', as: 't10', stock: false, out: 'Boris', into: 'TABLE-RED' }]);
   assert.throws(() => replay(withFacts, journal.all.filter((_entry, index) => index !== deed + 1).map((entry, seq) => ({ ...entry, seq }))), JournalError);
   assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [], moves: [], sets: [], poses: [], search: false, finds: [] }), JournalError);
+  // A person under the id of its place would share one list of things with it, so a world file that gives one is refused.
+  assert.throws(() => readWorld({ title: 'T', about: 'A.', clock: '09:00', places: [{ id: 'red', name: 'Red', about: 'Red.' }], characters: [{ id: 'red', name: 'Anna', place: 'red', sheet: 'S' }] }), /`characters\[0\]\.id` repeats an id/);
 });

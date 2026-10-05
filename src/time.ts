@@ -66,7 +66,8 @@ export function travelSeconds(world: World, from: string, to: string): number {
   const a = world.places.find(place => place.id === from), b = world.places.find(place => place.id === to);
   const walked = a?.at && b?.at ? Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1]) / world.walkMetresPerMinute : null;
   const paced = walked === null ? null : walked > 10 ? Math.round(walked) : Math.round(walked * 10) / 10;
-  return Math.max(1, Math.round((a?.minutesTo[to] ?? b?.minutesTo[from] ?? paced ?? world.travelMinutes) * 60));
+  const listed = (place: typeof a, other: string) => place && Object.hasOwn(place.minutesTo, other) ? place.minutesTo[other] : null;
+  return Math.max(1, Math.round((listed(a, to) ?? listed(b, from) ?? paced ?? world.travelMinutes) * 60));
 }
 
 // The moment of the story `at` seconds from its start, as seconds since the midnight before the start.

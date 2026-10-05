@@ -2,7 +2,7 @@
 // where, and the events of a run. The rules are next to it: the clock and the distances in `time.ts`, what a
 // resident does in `action.ts`, and what the world answers to a deed or for a figure in `answer.ts`.
 import { boundedOf, amountOf, countOf, isObject, listOf, refuse, textOf, TIME } from './reading.ts';
-import { all, MAX_IN_PLACE, MAX_ON_PERSON, readThings } from './things.ts';
+import { all, MAX_IN_PLACE, MAX_ON_PERSON, readThings, SINKS } from './things.ts';
 import type { Posting, Thing } from './things.ts';
 import type { Sleep } from './sleep.ts';
 import type { Weather } from './weather.ts';
@@ -73,9 +73,15 @@ export type Person = { id: string; place: string | null; heading: string | null;
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const factsOf = (value: unknown, field: string) => boundedOf(value, field, MAX_FACTS);
+// An id names one thing: a place's, a character's and a figure's are all different, since the rules keep the things
+// of a place and of a person, and take the `to` of a move, under them alike. None is what the rules themselves name
+// there: a way out of the world, a thing's label, or a name that every object of the language has.
 function idOf(value: unknown, field: string, taken: string[]): string {
   if (typeof value !== 'string' || !ID.test(value)) return refuse(field, 'must be a short id of Latin letters, digits, `_` and `-`');
-  return taken.includes(value) ? refuse(field, 'repeats an id') : value;
+  if (SINKS.includes(value) || /^t\d+$/.test(value) || value in {}) return refuse(field, 'must not be `eaten`, `burned`, a label of a thing like `t7` or a name every object has like `constructor`');
+  if (taken.includes(value)) return refuse(field, 'repeats an id');
+  taken.push(value);
+  return value;
 }
 
 // A world file as it was parsed from JSON, without the settings of the laws, which `readWorld` of `laws.ts` adds.
@@ -84,7 +90,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   if (!isObject(value)) return refuse('the file', 'must be a JSON object');
   if (typeof value.clock !== 'string' || !TIME.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
   if (value.remote !== undefined && value.remote !== null) textOf(value.remote, 'remote');
-  const places: Place[] = [], labels = { next: 1 }, longWords = countOf(value.longWords, 'longWords', 400);
+  const places: Place[] = [], taken: string[] = [], labels = { next: 1 }, longWords = countOf(value.longWords, 'longWords', 400);
   const within = (things: Thing[], most: number, field: string) => all(things).length <= most ? things : refuse(field, `must hold ${most} things at most, with all that they hold`);
   for (const [index, place] of listOf(value.places, 'places').entries()) {
     const field = `places[${index}]`;
@@ -105,9 +111,8 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     if (at !== null && !(Array.isArray(at) && at.length === 2 && at.every(part => typeof part === 'number' && Number.isFinite(part)))) {
       return refuse(`${field}.at`, 'must be two numbers, the metres east and north');
     }
-    const minutesTo: { [place: string]: number } = {};
-    for (const [to, minutes] of Object.entries(place.minutesTo ?? {})) minutesTo[to] = amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0);
-    places.push({ id: idOf(place.id, `${field}.id`, places.map(known => known.id)), name: textOf(place.name, `${field}.name`),
+    const minutesTo = Object.fromEntries(Object.entries(place.minutesTo ?? {}).map(([to, minutes]) => [to, amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0)]));
+    places.push({ id: idOf(place.id, `${field}.id`, taken), name: textOf(place.name, `${field}.name`),
       about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
       things: within(readThings(place.things, `${field}.things`, labels, true), MAX_IN_PLACE, `${field}.things`), open: place.open === true, clock: place.clock === true,
       crowd: boundedOf(place.crowd, `${field}.crowd`, LIMITS.crowd), figures, at: at as [number, number] | null, minutesTo });
@@ -124,16 +129,14 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     if (character.clock !== undefined && typeof character.clock !== 'boolean') return refuse(`${field}.clock`, 'must be true or false');
     const old = ['holds', 'has'].find(name => character[name] !== undefined);
     if (old) return refuse(`${field}.${old}`, 'is no longer read: what a person has is the list `carries`');
-    characters.push({ id: idOf(character.id, `${field}.id`, characters.map(known => known.id)), name: textOf(character.name, `${field}.name`),
+    characters.push({ id: idOf(character.id, `${field}.id`, taken), name: textOf(character.name, `${field}.name`),
       place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), memory: boundedOf(character.memory, `${field}.memory`, longWords), facts: factsOf(character.facts, `${field}.facts`),
       looks: boundedOf(character.looks, `${field}.looks`, LIMITS.looks), pose: boundedOf(character.pose, `${field}.pose`, LIMITS.pose),
       carries: within(readThings(character.carries, `${field}.carries`, labels), MAX_ON_PERSON, `${field}.carries`),
       clock: character.clock === true });
   }
-  // An id names one thing: a figure's is no place's, no character's and no other figure's.
-  const taken = [...places, ...characters].map(known => known.id);
   for (const [index, place] of places.entries()) {
-    for (const [at, figure] of place.figures.entries()) taken.push(idOf(figure.id, `places[${index}].figures[${at}].id`, taken));
+    for (const [at, figure] of place.figures.entries()) idOf(figure.id, `places[${index}].figures[${at}].id`, taken);
   }
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
