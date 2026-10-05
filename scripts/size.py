@@ -4,9 +4,10 @@
     npm run size            the working tree's text of the files Git tracks
     npm run size -- --index what is staged in the Git index
 
-It prints three counts: the core, `src/live.ts`, and all tracked text. The core has a ceiling. Over it this prints a
-warning and still ends well: the ceiling is a reason to look, not a ban. It never estimates: without `tiktoken` it
-says how to get it, counts nothing, and ends well too.
+It prints three counts: the core, `src/live.ts`, and all tracked text. The core's count falls into one of four
+bands, and from the second on this prints a line that grows stronger with the band. It always ends well: a band is a
+reason to look, not a ban. It never estimates: without `tiktoken` it says how to get it, counts nothing, and ends
+well too.
 """
 import os
 import subprocess
@@ -14,25 +15,30 @@ import sys
 
 # The core of the live mode: the rules, with no model and no disk in them.
 CORE = ['src/world.ts', 'src/journal.ts', 'src/laws.ts', 'src/sleep.ts', 'src/weather.ts', 'src/memory.ts', 'src/reading.ts']
-# The most tokens the core may hold before a warning. Provisional: the owner has not settled the number yet.
-CORE_CEILING = 30_000
+# The bands of the core's size in tokens: up to the first bound nothing is said, and above each bound its line.
+# Provisional, all three: the owner has not settled the numbers yet.
+CORE_BANDS = [
+    (24_000, 'note: the core is nearing its size.'),
+    (30_000, 'WARNING: the core is over its size. A change that adds to the core says what it takes out of it, or why the size should rise.'),
+    (36_000, 'STRONG WARNING: the core no longer reads whole. Split it or cut it before anything more is added.'),
+]
 LIVE = 'src/live.ts'
 # Tracked files that are not this project's own text.
 NOT_COUNTED = ['LICENSE', 'package-lock.json']
 ENCODING = 'o200k_base'
-# A Python that has `tiktoken`, when the one running this has not: the one `SAGENTS_SIZE_PYTHON` names, then a venv
-# kept outside the repository. The repository itself depends on nothing.
-PYTHONS = [os.environ.get('SAGENTS_SIZE_PYTHON'), os.path.expanduser('~/.local/share/limits-venv/bin/python')]
+# A Python that has `tiktoken`, when the one running this has not: the one this variable of the environment names.
+# The repository itself depends on nothing and knows no path of any machine.
+PYTHON = 'SAGENTS_SIZE_PYTHON'
 
 try:
     import tiktoken
 except ImportError:
-    other = next((path for path in PYTHONS if path and os.path.isfile(path) and os.path.abspath(path) != os.path.abspath(sys.executable)), None)
-    if other and not os.environ.get('SAGENTS_SIZE_AGAIN'):
+    other = os.environ.get(PYTHON)
+    if other and os.path.isfile(other) and os.path.abspath(other) != os.path.abspath(sys.executable) and not os.environ.get('SAGENTS_SIZE_AGAIN'):
         os.execve(other, [other, *sys.argv], {**os.environ, 'SAGENTS_SIZE_AGAIN': '1'})
     print('size: nothing was counted, because this Python has no `tiktoken`. Install it outside the repository, '
           'for example `python3 -m venv ~/.local/share/limits-venv && ~/.local/share/limits-venv/bin/pip install tiktoken`, '
-          'or name a Python that has it in SAGENTS_SIZE_PYTHON.')
+          f'and name that Python in {PYTHON}: `{PYTHON}=~/.local/share/limits-venv/bin/python npm run size`.')
     sys.exit(0)
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -66,8 +72,10 @@ if missing:
     print(f'size: {", ".join(missing)} of the list in scripts/size.py is not a tracked text file; the counts below lack it.')
 core = sum(counts.get(path, 0) for path in CORE)
 print(f'size, in {ENCODING} tokens, of {"the Git index" if staged else "the working tree"}:')
-print(f'  core, {len(CORE)} files without model and disk: {core:,} of {CORE_CEILING:,} (a provisional ceiling)')
+print(f'  core, {len(CORE)} files without model and disk: {core:,} (provisional bounds: {", ".join(f"{bound:,}" for bound, _ in CORE_BANDS)})')
 print(f'  {LIVE}: {counts.get(LIVE, 0):,}')
 print(f'  all tracked text but {" and ".join(NOT_COUNTED)}: {sum(counts.values()):,}')
-if core > CORE_CEILING:
-    print(f'size: WARNING: the core is {core - CORE_CEILING:,} tokens over its ceiling. This forbids nothing: say in the change why the core grew, or move something out of it.')
+over = [(bound, line) for bound, line in CORE_BANDS if core > bound]
+if over:
+    bound, line = over[-1]
+    print(f'size: {line} It is {core - bound:,} tokens above {bound:,}. This forbids nothing.')
