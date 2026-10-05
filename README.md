@@ -478,7 +478,17 @@ What sagents sends and to whom:
 ```sh
 npm test                        # no install and no network
 npm install && npm run check    # the type check
+npm run size                    # how large the core is, in tokens
 ```
+
+`npm run size` counts tokens (`o200k_base`) of three things: the core of the live mode without model and disk
+(`src/world.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`), `src/live.ts`, and
+all tracked text except `LICENSE` and `package-lock.json`. It reads the working tree, or the Git index with
+`npm run size -- --index`. The core has a ceiling, 30,000 tokens for now and provisional, so that it stays small
+enough to read whole. Over the ceiling the script prints a warning and still ends well: it forbids nothing. The list
+of core files and the ceiling are at the top of `scripts/size.py`. The count needs the Python package `tiktoken`,
+which is no dependency of this project: without it the script says how to get it, counts nothing and ends well. It
+is not part of `npm test`. A change that grows the core says by how many tokens.
 
 ## License
 

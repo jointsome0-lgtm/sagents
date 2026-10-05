@@ -11,7 +11,8 @@
   "scripts": {
     "test": "node --test src/*.test.ts",
     "check": "tsc -p tsconfig.json",
-    "bench": "node src/bench.ts"
+    "bench": "node src/bench.ts",
+    "size": "python3 scripts/size.py"
   },
   "devDependencies": {
     "@types/node": "24.9.2",

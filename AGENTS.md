@@ -24,6 +24,11 @@ environment from `environments/`.
   something or lose data unnoticed.
 - A request to the model holds what the caller gave and nothing else. Do not add default instructions, tools or
   metadata to it.
+- The core of the live mode (`world.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`,
+  `reading.ts`) is meant to stay small enough to read whole. `npm run size` counts it in tokens against a ceiling
+  kept in `scripts/size.py`; over the ceiling it warns and forbids nothing. When a change grows the core, run it
+  before and after and say in your report by how many tokens the core grew. It needs `tiktoken` from outside the
+  repository and never estimates: without it, say that the count was not taken.
 - A `catch` names the errors it expects and passes the rest on. An empty `catch` carries a comment saying why
   nothing can be lost there.
 
