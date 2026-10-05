@@ -2,7 +2,7 @@
 // with one holder, a person, a place or another thing. The world's answer names what a deed moved by label and where
 // it ended up; the rules check each entry, move the record and say what went from where to where. Nothing here reads
 // prose, and no text of a model changes a count.
-import { boundedOf, isObject, refuse, textOf } from './reading.ts';
+import { boundedOf, isObject, MAX_FACTS, refuse, textOf } from './reading.ts';
 
 // The most entries one answer may move and set, the most taken from a stock by one entry, how deep a thing may lie
 // under a person or a place, and how many records a person and a place may hold, so that a request has a largest size.
@@ -19,8 +19,9 @@ export const MAX_N = 1_000_000_000;
 // count, which taking does not use up. `food` is the calories of one, and what makes it something to eat; `burns`
 // says that it can burn up; `fire` that it can set things alight, always or while it is in the state `fire` names.
 // `states` are the states it can be in and `state` the one it is in. `money` is a count that no deed uses up or
-// makes. `hidden` is where a thing of a place lies unfound, with the minutes of search that find it.
-export type Thing = { label: string; name: string; n: number | null; fixed: boolean; open: boolean; stock: boolean; food: number | null; burns: boolean;
+// makes. `hidden` is where a thing of a place lies unfound, with the minutes of search that find it. `facts` is what
+// is true of the thing and is not seen at once, for the world alone as every `facts` is: it goes where the thing goes.
+export type Thing = { label: string; name: string; facts: string | null; n: number | null; fixed: boolean; open: boolean; stock: boolean; food: number | null; burns: boolean;
   fire: boolean | string; states: string[] | null; state: string | null; money: boolean; holds: Thing[] | null; hidden: { spot: string; minutes: number } | null };
 // The things of a run: what lies in each place and what each person has in hand or wears, with all that those hold;
 // the number of the next label, since a label is the world's own and is never used again; and the seconds each
@@ -83,7 +84,7 @@ export function readThings(value: unknown, field: string, labels: { next: number
       const minutes = typeof item.hidden.minutes === 'number' && Number.isFinite(item.hidden.minutes) && item.hidden.minutes > 0 ? item.hidden.minutes : refuse(`${here}.hidden.minutes`, 'must be a number above zero');
       hidden = { spot, minutes };
     }
-    return { label, name, n, fixed, open, stock, food, burns, fire, states, state, money, holds, hidden };
+    return { label, name, facts: boundedOf(item.facts, `${here}.facts`, MAX_FACTS), n, fixed, open, stock, food, burns, fire, states, state, money, holds, hidden };
   });
 }
 
@@ -117,14 +118,14 @@ export function sought(things: Things, deed: { who: string; place: string; secon
 type Slot = { thing: Thing; list: Thing[]; key: string; top: Thing; level: number; root: string };
 const height = (thing: Thing): number => 1 + Math.max(0, ...(thing.holds ?? []).map(height));
 const alike = (one: Thing, other: Thing) => one.name === other.name && one.food === other.food && one.burns === other.burns && one.money === other.money
-  && one.fire === other.fire && one.fixed === other.fixed;
+  && one.fire === other.fire && one.fixed === other.fixed && one.facts === other.facts;
 
 // An answer's entries take effect in the place of a deed, among its things and those of the people `present`, whose
 // names `names` gives with the place's: first the hidden things `found` are hidden no longer, then each move in its
 // order, then each state. The first entry that cannot be taken refuses the whole answer, and then nothing has
 // changed. A move to where the thing already is does nothing, and an answer of such moves alone is refused. A whole record keeps its label and all it holds; a
 // part of a count leaves the rest under the old label and is a new record where it went; what is taken from a stock
-// is a new record and the stock stays; counted records of one name and kind at one holder become one. Without
+// is a new record and the stock stays, and either has the facts of what it was taken from; counted records of one name, kind and facts at one holder become one. Without
 // `sinks` nothing is eaten or burned. Nothing of `things` is changed here: `keep` does that with what this gives.
 export function settle(things: Things, place: string, present: string[], names: Map<string, string>, found: string[], moves: Move[], sets: Setting[], sinks = true): Settled | Refused {
   const lists = new Map<string, Thing[]>([[place, structuredClone(things.places.get(place)!)], ...present.map((id): [string, Thing[]] => [id, structuredClone(things.people.get(id)!)])]);

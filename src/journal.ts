@@ -9,7 +9,7 @@ import { blank, idle, lineOf, remember, rewrite } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
-import { apply, arrive, isRefusal, next, readAction, start, wake } from './action.ts';
+import { apply, arrive, isRefusal, next, readAction, sleepersNear, start, wake } from './action.ts';
 import { readReply, reply, readResult, result } from './answer.ts';
 import { stocked } from './things.ts';
 import { clockAt, hasClock, timeFor } from './time.ts';
@@ -26,7 +26,7 @@ export class JournalError extends Error {}
 // word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
 // `at`: what came of the deed, or null, the sleepers it wakes, what it moved by label and where to, the states and
-// the poses it changed, what it makes a body feel, each line with its owner, whether the deed was a search of its
+// the poses it changed, what it makes a body feel, each line with its owner, what of it is heard next door, whether the deed was a search of its
 // place, and the labels of the hidden things it went straight to. `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`:
 // its words, or null, and what changed hands with them. Neither is ever an answer that the rules of things refuse.
 // A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
@@ -155,11 +155,11 @@ export function advance(world: World, state: State, record: Record): Event {
   if (deed || record.kind === 'result') {
     // A deed is followed by the world's answer and by nothing else, and the world answers nothing but a deed.
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
-    const sleepers = people.filter(person => person.asleep && person.place === deed.place).map(person => person.id);
+    const sleepers = sleepersNear(people, world.places.find(place => place.id === deed.place)!).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
-    const { text, wakes, moves, sets, poses, feels, search, finds } = record, answer = { text, wakes, moves, sets, poses, feels, search, finds };
+    const { text, wakes, moves, sets, poses, feels, beyond, search, finds } = record, answer = { text, wakes, moves, sets, poses, feels, beyond, search, finds };
     const hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
-    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, search, finds }), sleepers, present, hidden), answer)) {
+    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, beyond, search, finds }), sleepers, present, hidden), answer)) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
     const event = result(world, people, state.things, deed, answer);
@@ -176,7 +176,12 @@ export function advance(world: World, state: State, record: Record): Event {
       const lines = [...(event.heard.includes(id) ? [...(text === null ? [] : [`What came of what ${doer} did: ${text}`]), ...(moved ? [moved] : [])] : []), ...felt(id)];
       remember(minds.get(id)!, ...lines.map(line => lineOf(seq, `${when(id, event.at)} ${line}`)));
     }
-    for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${doer} woke you by this: ${deed.text}`));
+    // What is heard next door is one line with the deed's place and the world's words for the sound: it holds
+    // nothing else of the deed, and a sleeper woken from next door wakes with no more than that. The place keeps none of it.
+    const from = named(world.places, deed.place);
+    for (const id of event.nearby!) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} From ${from}, next door: ${beyond}`));
+    for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${present.includes(id) ? `${doer} woke you by this: ${deed.text}`
+      : `Something from ${from}, next door, woke you${beyond === null ? '.' : `: ${beyond}`}`}`));
     if (record.text !== null) {
       // The place keeps what came of the deeds done in it, the latest ones.
       const kept = state.results.get(deed.place)!;

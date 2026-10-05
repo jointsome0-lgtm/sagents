@@ -50,7 +50,7 @@ const respond = async (request: Request) => {
   const usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
   if ('result' in (request.schema as { properties: object }).properties) {
     results += 1;
-    return { text: JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], feels: [], result: speech }), usage };
+    return { text: JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], feels: [], beyond: null, result: speech }), usage };
   }
   if ('memory' in (request.schema as { properties: object }).properties) {
     rewrites += 1;

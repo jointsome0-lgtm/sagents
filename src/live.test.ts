@@ -20,7 +20,7 @@ const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', 
     { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA' }, { id: 'dan', name: 'Dan', place: 'blue', sheet: 'SHEET-DAN' }] });
 const act = (action: string, more: object = {}) => JSON.stringify({ action, text: null, to: null, place: null, seconds: null, until: null, note: null, ...more });
 // The world's answer to a deed, with every field of its schema.
-const came = (more: object = {}) => JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], feels: [], result: null, ...more });
+const came = (more: object = {}) => JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], feels: [], beyond: null, result: null, ...more });
 const words = (count: number) => Array.from({ length: count }, (_, index) => `w${index + 1}`).join(' ');
 // Each character answers from its own list, then waits; the world answers from the list `world`, then that nothing came
 // of the deed. The requests are kept as they were sent, per character.
@@ -247,7 +247,7 @@ test('a character with a model of its own is asked through that connection under
 
 test('the world answers a deed from facts, bodies, things under labels and the weather, a resident is sent its own, what it sees of those with it and the weather that reaches it, and the answer has one place in the journal', async () => {
   const withFacts = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', facts: 'FACT-WORLD', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
-    places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED', clock: true, things: [{ name: 'TABLE-RED', fixed: true, open: true, holds: [{ name: 'KEY-RED' }] }] },
+    places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED', clock: true, nextDoor: ['blue'], things: [{ name: 'TABLE-RED', fixed: true, open: true, holds: [{ name: 'KEY-RED', facts: 'FACT-KEY' }] }] },
       { id: 'blue', name: 'Blue yard', about: 'Blue walls.', facts: 'FACT-BLUE', open: true, clock: true, things: [{ name: 'BENCH-BLUE', fixed: true }] }],
     // The second weather does not get under a roof.
     weather: { start: { text: 'SKY-ONE', indoors: 'ROOF-ONE' }, changes: [{ day: 1, at: '09:01', text: 'SKY-TWO', indoors: null }] },
@@ -265,7 +265,7 @@ test('the world answers a deed from facts, bodies, things under labels and the w
     // It moves the key from the table to Boris and four of his coins onto the table, and poses someone here and
     // someone elsewhere: the pose elsewhere is dropped. Of what bodies feel, the witness of the first deed and the doer
     // of the second are told theirs; the sleeper the deed wakes and someone elsewhere are told none.
-    world: [came({ result: 'COLD-WORD', feels: [{ of: 'dan', text: 'FEEL-DAN' }] }), came({ result: 'RESULT-WORD', wakes: ['dan', 'boris', 'anna'], moves: [{ what: 't2', n: 1, to: 'boris' }, { what: 't7', n: 4, to: 't1' }],
+    world: [came({ result: 'COLD-WORD', feels: [{ of: 'dan', text: 'FEEL-DAN' }] }), came({ result: 'RESULT-WORD', beyond: 'BEYOND-WORD', wakes: ['dan', 'boris', 'anna'], moves: [{ what: 't2', n: 1, to: 'boris' }, { what: 't7', n: 4, to: 't1' }],
       poses: [{ of: 'anna', text: 'POSE-NEW' }, { of: 'dan', text: 'POSE-STOLEN' }], feels: [{ of: 'anna', text: 'FEEL-STOLEN' }, { of: 'boris', text: 'FEEL-BORIS' }, { of: 'dan', text: 'FEEL-STOLEN' }] })],
   });
   const journal = memoryStore();
@@ -277,10 +277,14 @@ test('the world answers a deed from facts, bodies, things under labels and the w
 Things here:
 - t1 TABLE-RED, fixed, open [t2 KEY-RED]
 Other places, which nobody reaches by a deed: Blue yard (blue).
+Next door:
+- Blue yard (blue): Clara (clara), awake; Dan (dan), awake.
 The weather outside: SKY-ONE. Under this roof: ROOF-ONE.
 Here:
 - Anna (anna), asleep. Looks: LOOKS-ANNA. Carries: t4 COAT-ANNA [t5 PURSE-ANNA]. Facts: FACT-ANNA.
 - Boris (boris), awake. Looks: LOOKS-BORIS. Pose: POSE-BORIS. Carries: t6 BAG-BORIS [t7 COINS-BORIS ×9]. Facts: FACT-BORIS.
+Facts of things:
+- t2: FACT-KEY.
 Now 09:00:07. Boris does, for 10 s: shakes Anna
 What comes of it?` }] });
   const lists = (sent.world[1].schema as { properties: { moves: { items: { properties: { what: object; to: object } } }; wakes: object; feels: { items: { properties: { of: object } } } } }).properties;
@@ -303,7 +307,7 @@ What comes of it?` }] });
   assert.match(sent.boris[0].system ?? '', /\nSHEET-BORIS\nHow you look: LOOKS-BORIS$/);
   // The weather reaches each one as its place gives it. The change at 09:01 is perceived under the open sky, where it
   // ends the waiting, and not under the roof, which it does not get under; the world is told it wherever the deed is.
-  assert.match(sent.world[0].messages[0].content, /^The place: Blue yard \(blue\), under the open sky\. Blue walls\. Facts: FACT-BLUE\.\nThings here:\n- t3 BENCH-BLUE, fixed\nOther places, which nobody reaches by a deed: Red room \(red\)\.\nThe weather: SKY-ONE\.\nHere:\n/);
+  assert.match(sent.world[0].messages[0].content, /^The place: Blue yard \(blue\), under the open sky\. Blue walls\. Facts: FACT-BLUE\.\nThings here:\n- t3 BENCH-BLUE, fixed\nOther places, which nobody reaches by a deed: Red room \(red\)\.\nNext door:\n- Red room \(red\): Anna \(anna\), awake; Boris \(boris\), awake\.\nThe weather: SKY-ONE\.\nHere:\n/);
   assert.match(sent.boris[0].messages[0].content, /\nThe weather, from under the roof: ROOF-ONE\.\nYou feel rested\.\nMinutes from here/);
   assert.match(sent.clara[0].messages[0].content, /\nThe weather: SKY-ONE\.\nYou feel rested\.\nMinutes from here/);
   assert.match(sent.clara.at(-1)!.messages[0].content, /\n09:01:00 The weather changes: SKY-TWO\n[^]*\nThe weather: SKY-TWO\.\nYou feel rested\.\nMinutes from here/);
@@ -321,15 +325,20 @@ What comes of it?` }] });
   // What a body feels is in the requests of its owner and of nobody else.
   assert.deepEqual([sent.anna, sent.boris, sent.clara, sent.dan].map(requests => [...new Set(JSON.stringify(requests).match(/FEEL-[A-Z]+/g))]), [[], ['FEEL-BORIS'], [], ['FEEL-DAN']]);
   assert.match(sent.anna[3].messages[0].content, /\nSince then:\n09:00:17 Boris woke you by this: shakes Anna\n09:00:17 You wake\.\n\nNow 09:00:17\./);
+  // What the world says is heard next door is one line for those awake there, whichever of the two places lists the
+  // other, and it ends their waiting; nobody in the deed's own place is told it. Everyone is told which places are next door.
+  assert.match(sent.dan[2].messages[0].content, /\n09:00:07 From Red room, next door: BEYOND-WORD\n\nNow 09:00:07\./);
+  assert.deepEqual([sent.anna, sent.boris, sent.clara, sent.dan].map(requests => JSON.stringify(requests).includes('BEYOND-')), [false, false, true, true]);
+  assert.match(sent.dan[0].system ?? '', /\nPlaces:\n- Red room \(red\): Red walls\. Next door: Blue yard\.\n- Blue yard \(blue\): Blue walls\. Next door: Red room\.\n/);
   // The answer is the record right after its deed, and the journal takes it nowhere else and nothing else there.
   const deed = journal.all.findIndex(({ event }) => event.kind === 'do' && event.who === 'boris');
   assert.deepEqual(journal.all[deed + 1].record, { kind: 'result', who: 'boris', at: 7, text: 'RESULT-WORD', wakes: ['anna'], moves: [{ what: 't2', n: 1, to: 'boris' }, { what: 't7', n: 4, to: 't1' }],
-    sets: [], poses: [{ of: 'anna', text: 'POSE-NEW' }], feels: [{ of: 'boris', text: 'FEEL-BORIS' }], search: false, finds: [] });
+    sets: [], poses: [{ of: 'anna', text: 'POSE-NEW' }], feels: [{ of: 'boris', text: 'FEEL-BORIS' }], beyond: 'BEYOND-WORD', search: false, finds: [] });
   // The event holds what the rules made of the moves: a whole thing under its label, and a part of a count as a new record.
   assert.deepEqual(journal.all[deed + 1].event.moved, [{ what: 't2', name: 'KEY-RED', n: null, from: 't1', to: 'boris', as: 't2', stock: false, out: 'TABLE-RED', into: 'Boris' },
     { what: 't7', name: 'COINS-BORIS', n: 4, from: 't6', to: 't1', as: 't10', stock: false, out: 'Boris', into: 'TABLE-RED' }]);
   assert.throws(() => replay(withFacts, journal.all.filter((_entry, index) => index !== deed + 1).map((entry, seq) => ({ ...entry, seq }))), JournalError);
-  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [], moves: [], sets: [], poses: [], feels: [], search: false, finds: [] }), JournalError);
+  assert.throws(() => advance(withFacts, begin(withFacts), { kind: 'result', who: 'anna', at: 0, text: null, wakes: [], moves: [], sets: [], poses: [], feels: [], beyond: null, search: false, finds: [] }), JournalError);
   // A person under the id of its place would share one list of things with it, so a world file that gives one is refused.
   assert.throws(() => readWorld({ title: 'T', about: 'A.', clock: '09:00', places: [{ id: 'red', name: 'Red', about: 'Red.' }], characters: [{ id: 'red', name: 'Anna', place: 'red', sheet: 'S' }] }), /`characters\[0\]\.id` repeats an id/);
 });

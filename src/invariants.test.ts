@@ -27,6 +27,10 @@ const PLACES = 6, PEOPLE = 30;
 // Each text is one word that says which state it is of and whether it is the sky's or the roof's.
 const SKIES = Array.from({ length: 2000 }, (_, index) => ({ at: 300 + index * 600, text: `sky-${index + 1}-0`, indoors: index % 3 ? `roof-${index + 1}-0` : null }));
 const START = 20 * 3600;
+// The pairs of places that are next door to each other, each listed by its first place only: one place has two such
+// neighbours, and the last place has none.
+const DOORS = [['p0', 'p1'], ['p2', 'p1'], ['p4', 'p3']];
+const neighbours = (spot: string) => DOORS.flatMap(([one, other]) => one === spot ? [other] : other === spot ? [one] : []);
 const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '20:00', remote: 'radio', travelMinutes: 3, shortWords: 300, longWords: 60,
   // Thirteen hours awake at the start, and the limit a quarter of an hour on, so that some reach it.
   tiredHours: 13.1,
@@ -34,20 +38,23 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
     at: [Math.floor((START + at) % 86_400 / 3600), Math.floor((START + at) / 60) % 60].map(part => String(part).padStart(2, '0')).join(':') })) },
   // Two places of the six have a clock and every fifth person carries one.
   // Every text of a body and of facts is one word that names its kind and its owner, so that a request shows whose
-  // it holds, and so is the name of a thing that not everyone may be sent.
+  // it holds, and so is the name of a thing that not everyone may be sent. The facts of a thing are one word that
+  // begins `lore-` and names where the thing began: a tool and what lies in a hidden thing, a hat, and the bread and
+  // the water, of which parts are taken.
   places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {},
+    nextDoor: DOORS.filter(([one]) => one === `p${index}`).map(([, other]) => other),
     // Every place but the last says where it lies, so some walks take the straight line and some the world's minutes.
     ...(index < PLACES - 1 ? { at: [index * 150, index % 2 * 2000] } : {}), open: index % 2 === 1, clock: index % 3 === 0,
     facts: `facts-p${index}-0`,
     // Each place has things that are counted, among them money, food and what burns, two supplies with no count,
     // things that hold others, and things with states, one of which is a fire while it is lit.
-    things: [{ name: `rack-p${index}`, fixed: true, open: true, holds: [{ name: 'coin', n: 40, money: true }, { name: 'bread', n: 30, food: 50 }, { name: 'log', n: 30, burns: true },
-      { name: `cup-p${index}`, holds: [] }, { name: `tool-p${index}` }] },
+    things: [{ name: `rack-p${index}`, fixed: true, open: true, holds: [{ name: 'coin', n: 40, money: true }, { name: 'bread', n: 30, food: 50, facts: 'lore-bread' }, { name: 'log', n: 30, burns: true },
+      { name: `cup-p${index}`, holds: [] }, { name: `tool-p${index}`, facts: `lore-p${index}-tool` }] },
     { name: `stove-p${index}`, fixed: true, states: ['lit', 'out'], state: 'lit', fire: 'lit' }, { name: `torch-p${index}`, fixed: true, fire: true },
-    { name: `gate-p${index}`, fixed: true, states: ['open', 'shut', 'ajar'] }, { name: 'wood', stock: true, burns: true }, { name: 'water', stock: true, food: 0 },
+    { name: `gate-p${index}`, fixed: true, states: ['open', 'shut', 'ajar'] }, { name: 'wood', stock: true, burns: true }, { name: 'water', stock: true, food: 0, facts: 'lore-water' },
     // Three things are hidden in every place: one that a few minutes of searching find, one that takes half an hour,
     // and one that no search here lasts long enough for.
-    { name: `hidden-p${index}-0`, holds: [{ name: `inside-p${index}-0` }], hidden: { spot: `spot-p${index}-0`, minutes: 3 } },
+    { name: `hidden-p${index}-0`, holds: [{ name: `inside-p${index}-0`, facts: `lore-p${index}-inside` }], hidden: { spot: `spot-p${index}-0`, minutes: 3 } },
     { name: `hidden-p${index}-1`, hidden: { spot: `spot-p${index}-1`, minutes: 30 } }, { name: `hidden-p${index}-2`, hidden: { spot: `spot-p${index}-2`, minutes: 600 } }],
     // All places but one have someone whom nobody plays and who answers, and all but another a crowd.
     ...(index === 1 ? {} : { figures: [{ id: `f${index}`, name: `Figure ${index}`, looks: `looks-f${index}-0`, facts: `facts-f${index}-0` }] }),
@@ -56,7 +63,7 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
   // carries an open tray with food and with twigs to burn.
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
     facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, clock: index % 5 === 0,
-    carries: [{ name: `coat-c${index}`, holds: [{ name: `secret-c${index}` }, { name: 'coin', n: 10, money: true }] }, { name: `hat-c${index}` },
+    carries: [{ name: `coat-c${index}`, holds: [{ name: `secret-c${index}` }, { name: 'coin', n: 10, money: true }] }, { name: `hat-c${index}`, facts: `lore-c${index}-hat` },
       { name: `tray-c${index}`, open: true, holds: [{ name: 'apple', n: 3, food: 90 }, { name: 'twig', n: 3, burns: true }] },
       // Some carry all a person may, and some a thing in a thing four deep, so that the run meets both limits.
       ...(index % 5 === 1 ? Array.from({ length: 23 }, (_, at) => ({ name: `trinket-c${index}-${at}` })) : []),
@@ -68,7 +75,7 @@ const world = readWorld(JSON.parse(source), JSON.parse(ENVIRONMENT));
 // The laws of a live world, each one sentence. A run that breaks one fails with that sentence and the record's number.
 export const LAWS = {
   time: 'Time never goes back.',
-  place: 'Nobody perceives what happened in another place, except the one a call was made to.',
+  place: 'Nobody perceives what happened in another place, except the one a call was made to and those next door to a deed, who are told only what the world says is heard there.',
   absent: 'A traveller or a sleeper perceives nothing and takes no action.',
   speech: 'Nobody acts before a speech they are hearing or making has ended.',
   limit: 'A speech never holds more words than its turn allowed.',
@@ -79,7 +86,7 @@ export const LAWS = {
   replay: 'Replaying the records gives every stored event again, and a journal that was changed is refused.',
   resume: 'A run stopped and continued from its file gives the same journal as one that never stopped.',
   deed: 'Every deed is followed by the world\'s answer and by nothing else.',
-  waking: 'A sleeper wakes only when its sleep ends or a deed\'s result wakes it.',
+  waking: 'A sleeper wakes only when its sleep ends or a deed\'s result wakes it, and a deed wakes nobody outside its place and the places next door to it.',
   spent: 'Nobody acts after being awake for the world\'s limit: at that turn it falls asleep instead.',
   body: 'How a person is placed changes only by the world\'s answer to a deed done in the place where it is; a pose is also dropped when its owner leaves or falls asleep.',
   kept: 'A thing is where the postings of events put it and nowhere else, and the world is told of exactly those of its place and of the people there: a record has one holder, lies no deeper than four under a person or a place, a person carries thirty records at most and a place holds sixty, and for every name what there is, what was eaten or burned and what was taken from a supply add up to what the world file gave; the sum of money never changes.',
@@ -90,6 +97,8 @@ export const LAWS = {
   weather: 'The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of it.',
   clock: 'Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place\'s.',
   felt: 'Nobody is told what another\'s body feels, the world included, and nobody asleep or away is told a feeling.',
+  lore: 'The facts of a thing reach the world only in a request that lists the thing, wherever it then is, once and under its label, and no resident is sent any.',
+  door: 'What of a deed is heard next door is told only to those awake in a place next door to the deed\'s, and to a sleeper there whom the deed wakes, in one line that names the deed\'s place and holds nothing else of the deed, and it ends their waiting; the world is told who is next door to a deed by name, awake or asleep, and is never told what was heard.',
 };
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
@@ -105,20 +114,27 @@ const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.
 // `sky` holds the words of the weather in the whole request, and `now` those after its history, where a turn says
 // the weather of the moment. `reply` marks a request to the world for a figure's answer. `clocks` holds every time of the clock in the request, as the engine writes one.
 // `feels` holds the words of what bodies feel in the request: the stand-in gives each as one word that names its owner.
-// `seen.feels` keeps, for the number of records the journal held, what the latest answer of the world gave of them.
-type Asked = { record: number; who: string; turn: boolean; reply?: boolean; marks: string[]; labelled: boolean; records: string[]; sky: string[]; now: string[]; clocks: string[]; feels: string[] };
+// `seen.feels` keeps, for the number of records the journal held, what the latest answer of the world gave of them,
+// and `seen.said` what it gave as heard next door and whom it named as woken.
+// `lore` holds every word of the facts of things in the request and `facts` those of them that stand in a line of
+// their own under a label, with the label. `doors` holds the lines of the places next door, and `sounds` every line
+// that holds a word of what was heard next door, which the stand-in gives as one word that names the deed's place,
+// or that tells of being woken.
+type Asked = { record: number; who: string; turn: boolean; reply?: boolean; marks: string[]; labelled: boolean; records: string[]; sky: string[]; now: string[]; clocks: string[]; feels: string[];
+  lore: string[]; facts: string[]; doors: string[]; sounds: string[] };
 type Feeling = { of: string; text: string };
-const SKY = /\b(?:sky|roof)-\d+-0/g, CLOCK = /(?:day \d+ )?\d\d:\d\d:\d\d/g, FEELS = /\bfeels-c\d+-\d+/g;
+const SKY = /\b(?:sky|roof)-\d+-0/g, CLOCK = /(?:day \d+ )?\d\d:\d\d:\d\d/g, FEELS = /\bfeels-c\d+-\d+/g, LORE = /\blore-[\w-]+/g;
 const asker = (request: Request) => /\nYou are Person \d+ \((c\d+)\)\./.exec(request.system!)![1];
 const askedOf = (request: Request, record: number, who: string, turn: boolean): Asked => {
   const content = request.messages[0].content, body = `${request.system}${content}`;
   return { record, who, turn, marks: body.match(MARK) ?? [], labelled: /\bt\d+\b/.test(content), records: (content.match(/\bt\d+ [^,;[\]\n]*/g) ?? []).map(found => found.replace(/\..*$/, '').trim()), sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [],
-    clocks: body.match(CLOCK) ?? [], feels: body.match(FEELS) ?? [] };
+    clocks: body.match(CLOCK) ?? [], feels: body.match(FEELS) ?? [], lore: body.match(LORE) ?? [], facts: [...content.matchAll(/\n- (t\d+): (lore-[\w-]+)\.(?=\n)/g)].map(found => `${found[1]} ${found[2]}`),
+    doors: [...content.matchAll(/\n- Place \d+ \((p\d+)\): ([^\n]*)/g)].map(found => `${found[1]} ${found[2]}`), sounds: body.split('\n').filter(line => /\bbeyond-|woke you/.test(line)) };
 };
 const MARK = /\b(?:looks|pose|facts|crowd|hidden|inside|secret)-[cpf]\d+(?:-\d+)?/g;
 function standIn(record: () => number) {
-  const seen: { largest: number; record: number; again: number; full: number; deep: number; same: number; turns: Asked[] | null; feels: Map<number, Feeling[]> } =
-    { largest: 0, record: 0, again: 0, full: 0, deep: 0, same: 0, turns: [], feels: new Map() };
+  const seen: { largest: number; record: number; again: number; full: number; deep: number; same: number; turns: Asked[] | null; feels: Map<number, Feeling[]>;
+    said: Map<number, { beyond: string | null; wakes: string[] }> } = { largest: 0, record: 0, again: 0, full: 0, deep: 0, same: 0, turns: [], feels: new Map(), said: new Map() };
   const respond = async (request: Request) => {
     const body = `${request.system}${request.messages.map(message => message.content).join('')}`;
     if (body.length > seen.largest) Object.assign(seen, { largest: body.length, record: record() });
@@ -189,12 +205,18 @@ function standIn(record: () => number) {
         return { of, text: random() < 0.2 ? '' : `feels-${of}-${upTo(99_999)}` };
       });
       if (seen.turns) seen.feels.set(record(), feels);
+      // About half of the deeds are heard next door, whether or not the place has such a neighbour, now and then with
+      // no words. The sleepers it wakes are of the place and of the places next door alike, since the request names
+      // both, and it wakes them whether or not anything was heard; the one more it names may sleep far away.
+      const beyond = random() < 0.5 ? null : random() < 0.1 ? ' ' : `beyond-${spot}-${upTo(99_999)}`;
+      const wakes = [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`];
+      if (seen.turns && !('reply' in asks)) seen.said.set(record(), { beyond, wakes });
       // For a figure it gives words, too many now and then, or none.
       answer = roll < 0.1 ? 'no answer' : 'reply' in asks ? { reply: roll < 0.35 ? null : words(upTo(90)), moves }
         // It calls about half of the deeds a search, and now and then says that a deed went straight to a hidden thing
         // of the place or to one that is not there.
         : { search: random() < 0.5, finds: random() < 0.15 ? [labels[upTo(labels.length + 1) - 1] ?? 't0'] : [], moves, sets, poses,
-          wakes: [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`], feels, result: roll < 0.4 ? null : words(upTo(90)) };
+          wakes, feels, beyond, result: roll < 0.4 ? null : words(upTo(90)) };
     } else if ('memory' in (request.schema as { properties: object }).properties) {
       seen.turns?.push(askedOf(request, record(), asker(request), false));
       answer = roll < 0.08 ? { memory: '' } : roll < 0.12 ? { memory: 'x'.repeat(5000) } : { memory: words(roll < 0.3 ? 61 + upTo(100) : upTo(60)) };
@@ -235,7 +257,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
     json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, result: 0, nothing: 0, woken: 0, spent: 0, posed: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0, reply: 0, silent: 0,
-    moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0, felt: 0, feltAsleep: 0, feltAway: 0, feltEmpty: 0 };
+    moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0, felt: 0, feltAsleep: 0, feltAway: 0, feltEmpty: 0,
+    lore: 0, loreMoved: 0, loreParted: 0, loreHidden: 0, beyond: 0, wokenBeyond: 0, wokenMute: 0, unwoken: 0, wokenFar: 0, hush: 0 };
   const sleepEnds = new Map<string, number>();
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
@@ -247,12 +270,12 @@ test('thousands of steps of any answers leave a journal in which every law of th
   // of the events alone: under each label its name, its count, its holder, and whether it is a supply or money.
   // `given` is how many there were of each name at the start, `sunk` what was eaten or burned and `taken` what came
   // from a supply.
-  const ledger = new Map<string, { name: string; n: number | null; holder: string; stock: boolean; money: boolean }>();
+  const ledger = new Map<string, { name: string; n: number | null; holder: string; stock: boolean; money: boolean; facts: string | null }>();
   const given = new Map<string, number>(), sunk = new Map<string, number>(), taken = new Map<string, number>();
   const more = (sums: Map<string, number>, name: string, n: number) => sums.set(name, (sums.get(name) ?? 0) + n);
   const enter = (things: Thing[], holder: string) => {
     for (const thing of things) {
-      ledger.set(thing.label, { name: thing.name, n: thing.n, holder, stock: thing.stock, money: thing.money });
+      ledger.set(thing.label, { name: thing.name, n: thing.n, holder, stock: thing.stock, money: thing.money, facts: thing.facts });
       if (!thing.stock) more(given, thing.name, thing.n ?? 1);
       enter(thing.holds ?? [], thing.label);
     }
@@ -264,7 +287,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const rootOf = (key: string): string => ledger.has(key) ? rootOf(ledger.get(key)!.holder) : key;
   const topOf = (label: string): string => ledger.has(ledger.get(label)!.holder) ? topOf(ledger.get(label)!.holder) : label;
   const depthOf = (key: string): number => ledger.has(key) ? 1 + depthOf(ledger.get(key)!.holder) : 0;
-  const labelOf = new Map([...ledger].map(([label, thing]) => [thing.name, label]));
+  const labelOf = new Map([...ledger].map(([label, thing]) => [thing.name, label])), first = new Set(ledger.keys());
   // What is still hidden in each place, the names of what was found, and the seconds each one has searched each place.
   const hidden = new Map(world.places.map(item => [item.id, item.things.filter(thing => thing.hidden)])), searched = new Map<string, number>();
   const known = new Set<string>();
@@ -279,6 +302,12 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const read = (...times: string[]) => { for (const character of world.characters) if (reads(character)) for (const time of times) timed.get(character.id)!.add(time); };
   // The words of what bodies feel that a result has given so far, and those of them that a request has shown since.
   const bodily = new Set<string>(), met = new Set<string>();
+  // Who may be told each word of what was heard next door; who was woken by whom in the deed's own place, and who
+  // from which place next door with which word or with none; and from when each one who heard such a word is free.
+  const sounded = new Map<string, Set<string>>(), shaken = new Set<string>(), knocked = new Set<string>(), roused = new Map<string, number>();
+  const WHEN = String.raw`(?:\[[^\]\n]+\]|(?:day \d+ )?\d\d:\d\d:\d\d)`;
+  const HEARD = new RegExp(`^${WHEN} From Place (\\d+), next door: (beyond-p\\d+-\\d+)$`), WOKEN = new RegExp(`^${WHEN} Something from Place (\\d+), next door, woke you(?:\\.|: (beyond-p\\d+-\\d+))$`),
+    SHAKEN = new RegExp(`^${WHEN} Person (\\d+) woke you by this: [^\\n]*$`);
   let at = 0, asked = 0, sky = 0;
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
@@ -296,6 +325,17 @@ test('thousands of steps of any answers leave a journal in which every law of th
         if (!met.has(word)) count.felt += 1;
         met.add(word);
       }
+      // A line of what was heard next door is its hearer's, of a deed's place next door, and has no other form; a
+      // sleeper woken from next door reads the place and the sound or the place alone, and never who did what.
+      for (const line of turns[asked].sounds) {
+        const heard = HEARD.exec(line), woken = WOKEN.exec(line), shook = !/\bbeyond-/.test(line) && SHAKEN.exec(line);
+        law('door', who !== spot && (heard ? heard[2].startsWith(`beyond-p${heard[1]}-`) && sounded.get(heard[2])!.has(who)
+          : woken ? knocked.has(`${who} p${woken[1]} ${woken[2] ?? ''}`) : !!shook && shaken.has(`${who} c${shook[1]}`)), seq);
+        if (met.has(`${who} ${line}`)) continue;
+        met.add(`${who} ${line}`);
+        if (!shook) count[heard ? 'beyond' : woken![2] ? 'wokenBeyond' : 'wokenMute'] += 1;
+      }
+      law('lore', who === spot ? turns[asked].lore.length === turns[asked].facts.length : !turns[asked].lore.length, seq);
       if (who !== spot) {
         for (const time of turns[asked].clocks) law('clock', timed.get(who)!.has(time), seq);
         if (turn) count[turns[asked].clocks.includes(event.clock) ? 'clocked' : 'clockless'] += 1;
@@ -320,6 +360,17 @@ test('thousands of steps of any answers leave a journal in which every law of th
         const lies = [...ledger].filter(([label]) => roots.has(rootOf(label)) && !(turns[asked].reply && still.has(topOf(label))))
           .map(([label, { name, n }]) => `${label} ${name}${n === null ? '' : ` ×${n}`}`);
         law('kept', isDeepStrictEqual([...turns[asked].records].sort(), lies.sort()), seq);
+        // And of the facts of exactly those things, each under its label, wherever the thing began and whatever it
+        // was parted from.
+        const lore = [...ledger].filter(([label, { facts }]) => facts !== null && roots.has(rootOf(label)) && !(turns[asked].reply && still.has(topOf(label))));
+        law('lore', isDeepStrictEqual([...turns[asked].facts].sort(), lore.map(([label, { facts }]) => `${label} ${facts}`).sort()), seq);
+        count.lore += lore.length;
+        count.loreMoved += lore.filter(([, { facts }]) => /^lore-p\d+-/.test(facts!) && !facts!.startsWith(`lore-${spot}-`)).length;
+        count.loreParted += lore.filter(([label]) => !first.has(label)).length;
+        count.loreHidden += lore.filter(([label]) => still.has(topOf(label))).length;
+        // A deed's request says who is in each place next door, awake or asleep, and a figure's says nothing of them.
+        law('door', isDeepStrictEqual(turns[asked].doors, turns[asked].reply ? [] : world.places.filter(item => neighbours(spot).includes(item.id)).map(item => `${item.id} ${
+          world.characters.filter(({ id }) => !away.has(id) && place.get(id) === item.id).map(({ id, name }) => `${name} (${id}), ${asleep.has(id) ? 'asleep' : 'awake'}`).join('; ') || 'nobody'}.`)), seq);
       } else {
         // A resident is sent no label. A guarded thing is named to it only when it carries the thing, three deep at
         // most, and a hidden one only when it was found.
@@ -366,10 +417,25 @@ test('thousands of steps of any answers leave a journal in which every law of th
       count[record.text === null ? 'silent' : 'reply'] += 1;
     }
     if (record.kind === 'result') {
+      const beside = (id: string) => !away.has(id) && neighbours(event.place).includes(place.get(id)!), said = seen.said.get(seq);
       for (const id of record.wakes) {
-        law('waking', asleep.has(id) && place.get(id) === event.place, seq);
+        law('waking', asleep.has(id) && (place.get(id) === event.place || beside(id)), seq);
         sleepEnds.set(id, Math.min(sleepEnds.get(id)!, before.at + before.seconds));
+        if (beside(id)) knocked.add(`${id} ${event.place} ${record.beyond ?? ''}`);
+        else shaken.add(`${id} ${record.who}`);
       }
+      // What is heard next door is what the world gave, for everyone awake in a place next door and nobody else. A
+      // sleeper there who is not woken is told nothing, and one who sleeps farther off is not woken.
+      const hearers = record.beyond === null ? [] : world.characters.map(({ id }) => id).filter(id => beside(id) && !asleep.has(id));
+      law('door', isDeepStrictEqual(event.nearby, hearers) && event.beyond === record.beyond && (record.beyond === null || record.beyond === said?.beyond), seq);
+      if (record.beyond !== null) {
+        if (!sounded.has(record.beyond)) sounded.set(record.beyond, new Set());
+        for (const id of [...hearers, ...record.wakes.filter(beside)]) sounded.get(record.beyond)!.add(id);
+        count.unwoken += world.characters.filter(({ id }) => beside(id) && asleep.has(id) && !record.wakes.includes(id)).length;
+        if (!hearers.length && !neighbours(event.place).length) count.hush += 1;
+      }
+      for (const id of hearers) roused.set(id, event.at);
+      count.wokenFar += record.wakes.length || record.beyond !== null ? said!.wakes.filter(id => asleep.has(id) && place.get(id) !== event.place && !beside(id)).length : 0;
       // A search finds what its doer's searches of the place have lasted long enough for, and so does a deed that the
       // world says went straight to a thing still hidden in that place. It is hidden no longer.
       const key = `${record.who} ${event.place}`, seconds = (searched.get(key) ?? 0) + before.seconds, lay = hidden.get(event.place)!;
@@ -418,9 +484,9 @@ test('thousands of steps of any answers leave a journal in which every law of th
       const twin = posting.as === null ? undefined : ledger.get(posting.as);
       if (gone) more(sunk, thing.name, amount);
       else if (twin) {
-        law('kept', twin.holder === posting.to && twin.name === thing.name && twin.n !== null, seq);
+        law('kept', twin.holder === posting.to && twin.name === thing.name && twin.n !== null && twin.facts === thing.facts, seq);
         twin.n! += amount;
-      } else ledger.set(posting.as!, { name: thing.name, n: posting.n, holder: posting.to, stock: false, money: thing.money });
+      } else ledger.set(posting.as!, { name: thing.name, n: posting.n, holder: posting.to, stock: false, money: thing.money, facts: thing.facts });
       count[gone ? posting.to as 'eaten' | 'burned' : thing.stock ? 'taken' : twin ? 'joined' : posting.as !== posting.what ? 'parted' : 'moved'] += 1;
     }
     if (event.moved?.length) {
@@ -438,6 +504,11 @@ test('thousands of steps of any answers leave a journal in which every law of th
     if (record.kind === 'spent') count.spent += 1;
     if (record.kind === 'act' || record.kind === 'spent') law('spent', (debtOf(record.who, record.at) >= limit) === (record.kind === 'spent'), seq);
     if (event.kind === 'sleep' || event.kind === 'wake') debts.set(event.who, { debt: debtOf(event.who, event.at), since: event.at });
+    // Whoever heard something from next door is free then, or when a speech that holds it has ended.
+    if ((record.kind === 'act' || record.kind === 'spent' || record.kind === 'memory') && roused.has(record.who)) {
+      law('door', record.at === Math.max(roused.get(record.who)!, held.get(record.who) ?? 0), seq);
+      roused.delete(record.who);
+    }
     if (record.kind === 'act') {
       law('absent', !away.has(record.who) && !asleep.has(record.who), seq);
       law('speech', record.at >= (held.get(record.who) ?? 0), seq);

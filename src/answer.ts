@@ -9,10 +9,10 @@ import { LIMITS, MAX_WORDS, namesOf } from './world.ts';
 import type { Event, Person, World } from './world.ts';
 
 // The world's answer to a deed as it was read: what came of it in words, the sleepers it wakes, what it moved and
-// which states it changed, the poses it changed, what it makes a body feel, whether it was a search, and the hidden
-// things it went straight to.
+// which states it changed, the poses it changed, what it makes a body feel, what of it is heard next door, whether it
+// was a search, and the hidden things it went straight to.
 export type Answer = { text: string | null; wakes: string[]; moves: Move[]; sets: Setting[]; poses: { of: string; text: string }[]; feels: { of: string; text: string }[];
-  search: boolean; finds: string[] };
+  beyond: string | null; search: boolean; finds: string[] };
 
 const parsed = (answer: string): unknown => {
   try { return JSON.parse(answer); } catch (error) {
@@ -31,11 +31,12 @@ const movesOf = (value: unknown): Move[] | null => Array.isArray(value) && value
 // and of `finds` only the labels in `hidden`, each once, in their order; of `poses` only those of a person in
 // `present`, each one line cut at its limit, the later of two for one person. Of `feels` only those of a person in
 // `present` who is not in `sleepers` are kept, cut and chosen alike, and one with no words is dropped: a sleeper is
-// told nothing, the one this deed wakes included. `search` is true only when the answer says so. Whether the moves
-// and the states can be taken is not looked at here: `refusal` says that.
+// told nothing, the one this deed wakes included. `beyond` is read as a pose is: one line cut at its limit, and null
+// when there is nothing in it. `search` is true only when the answer says so. Whether the moves and the states can
+// be taken is not looked at here: `refusal` says that. `sleepers` are those the deed can wake, next door included.
 export function readResult(answer: string, sleepers: string[], present: string[], hidden: string[]): Answer | null {
   const value = parsed(answer);
-  if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || !Array.isArray(value.wakes) || !Array.isArray(value.poses) || !Array.isArray(value.feels)
+  if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || (value.beyond !== null && typeof value.beyond !== 'string') || !Array.isArray(value.wakes) || !Array.isArray(value.poses) || !Array.isArray(value.feels)
     || !Array.isArray(value.sets) || value.sets.length > MAX_SETS) return null;
   const moves = movesOf(value.moves), named: unknown[] = value.wakes, sets: Setting[] = [], poses = new Map<string, string>(), feels = new Map<string, string>();
   for (const item of value.sets as unknown[]) {
@@ -57,7 +58,7 @@ export function readResult(answer: string, sleepers: string[], present: string[]
     feels.set(of, text);
   }
   return moves && { text: line(value.result, MAX_WORDS) || null, wakes: sleepers.filter(id => named.includes(id)), moves, sets,
-    poses: [...poses].map(([of, text]) => ({ of, text })), feels: [...feels].map(([of, text]) => ({ of, text })), search: value.search === true, finds: hidden.filter(id => Array.isArray(value.finds) && value.finds.includes(id)) };
+    poses: [...poses].map(([of, text]) => ({ of, text })), feels: [...feels].map(([of, text]) => ({ of, text })), beyond: line(value.beyond, LIMITS.beyond) || null, search: value.search === true, finds: hidden.filter(id => Array.isArray(value.finds) && value.finds.includes(id)) };
 }
 
 // The world's answer for a figure as it can be taken, or null when it cannot be used: `reply` becomes one line of
@@ -101,22 +102,27 @@ export function reply(world: World, people: Person[], things: Things, said: Even
     heard: hearers.map(person => person.id), note: null, moved: made.moved };
 }
 
-// The world's answer to a deed takes effect: each sleeper it wakes has its sleep end when the deed ends, and the
-// waking itself comes at that sleeper's turn, as every waking does. Its moves and states are settled by the rules
+// The world's answer to a deed takes effect: each sleeper it wakes, in the place or next door, has its sleep end when
+// the deed ends, and the waking itself comes at that sleeper's turn, as every waking does. Its moves and states are settled by the rules
 // of things, whole or not at all, and its poses replace those of the people of the place; an empty pose is none.
 // A deed the world calls a search counts towards its doer's search of the place. What is found is hidden no longer,
 // for anyone. Those awake in the place perceive what came of the deed when it came to words or to anything else.
 // What a body feels is not perceived in that way: the event holds it for its owner, and `heard` is as without it.
+// What is heard next door reaches everyone awake in a place next door, `nearby`, and ends their waiting as speech
+// near them does; a sleeper there whom the answer does not wake, and someone on the way, hear nothing.
 // An answer that the rules refuse changes nothing and gives the refusal.
 export function result(world: World, people: Person[], things: Things, deed: Event, answer: Answer): Event | Refused {
-  const made = settled(world, people, things, deed, answer), { text, wakes, poses, feels, search, finds } = answer;
+  const made = settled(world, people, things, deed, answer), { text, wakes, poses, feels, beyond, search, finds } = answer;
   if ('code' in made) return made;
   keep(things, deed.place, made);
   const doer = people.find(person => person.id === deed.who)!, { moved, set, found } = made;
   if (search) things.searched.set(`${deed.who} ${deed.place}`, (things.searched.get(`${deed.who} ${deed.place}`) ?? 0) + deed.seconds);
   for (const pose of poses) people.find(person => person.id === pose.of)!.pose = pose.text || null;
   for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + deed.seconds);
+  const doors = world.places.find(place => place.id === deed.place)!.nextDoor;
+  const nearby = beyond === null ? [] : people.filter(person => !person.asleep && doors.includes(person.place!));
+  for (const hearer of nearby) attend(hearer, deed.at);
   return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
     heard: text === null && !moved.length && !set.length && !found.length ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null,
-    wakes, search, finds, moved, set, poses, feels, found };
+    wakes, search, finds, moved, set, poses, feels, beyond, nearby: nearby.map(person => person.id), found };
 }

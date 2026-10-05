@@ -3,7 +3,7 @@
 import { cut, isObject, wordsOf } from './reading.ts';
 import { clockAt, lasting, secondsUntil, speechSeconds, travelSeconds } from './time.ts';
 import { MAX_SECONDS, MAX_SLEEP, MAX_WORDS } from './world.ts';
-import type { Event, Kind, Person, World } from './world.ts';
+import type { Event, Kind, Person, Place, World } from './world.ts';
 
 // One answer of a character, as the schema asks for it: every field is there and an unused one is null. `to` is the
 // character a `call` reaches, or the figure of the speaker's place a `say` is addressed to.
@@ -76,6 +76,8 @@ export const attend = (person: Person, now: number) => { person.freeAt = Math.ma
 
 // Those who perceive what happens in a place: everyone there who is awake.
 export const awakeIn = (people: Person[], place: string, but: Person) => people.filter(person => person !== but && person.place === place && !person.asleep);
+// Those a deed done in a place can wake: the sleepers of the place and of the places next door to it.
+export const sleepersNear = (people: Person[], place: Place) => people.filter(person => person.asleep && (person.place === place.id || place.nextDoor.includes(person.place!)));
 
 // One action of a character in a place, at `now`: the event, with the actor and those who perceive it moved on.
 // `limit` is the number of words a speech may hold this turn; a longer one is cut there.

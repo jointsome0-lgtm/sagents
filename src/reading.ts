@@ -27,6 +27,9 @@ export function cut(text: string, limit: number): { text: string; cut: boolean }
 // A text closed as a sentence.
 export const closed = (text: string) => /[.!?…]$/.test(text) ? text : `${text}.`;
 
+// The most words one `facts` of a world file may hold, so that the request to the world has a largest size.
+export const MAX_FACTS = 300;
+
 export const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 // A time of day like `06:30` as seconds since midnight.
 export const secondsOfDay = (time: string) => { const [hours, minutes] = time.split(':').map(Number); return hours * 3600 + minutes * 60; };

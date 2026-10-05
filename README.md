@@ -123,6 +123,11 @@ The rules of time and hearing:
 - Speech lasts as long as its words take at the world's `wordsPerMinute`, 130 by default. A `say` or a `call` holds at
   most 65 words. A longer one is cut. So are a note and the text of a `do`.
 - Everyone in the speaker's place hears a `say` and is held until it ends, so people in one place take turns.
+- A place of a world file may list `nextDoor`, the ids of the places that share a door or a thin wall with it. Two
+  places are next door to each other whichever of them lists the other; the place itself or an id that is no place
+  of the list is refused. The list of places that every resident is sent says which places are next door to each.
+  Speech does not pass a door. What of a deed is heard next door is the world's to say, as the point on `beyond`
+  below describes.
 - A `call` goes through the world's `remote`, a telephone for example. The one called hears it wherever they are, and
   those next to the caller hear the caller's half. A world without `remote` has no calls.
 - A `go` leads to another place of the list and takes the minutes between the two: those a `minutesTo` of either
@@ -132,7 +137,8 @@ The rules of time and hearing:
   nothing and does not act. A call to it is delivered when it arrives.
 - A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
   next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours. A known limit:
-  a `do` ends early as a `wait` does, when someone speaks, comes or leaves nearby or the weather changes, and its
+  a `do` ends early as a `wait` does, when someone speaks, comes or leaves nearby, something is heard from next door
+  or the weather changes, and its
   doer is free again then, yet the deed is credited whole at once: the world answers for all its seconds, and a
   search counts them all.
 - A place of a world file may have `"clock": true`, and so may a character, for a watch or a phone. A resident knows
@@ -172,16 +178,28 @@ The rules of time and hearing:
 
 The world answers a deed:
 
-- A world file may give `facts` to the world, to a place and to a character: what is true there and is not seen at
-  once, 300 words each at most. No resident is ever sent any of it.
+- A world file may give `facts` to the world, to a place, to a character and to a thing: what is true there and is
+  not seen at once, 300 words each at most. No resident is ever sent any of it.
+- The `facts` of a thing are what is true of the thing itself: what is written in a notebook, what a bag does not
+  hold. Any thing may have them, wherever it stands: in a place, inside another thing, on a character. They go with
+  the thing. The world is told the facts of every thing that its request lists, for a deed and for a figure's answer
+  alike: lying in the place, in the hands or the pockets of someone there, inside another thing, or hidden. They
+  stand in lines of their own after the lists, under `Facts of things:`, each under the label of its thing, like
+  `- t23: …`, so that a long text does not stand in the notation. A part taken off a counted thing or out of a
+  stock has the facts of what it was taken from, and two counts become one record only when their facts are the
+  same. In `examples/night-pass.json` what the guests' journal, the backpack, the map and the notebook say is with
+  those things, so it is still known when one of them is carried to another place.
 - After every `do` the world is asked once what came of it, through the model of `--world-model`, which is
   `--model`'s unless given. It is sent the world's description and facts, the place with its facts and its things, what is hidden in it, the names
-  of the other places, who is there, awake or asleep, each with looks, pose, what it carries and its facts, what
+  of the other places, for each place next door who is there, by name and id and awake or asleep, or that nobody
+  is, who is in the deed's place, awake or asleep, each with looks, pose, what it carries and its facts, the facts
+  of the things listed, what
   came of the latest earlier deeds in that place (400 words of them), the clock, and the doer's name with the deed
-  and its span. It is sent no sheet, note, memory or speech.
+  and its span. It is sent no sheet, note, memory or speech, and of those next door no looks, pose or things.
 - It answers with `search`, whether the deed was a search of the place; `finds`, the labels of the hidden things
   the deed went straight to; `moves`, `sets` and `poses`, described under «Things» below; `wakes`, the sleepers of
-  that place whom the deed wakes; `feels`, what the deed makes a body feel, described in the next point; and
+  that place or of a place next door whom the deed wakes; `feels`, what the deed makes a body feel, and `beyond`,
+  what of the deed is heard next door, described in the next two points; and
   `result`, one or two sentences of what anyone there could see, hear or smell, 65 words at most, or null when
   there is nothing to notice. The fields stand in this order, the entries before the words, so that the
   words are written after the entries and cannot lead them; both orders passed the check of 2026-10-05 on the weak
@@ -189,7 +207,8 @@ The world answers a deed:
   request and lists the labels, ids and states that the answer may name, so a model held to its schema names
   nothing else where a list has entries. A list that is empty takes any string, since a strict schema may refuse an
   empty list, and the states of all the things there stand in one list, so the schema does not hold a state to its
-  own thing. The rules do the rest: an id of `wakes`, `finds`, `poses` or `feels` that is not of the place is
+  own thing. The rules do the rest: an id of `finds`, `poses` or `feels` that is not of the place, or of `wakes` that is of
+  no sleeper of the place or of a place next door, is
   dropped, and an entry of `moves` or `sets` that cannot be taken refuses the answer, as «Things» says.
 - `feels` is a list of `{ of, text }`: what the deed makes the body of a person there feel, such as weight, cold,
   pain or taste, and never a thought or a wish. A deed that does something to a body gives entries, for the one
@@ -207,6 +226,20 @@ The world answers a deed:
   in single requests. This is the first of three planned layers of sensation. The
   other two are not built: what a body feels from its own state over time, such as an arm tired by an hour of
   carrying, and a body that changes and is kept as a record.
+- `beyond` is a string or null: what of the deed is heard in the places next door, one sentence of 20 words at
+  most, and null when nothing carries that far, which is most deeds. It says the sound and not who made it, unless
+  it is a voice with its words. It is read as a pose is: cut at the limit, and one with no words is null. Everyone
+  awake in a place next door, and not on the way, is told one line, `From <place name>, next door: <text>`, and it
+  ends a wait as speech nearby does. The line has the name of the deed's place and that text, and never the doer's
+  name, the deed, its result, a pose, a move or a feeling. A sleeper next door whom `wakes` names is woken as a
+  sleeper of the place is, and wakes with the line `Something from <place name>, next door, woke you: <text>`, or
+  with `… woke you.` when `beyond` is null: a weak world fills the old field sooner than the new one, so the
+  waking is taken without the text. A sleeper next door whom `wakes` does not name is told nothing, and so is
+  someone on the way. Nobody in the deed's own place is told the text, the doer included, and it is not kept for
+  the world: what a place keeps of its earlier deeds has none of it. A text for a place with no place next door is
+  kept in the record and told to nobody. The transcript of `live` shows it as a `heard next door: …` line under
+  the result. The world's text with the facts of things, the places next door and this field has not been run on
+  a real model: what was measured is the text before them.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
   each person and place, the seconds of that person's deeds there that the world called a search. A thing is found
   by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «Ночь на
@@ -226,7 +259,8 @@ The world answers a deed:
   way out, and a pose never names another place. Only a `go` moves anyone. The world is told the weather so that it
   knows it, and to speak of it only when the deed meets it. Nothing checks that it kept to either.
 - The doer and everyone awake in the place read what came of it at their own next turn; it interrupts nobody. A
-  sleeper it wakes has its sleep end when the deed ends, and reads who woke it and by what deed.
+  sleeper it wakes has its sleep end when the deed ends, and one of the deed's own place reads who woke it and by
+  what deed.
 - The answer is a record of its own, right after its deed: the journal takes nothing else there, so a run that
   stopped between the two asks the world first when it continues. An answer that cannot be used is asked for once
   more; after that nothing came of the deed, and the answer counts as unusable. An answer that the rules of things
@@ -249,7 +283,7 @@ People of a place whom nobody plays:
 - A `say` may have `to`, the id of a figure of the speaker's place; any other `to` of a `say` is dropped. Everyone
   in the place hears the speech as any other. Then the world is asked once, through the model of `--world-model`,
   what the figure answers: it is sent what a deed's request holds of the place and of those in it, without what is
-  hidden, with the crowd and every figure of the place with looks and facts, with what came of the latest earlier
+  hidden and without the places next door, with the crowd and every figure of the place with looks and facts, with what came of the latest earlier
   deeds there, and with what was said to the figures of that place before and answered (300 words of it).
 - It answers with `reply`, the figure's words, 65 at most, or null when the figure says nothing, and with `moves`
   as a deed's answer has them, for a thing handed over while speaking: a figure carries nothing of its own, what it
@@ -277,7 +311,8 @@ Things:
   or drink; `burns` says that it can burn up. `states` is the list of states it can be in and `state` the one it is
   in, the first when not given; `fire` is true for what can set things alight, or names the state in which it can.
   `money` marks a count that no deed uses up or makes. `hidden`, `{ spot, minutes }` on a thing of a place itself,
-  says where it lies unfound and how long a search finds it. A name has eight words at most and none of `, ; [ ] ×`.
+  says where it lies unfound and how long a search finds it. `facts` is what is true of the thing and is not seen
+  at once, for the world alone, as «The world answers a deed» says. A name has eight words at most and none of `, ; [ ] ×`.
   The examples show all of these. A file that still has the texts `holds`, `has`, a text of `things` or a list
   `hidden` is refused.
 - The rules give every record a label, `t1`, `t2` and on in the order of the file. A label is the world's own, is
@@ -416,7 +451,7 @@ turn it is a lost turn like any other, for the world's answer and a memory rewri
 and it counts as a request, with no tokens known for it. Three such answers of one model in a row, with no answer
 of that model arriving whole in between, end the run as `failed (output_limit)`. It prints
 each event as it happens. In the text output an event is one line, followed by a line for each thing it found, moved
-or put into another state, for each pose it changed, for each private feeling and for a private note; a `wait` with
+or put into another state, for each pose it changed, for each private feeling, for what was heard next door and for a private note; a `wait` with
 no note prints nothing,
 and a memory rewrite is shown whole, over as many lines as it has, marked as private like a note. With `--json`
 every event is one JSON object on one line, the silent waits too. Then comes one line of totals: the status and its
@@ -449,6 +484,12 @@ What it lacks:
   there, so the lines can fall behind the lists, and a weak model then answers by the line: in two whole runs it
   did so twice, with money still on a counter after it had been pocketed and keys gone from a box after they had
   been put back.
+- Speech does not pass a door: a `say` is heard in the speaker's place and nowhere else, however loud. Someone
+  who calls through a door does it by a `do`, and the one inside reads only what the world put into `beyond`, and
+  can answer the same way. Whether a deed is heard next door is the world's reading, and nothing checks it; every
+  place next door hears the same, and the doer is not told that it was heard.
+- A door has no state. It is not a thing that is open, shut or bolted: what a place's description says of its door
+  is all the world knows, a `go` passes any door, and what is heard next door does not depend on one.
 - A search is whatever the world calls one, and a deed went straight to a hidden thing when the world says so:
   nothing checks either, so a world that is generous finds a thing for someone who only guessed. Nobody is told how
   long a search has lasted or that there is anything left to find.
