@@ -110,7 +110,7 @@ node src/cli.ts live examples/night-station.json [--model <id>] [--cast <charact
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
 each with a place and a sheet. Every character is played by the model, `gpt-6.1-sol@low` unless `--model` says
 otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-your-own). One turn is one request
-and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note.
+and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note. The rules ask a note to be no plan but what is going on in the character at that moment: what it notices, what its body feels, what it wants and what holds it back, so that no sheet has to say what a note is for.
 `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
 what each one remembers after the night decides what happens; `examples/seaside-cafe.json` is a café with a
 crowd and a waitress whom nobody plays, in a town whose places lie on a map. The three examples are written in

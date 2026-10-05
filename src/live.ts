@@ -30,7 +30,7 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). The wait ends at once when someone speaks near you, comes or leaves, or when something is heard from next door, so a long wait loses nothing: do not wait in short steps.
 - sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}), or \`until\` a time of day. Asleep you hear and see nothing, and only someone's deed can wake you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
 - until: for do, wait and sleep, in place of \`seconds\`: a time of day like 06:30, the next moment the clock shows it. It must fall within the action's span.
-- note: with any action, a private line you keep for yourself. Nobody else ever reads it. Null when you have none.
+- note: with any action, a private line you keep for yourself: not a plan, but what is going on in you right now, what you notice, what your body feels, what you want and, when something holds you back, what it is. Nobody else ever reads it. Null when you have none.
 
 Speak the way people speak: briefly, one thought at a time, and leave room for an answer. Words cost the story's time: each takes part of a second, and those who listen are held until you finish. Each turn says how many words \`text\` may hold; a longer speech is cut there. A note, and the \`text\` of a do, keep their first ${MAX_WORDS} words.
 
