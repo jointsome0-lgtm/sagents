@@ -3,6 +3,10 @@
 // takes, who perceives it and when each character is free to act again.
 export const MAX_WORDS = 65;
 export const MAX_SECONDS = 3600;
+export const MAX_SLEEP = 43_200;
+// A text of so many words holds at most this many characters for each of them, so that a limit in words is a limit
+// in characters too, whatever a model writes.
+export const CHARS_PER_WORD = 10;
 // What an answer that cannot be used becomes: a wait of this many seconds.
 export const LOST_SECONDS = 30;
 
@@ -12,21 +16,23 @@ export class WorldError extends Error {}
 export type Place = { id: string; name: string; about: string; minutesTo: { [place: string]: number } };
 export type Character = { id: string; name: string; place: string; sheet: string };
 // `remote` names the means by which people reach each other from afar; a world with null has none.
+// `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps.
 export type World = { title: string; about: string; clock: string; wordsPerMinute: number; remote: string | null;
-  travelMinutes: number; places: Place[]; characters: Character[] };
+  travelMinutes: number; shortWords: number; longWords: number; places: Place[]; characters: Character[] };
 
-export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait';
+export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // One answer of a character, as the schema asks for it: every field is there and an unused one is null.
 export type Action = { action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; note: string | null };
 // `place` is where it happened; `to` is the character called, or the place a `go` leads to; `heard` holds the ids of
-// those who perceived it when it happened, without the one who did it.
-export type Event = { at: number; clock: string; kind: Kind | 'arrive'; who: string; place: string; to: string | null; text: string | null;
+// those who perceived it when it happened, without the one who did it. A `memory` is a character's long-term text
+// written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
+export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory'; who: string; place: string; to: string | null; text: string | null;
   seconds: number; cut: boolean; heard: string[]; note: string | null };
-// A character in the run. On the way it is in no place and `heading` names where it will arrive. `speaking` and
-// `listening` are the ends of its own last speech and of the latest speech it heard; `began` is the start of its own
-// last action; `missed` holds the calls made to it while it was on the way.
-export type Person = { id: string; place: string | null; heading: string | null; freeAt: number; began: number | null; speaking: number;
-  listening: number; missed: Event[] };
+// A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
+// its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
+// is the start of its own last action.
+export type Person = { id: string; place: string | null; heading: string | null; asleep: boolean; freeAt: number; began: number | null;
+  speaking: number; listening: number };
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const isObject = (value: unknown): value is { readonly [field: string]: unknown } => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -34,6 +40,8 @@ const refuse = (field: string, problem: string): never => { throw new WorldError
 const textOf = (value: unknown, field: string): string => typeof value === 'string' && value.trim() ? value : refuse(field, 'must be a text that is not empty');
 const amountOf = (value: unknown, field: string, absent: number): number => value === undefined ? absent
   : typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : refuse(field, 'must be a number above zero');
+const countOf = (value: unknown, field: string, absent: number): number => value === undefined ? absent
+  : typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : refuse(field, 'must be a whole number above zero');
 const listOf = (value: unknown, field: string): unknown[] => Array.isArray(value) && value.length ? value : refuse(field, 'must be a list that is not empty');
 function idOf(value: unknown, field: string, taken: string[]): string {
   if (typeof value !== 'string' || !ID.test(value)) return refuse(field, 'must be a short id of Latin letters, digits, `_` and `-`');
@@ -69,17 +77,33 @@ export function readWorld(value: unknown): World {
   }
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
-    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), places, characters };
+    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), shortWords: countOf(value.shortWords, 'shortWords', 2000),
+    longWords: countOf(value.longWords, 'longWords', 400), places, characters };
 }
 
-// The story's clock at so many seconds from its start, as a time of day.
+// The story's clock at so many seconds from its start, as a time of day. From the second day on it names the day.
 export function clockAt(world: World, at: number): string {
   const [hours, minutes] = world.clock.split(':').map(Number);
-  const second = (hours * 3600 + minutes * 60 + at) % 86_400;
-  return [Math.floor(second / 3600), Math.floor(second / 60) % 60, second % 60].map(part => String(part).padStart(2, '0')).join(':');
+  const since = hours * 3600 + minutes * 60 + at, second = since % 86_400, day = Math.floor(since / 86_400) + 1;
+  const time = [Math.floor(second / 3600), Math.floor(second / 60) % 60, second % 60].map(part => String(part).padStart(2, '0')).join(':');
+  return day > 1 ? `day ${day} ${time}` : time;
 }
 
 export const wordsOf = (text: string) => text.trim().split(/\s+/).filter(Boolean);
+// The size of a text for every limit in words: its words, or more when it holds more characters than words take.
+export const sizeOf = (text: string) => Math.max(wordsOf(text).length, Math.ceil(text.length / CHARS_PER_WORD));
+// A text as it fits a limit in words: whole, or its beginning, marked as cut.
+export function cut(text: string, limit: number): { text: string; cut: boolean } {
+  if (sizeOf(text) <= limit) return { text, cut: false };
+  let end = 0, count = 0;
+  for (const word of text.matchAll(/\S+/g)) {
+    if (count++ === limit) break;
+    end = word.index + word[0].length;
+  }
+  // The end is not left on half a character.
+  const kept = text.slice(0, Math.min(end, limit * CHARS_PER_WORD)).replace(/[\uD800-\uDBFF]$/, '');
+  return { text: kept.trimEnd(), cut: true };
+}
 export const speechSeconds = (world: World, words: number) => Math.max(2, Math.ceil(words / world.wordsPerMinute * 60));
 // How many words one speech may hold when so many seconds are left before the horizon.
 export const wordLimit = (world: World, secondsLeft: number) => Math.max(1, Math.min(MAX_WORDS, Math.floor(secondsLeft * world.wordsPerMinute / 60)));
@@ -91,22 +115,28 @@ export function travelSeconds(world: World, from: string, to: string): number {
 }
 
 export const start = (world: World): Person[] => world.characters.map(({ id, place }) =>
-  ({ id, place, heading: null, freeAt: 0, began: null, speaking: 0, listening: 0, missed: [] }));
+  ({ id, place, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0 }));
 
 // The next to play: the one free first, then the one whose own last action began earliest, then the world file's order.
 export const next = (people: Person[]): Person => people.reduce((first, person) =>
   person.freeAt < first.freeAt || (person.freeAt === first.freeAt && (person.began ?? -1) < (first.began ?? -1)) ? person : first);
 
 // A character's answer as an action it can take now, or null when it cannot be used. A field the action does not
-// use is dropped whatever it held.
+// use is dropped whatever it held. A text becomes one line; a note and what a `do` describes keep their first
+// `MAX_WORDS` words, and a speech is cut when it is made, at that turn's limit.
 export function readAction(world: World, actor: Person, answer: string): Action | null {
   let value: unknown;
-  try { value = JSON.parse(answer); } catch { return null; }
+  try { value = JSON.parse(answer); } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return null;
+  }
   if (!isObject(value)) return null;
-  const line = (field: unknown) => typeof field === 'string' && field.trim() ? field.trim() : null;
+  const line = (field: unknown) => typeof field === 'string' && field.trim() ? wordsOf(field).join(' ') : null;
+  const short = (field: unknown) => { const whole = line(field); return whole === null ? null : cut(whole, MAX_WORDS).text || null; };
   const text = line(value.text);
-  const seconds = typeof value.seconds === 'number' && Number.isInteger(value.seconds) && value.seconds >= 1 && value.seconds <= MAX_SECONDS ? value.seconds : null;
-  const none = { text: null, to: null, place: null, seconds: null, note: line(value.note) };
+  const within = (most: number) => typeof value.seconds === 'number' && Number.isInteger(value.seconds) && value.seconds >= 1 && value.seconds <= most ? value.seconds : null;
+  const seconds = within(MAX_SECONDS);
+  const none = { text: null, to: null, place: null, seconds: null, note: short(value.note) };
   if (value.action === 'say') return text ? { ...none, action: 'say', text } : null;
   if (value.action === 'call') {
     const known = world.remote !== null && value.to !== actor.id && world.characters.some(character => character.id === value.to);
@@ -116,8 +146,10 @@ export function readAction(world: World, actor: Person, answer: string): Action 
     const known = value.place !== actor.place && world.places.some(place => place.id === value.place);
     return known ? { ...none, action: 'go', place: value.place as string } : null;
   }
-  if (value.action === 'do') return text && seconds ? { ...none, action: 'do', text, seconds } : null;
+  const done = short(text), night = within(MAX_SLEEP);
+  if (value.action === 'do') return done && seconds ? { ...none, action: 'do', text: done, seconds } : null;
   if (value.action === 'wait') return seconds ? { ...none, action: 'wait', seconds } : null;
+  if (value.action === 'sleep') return night ? { ...none, action: 'sleep', seconds: night } : null;
   return null;
 }
 
@@ -125,25 +157,26 @@ export function readAction(world: World, actor: Person, answer: string): Action 
 // speech and the speech it is hearing have ended.
 const attend = (person: Person, now: number) => { person.freeAt = Math.max(now, person.speaking, person.listening); };
 
+// Those who perceive what happens in a place: everyone there who is awake.
+const awakeIn = (people: Person[], place: string, but: Person) => people.filter(person => person !== but && person.place === place && !person.asleep);
+
 // One action of a character in a place, at `now`: the event, with the actor and those who perceive it moved on.
 // `limit` is the number of words a speech may hold this turn; a longer one is cut there.
 export function apply(world: World, people: Person[], actor: Person, action: Action, now: number, limit: number): Event {
   const place = actor.place as string;
-  const here = people.filter(person => person !== actor && person.place === place);
+  const here = awakeIn(people, place, actor);
   const event: Event = { at: now, clock: clockAt(world, now), kind: action.action, who: actor.id, place, to: null, text: action.text,
     seconds: action.seconds ?? 0, cut: false, heard: here.map(person => person.id), note: action.note };
   actor.began = now;
   if (action.action === 'say' || action.action === 'call') {
-    const words = wordsOf(action.text as string);
-    if (words.length > limit) Object.assign(event, { text: words.slice(0, limit).join(' '), cut: true });
-    event.seconds = speechSeconds(world, Math.min(words.length, limit));
+    Object.assign(event, cut(action.text as string, limit));
+    event.seconds = speechSeconds(world, wordsOf(event.text as string).length);
     const listeners = [...here];
     const callee = people.find(person => person.id === action.to);
     if (action.action === 'call' && callee) {
       event.to = callee.id;
-      // A call to someone on the way waits for the arrival.
-      if (callee.place === null) callee.missed.push(event);
-      else if (!here.includes(callee)) listeners.push(callee);
+      // A call to someone on the way or asleep is not heard now: it waits for the arrival or the waking.
+      if (callee.place !== null && !callee.asleep && !here.includes(callee)) listeners.push(callee);
     }
     event.heard = people.filter(person => listeners.includes(person)).map(person => person.id);
     // Speech holds its listeners until it ends.
@@ -158,20 +191,28 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     for (const witness of here) attend(witness, now);
     Object.assign(actor, { place: null, heading: action.place });
   } else if (action.action === 'wait') event.heard = [];
-  // A `do` is left: it is seen and interrupts nobody, and a witness learns of it at its own next turn. Otherwise every
-  // gesture in a room would cost one call to the model for each person who waits there.
+  else if (action.action === 'sleep') actor.asleep = true;
+  // A `do`, and a falling asleep, are left: they are seen and interrupt nobody, and a witness learns of them at its
+  // own next turn. Otherwise every gesture in a room would cost one call to the model for each person who waits there.
   actor.freeAt = now + event.seconds;
   return event;
 }
 
 // A traveller whose turn has come at its arrival time is put in the destination. The event is the arrival as those
-// there see it; `missed` holds the calls that waited for the traveller, which it hears now, whole.
-export function arrive(world: World, people: Person[], traveller: Person, now: number): { event: Event; missed: Event[] } {
+// there see it.
+export function arrive(world: World, people: Person[], traveller: Person, now: number): Event {
   const place = traveller.heading as string;
-  const here = people.filter(person => person.place === place);
+  const here = awakeIn(people, place, traveller);
   for (const witness of here) attend(witness, now);
-  const missed = traveller.missed;
-  Object.assign(traveller, { place, heading: null, missed: [] });
-  return { missed, event: { at: now, clock: clockAt(world, now), kind: 'arrive', who: traveller.id, place, to: null, text: null, seconds: 0,
-    cut: false, heard: here.map(person => person.id), note: null } };
+  Object.assign(traveller, { place, heading: null });
+  return { at: now, clock: clockAt(world, now), kind: 'arrive', who: traveller.id, place, to: null, text: null, seconds: 0, cut: false,
+    heard: here.map(person => person.id), note: null };
+}
+
+// A sleeper whose sleep has run out wakes where it lay. Those there see it and nobody is interrupted.
+export function wake(world: World, people: Person[], sleeper: Person, now: number): Event {
+  const place = sleeper.place as string;
+  sleeper.asleep = false;
+  return { at: now, clock: clockAt(world, now), kind: 'wake', who: sleeper.id, place, to: null, text: null, seconds: 0, cut: false,
+    heard: awakeIn(people, place, sleeper).map(person => person.id), note: null };
 }

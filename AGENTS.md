@@ -6,8 +6,10 @@ Orientation for AI coding assistants and people working in this project. Keep it
 
 sagents runs story agents: models with tools for an interactive story where a coding agent has tools for a repository.
 [README.md](README.md) says what is written and what is only planned. Today the code is the model connection
-(`src/chatgpt.ts`), a prototype of the live mode (`src/world.ts` for the rules, `src/live.ts` for the run) and the
-command line (`src/cli.ts`).
+(`src/chatgpt.ts`), a prototype of the live mode and the command line (`src/cli.ts`). The live mode is `src/world.ts`
+for the rules of time, place and perception, `src/memory.ts` for what a character remembers, `src/journal.ts` for the
+records that are its only state, `src/state.ts` for the file that keeps them and `src/live.ts` for the run and the
+prompts. The first three hold no model call and no disk access, and only `state.ts` touches the disk.
 
 ## The code
 
@@ -18,6 +20,8 @@ command line (`src/cli.ts`).
   something or lose data unnoticed.
 - A request to the model holds what the caller gave and nothing else. Do not add default instructions, tools or
   metadata to it.
+- A `catch` names the errors it expects and passes the rest on. An empty `catch` carries a comment that says why
+  nothing can be lost there.
 
 ## Secrets and private text
 
