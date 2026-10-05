@@ -200,7 +200,11 @@ The world answers a deed:
   someone elsewhere; an entry with no words is dropped. It is not kept for the world: what a place keeps of its
   earlier deeds holds the `result` and no feeling, so no later request to the world has it. The transcript of
   `live` shows it as a `private feeling of …` line, like a note. The text of the field passed the check of
-  2026-10-05 on a strong model and on two weak ones. This is the first of three planned layers of sensation. The
+  2026-10-05 on a strong model and on two weak ones. In two whole runs of that day with the weak local model as the
+  world, 120 requests each, 9 deeds of 52 got a feeling and each was told to its doer alone: three where one was
+  due, cold, smoke and the heat of a stove, and six for the ordinary handling of a thing, such as keys taken into
+  the hand or boots pulled on. Nobody touched anybody in those runs, so entries for two bodies have been seen only
+  in single requests. This is the first of three planned layers of sensation. The
   other two are not built: what a body feels from its own state over time, such as an arm tired by an hour of
   carrying, and a body that changes and is kept as a record.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
@@ -441,6 +445,10 @@ What it lacks:
   what is there, but whether a deed moved a thing at all is the world's reading: a weak model leaves a move out, and
   then its words say that a jacket was hung up while the lists keep it on its owner. Nothing compares the words of
   a result with its moves. The facts of the world file never change.
+- A place keeps for the world only the deeds whose result had words. A deed that only moved a thing leaves no line
+  there, so the lines can fall behind the lists, and a weak model then answers by the line: in two whole runs it
+  did so twice, with money still on a counter after it had been pocketed and keys gone from a box after they had
+  been put back.
 - A search is whatever the world calls one, and a deed went straight to a hidden thing when the world says so:
   nothing checks either, so a world that is generous finds a thing for someone who only guessed. Nobody is told how
   long a search has lasted or that there is anything left to find.
