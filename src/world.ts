@@ -20,9 +20,12 @@ export class WorldError extends Error {}
 export type Place = { id: string; name: string; about: string; facts: string | null; minutesTo: { [place: string]: number } };
 export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null };
 // `remote` names the means by which people reach each other from afar; a world with null has none.
-// `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps.
+// `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `dayStart` is the
+// time of day everyone last woke before the story; after `tiredHours` awake a person is told it is tired, and after
+// `spentHours` it falls asleep where it is.
 export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null;
-  travelMinutes: number; shortWords: number; longWords: number; places: Place[]; characters: Character[] };
+  travelMinutes: number; shortWords: number; longWords: number; dayStart: string; tiredHours: number; spentHours: number; places: Place[];
+  characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // One answer of a character, as the schema asks for it: every field is there and an unused one is null.
@@ -44,8 +47,9 @@ export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' 
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
 // is the start of its own last action.
+// `debt` is its sleep debt in seconds as it stood at `since`: `debtAt` gives it for a later moment.
 export type Person = { id: string; place: string | null; heading: string | null; asleep: boolean; freeAt: number; began: number | null;
-  speaking: number; listening: number };
+  speaking: number; listening: number; debt: number; since: number };
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const isObject = (value: unknown): value is { readonly [field: string]: unknown } => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -69,7 +73,12 @@ function idOf(value: unknown, field: string, taken: string[]): string {
 // A world file as it was parsed from JSON, checked whole. The first thing wrong is one sentence that names the field.
 export function readWorld(value: unknown): World {
   if (!isObject(value)) return refuse('the file', 'must be a JSON object');
-  if (typeof value.clock !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
+  const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+  if (typeof value.clock !== 'string' || !TIME.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
+  const dayStart = value.dayStart ?? '07:00';
+  if (typeof dayStart !== 'string' || !TIME.test(dayStart)) return refuse('dayStart', 'must be a time of day like `07:00`');
+  const tiredHours = amountOf(value.tiredHours, 'tiredHours', 16), spentHours = amountOf(value.spentHours, 'spentHours', 24);
+  if (spentHours < tiredHours) return refuse('spentHours', 'must not be less than `tiredHours`');
   if (value.remote !== undefined && value.remote !== null) textOf(value.remote, 'remote');
   const places: Place[] = [];
   for (const [index, place] of listOf(value.places, 'places').entries()) {
@@ -95,7 +104,7 @@ export function readWorld(value: unknown): World {
   }
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
-    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), shortWords: countOf(value.shortWords, 'shortWords', 2000),
+    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), shortWords: countOf(value.shortWords, 'shortWords', 2000), dayStart, tiredHours, spentHours,
     longWords: countOf(value.longWords, 'longWords', 400), places, characters };
 }
 
@@ -132,8 +141,18 @@ export function travelSeconds(world: World, from: string, to: string): number {
   return Math.max(1, Math.round((minutesTo(from, to) ?? minutesTo(to, from) ?? world.travelMinutes) * 60));
 }
 
+// Everyone begins awake since the world's `dayStart`.
 export const start = (world: World): Person[] => world.characters.map(({ id, place }) =>
-  ({ id, place, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0 }));
+  ({ id, place, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0, debt: 86_400 - secondsUntil(world, 0, world.dayStart),
+    since: 0 }));
+
+// The sleep a person who stayed awake to the world's limit falls into.
+export const SPENT_SLEEP = 28_800;
+// A person's sleep debt at `now`, in seconds: it grows by one for each second awake, on the way included, and falls by
+// two for each second asleep, never below zero.
+export const debtAt = (person: Person, now: number) => person.asleep ? Math.max(0, person.debt - 2 * (now - person.since)) : person.debt + now - person.since;
+export const spentAt = (world: World, person: Person, now: number) => debtAt(person, now) >= world.spentHours * 3600;
+const settle = (person: Person, now: number) => Object.assign(person, { debt: debtAt(person, now), since: now });
 
 // The next to play: the one free first, then the one whose own last action began earliest, then the world file's order.
 export const next = (people: Person[]): Person => people.reduce((first, person) =>
@@ -229,7 +248,7 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     for (const witness of here) attend(witness, now);
     Object.assign(actor, { place: null, heading: action.place });
   } else if (action.action === 'wait') event.heard = [];
-  else if (action.action === 'sleep') actor.asleep = true;
+  else if (action.action === 'sleep') settle(actor, now).asleep = true;
   // A `do`, and a falling asleep, are left: they are seen and interrupt nobody, and a witness learns of them at its
   // own next turn. Otherwise every gesture in a room would cost one call to the model for each person who waits there.
   actor.freeAt = now + event.seconds;
@@ -250,7 +269,7 @@ export function arrive(world: World, people: Person[], traveller: Person, now: n
 // A sleeper whose sleep has run out wakes where it lay. Those there see it and nobody is interrupted.
 export function wake(world: World, people: Person[], sleeper: Person, now: number): Event {
   const place = sleeper.place as string;
-  sleeper.asleep = false;
+  settle(sleeper, now).asleep = false;
   return { at: now, clock: clockAt(world, now), kind: 'wake', who: sleeper.id, place, to: null, text: null, seconds: 0, cut: false,
     heard: awakeIn(people, place, sleeper).map(person => person.id), note: null };
 }
@@ -276,4 +295,13 @@ export function result(world: World, people: Person[], deed: Event, text: string
   for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + deed.seconds);
   return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
     heard: text === null ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null, wakes };
+}
+
+// A person who has been awake to the world's limit falls asleep where it is, at its turn, whatever it meant to do.
+// Those there see it, as they see any falling asleep.
+export function drop(world: World, people: Person[], person: Person, now: number): Event {
+  const place = person.place as string;
+  Object.assign(settle(person, now), { asleep: true, began: now, freeAt: now + SPENT_SLEEP });
+  return { at: now, clock: clockAt(world, now), kind: 'sleep', who: person.id, place, to: null, text: null, seconds: SPENT_SLEEP, cut: false,
+    heard: awakeIn(people, place, person).map(witness => witness.id), note: null };
 }

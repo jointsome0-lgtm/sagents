@@ -72,6 +72,7 @@ test('a character is sent its own sheet and what it perceived, and nothing else'
 09:00:00 Anna says: "RED-WORD is here"
 
 Now 09:00:03. You are in Red room (red). Here with you: Anna (anna).
+You have been awake for 2 h 0 min.
 Minutes from here: Blue room (blue) 1.
 This turn the \`text\` of a say or a call may hold 57 words at most. 0 min 57 s of the story are left.`;
   assert.equal(sent.boris.length, 1);
@@ -155,6 +156,7 @@ Since then:
 09:10:03 You wake.
 
 Now 09:10:03. You are in Red room (red). Here with you: Boris (boris).
+You have been awake for 1 h 40 min.
 Minutes from here: Blue room (blue) 1.
 This turn the \`text\` of a say or a call may hold 65 words at most.` }]);
   // Dan's two answers could not be used: the journal says the rewrite was lost, and he wakes knowing only that he woke.

@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { blank, lineOf, remember, rewrite } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
-import { apply, arrive, clockAt, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, start, wake } from './world.ts';
+import { apply, arrive, clockAt, drop, isRefusal, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, result, sizeOf, spentAt, start, wake } from './world.ts';
 import type { Action, Event, Person, Refusal, World } from './world.ts';
 
 // The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
@@ -16,9 +16,10 @@ export class JournalError extends Error {}
 // `act`: the action as it was read from the answer, or the reason why the answer could not be used, with that turn's
 // word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
-// `at`: what came of the deed, or null, and the sleepers it wakes.
+// `at`: what came of the deed, or null, and the sleepers it wakes. `spent`: the person has been awake to the world's limit
+// and falls asleep where it is; like an arrival and a waking, no answer is behind it.
 export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal }
-  | { kind: 'arrive' | 'wake'; who: string; at: number }
+  | { kind: 'arrive' | 'wake' | 'spent'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean }
   | { kind: 'result'; who: string; at: number; text: string | null; wakes: string[] };
 // `by` is the name of the model whose answer the record came of, and null for a record no answer is behind. The rules
@@ -56,6 +57,7 @@ const NO_REMOTE = 'There is no means of remote contact here: to reach someone, g
 export const refused = (world: World, reason: Refusal) => `${UNUSABLE} ${reason === 'to' && world.remote === null ? NO_REMOTE : INSTEAD[reason]}`;
 export const CUT = 'Your speech was longer than the limit: the others heard only its first words.';
 const NOTHING = 'Nothing came of it that could be noticed.';
+const SPENT = 'You could stay awake no longer and fell asleep where you were';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
 
@@ -128,6 +130,7 @@ export function advance(world: World, state: State, record: Record): Event {
       seconds: 0, cut: record.cut, heard: [], note: null };
   } else if (record.kind === 'act') {
     if (actor.asleep || actor.place === null) return refuse('is an action of someone asleep or on the way');
+    if (spentAt(world, actor, record.at)) return refuse('is an action of someone who could stay awake no longer');
     if (mind.size > world.shortWords) return refuse('is an action of someone whose memory was not folded first');
     if (!Number.isInteger(record.limit) || record.limit < 1 || record.limit > MAX_WORDS) return refuse('holds a word limit that no turn has');
     // An answer that could not be used is kept as its reason, which must be one of the list; an action must read as itself.
@@ -141,10 +144,16 @@ export function advance(world: World, state: State, record: Record): Event {
     if (event.kind === 'do') state.deed = event;
   } else {
     // A sleeper wakes with nothing but its long-term memory, so its lines were folded first.
-    const due = record.kind === 'wake' ? actor.asleep && !mind.lines.length : record.kind === 'arrive' && actor.place === null;
-    if (!due) return refuse('is a waking or an arrival of someone who is not due one');
-    event = record.kind === 'wake' ? wake(world, people, actor, record.at) : arrive(world, people, actor, record.at);
-    remember(mind, ...mind.waiting.splice(0), ...own(world, event).map(line => lineOf(seq, line)));
+    const due = record.kind === 'wake' ? actor.asleep && !mind.lines.length : record.kind === 'arrive' ? actor.place === null
+      : record.kind === 'spent' && !actor.asleep && actor.place !== null && spentAt(world, actor, record.at);
+    if (!due) return refuse('is a waking, an arrival or a falling asleep of someone who is not due one');
+    if (record.kind === 'spent') {
+      event = drop(world, people, actor, record.at);
+      remember(mind, lineOf(seq, `${event.clock} ${SPENT} (${event.seconds} s)`));
+    } else {
+      event = record.kind === 'wake' ? wake(world, people, actor, record.at) : arrive(world, people, actor, record.at);
+      remember(mind, ...mind.waiting.splice(0), ...own(world, event).map(line => lineOf(seq, line)));
+    }
   }
   for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, perceived(world, event, id)));
   if (event.kind === 'call' && !event.heard.includes(event.to as string)) {

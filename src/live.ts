@@ -4,7 +4,7 @@ import { advance, memoryStore, replay, RESULT_WORDS } from './journal.ts';
 import type { Record, State, Store } from './journal.ts';
 import { oldest, readMemory } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
-import { CHARS_PER_WORD, clockAt, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, travelSeconds, wordLimit } from './world.ts';
+import { CHARS_PER_WORD, clockAt, debtAt, spentAt, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, next, readAction, readResult, travelSeconds, wordLimit } from './world.ts';
 import type { Event, World } from './world.ts';
 
 // The `live` mode: every character of a world is played by a model, one call for one action, under the story's clock.
@@ -25,6 +25,8 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - note: with any action, a private line you keep for yourself. Nobody else ever reads it. Null when you have none.
 
 Speak the way people speak: briefly, one thought at a time, and leave room for an answer. Words cost the story's time: each takes part of a second, and those who listen are held until you finish. Each turn says how many words \`text\` may hold; a longer speech is cut there. A note, and the \`text\` of a do, keep their first ${MAX_WORDS} words.
+
+Each turn says how long you have been awake. People need sleep: an hour of it makes up for two awake, and one who stays awake too long falls asleep on the spot.
 
 You know only your sheet, what you remember and what you perceived since, which is what a turn lists. Nothing else is known to you. You may keep things to yourself, and you need not say what you want.
 
@@ -109,7 +111,7 @@ export function requestLimit(world: World): number {
   const system = sharedOf(world).length + longest(people) + longest(world.characters.map(character => character.sheet)) + 20;
   const head = 2 * longest(world.characters.map(character => character.name)) + longest(world.places.map(place => place.name)) + (world.remote?.length ?? 0) + 120;
   const lines = (world.shortWords + 4 * (head + MAX_WORDS)) * (CHARS_PER_WORD + 1);
-  const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + 400;
+  const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + 600;
   const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
   // The world's request: every person could be in one place, each with facts, under the results the place keeps.
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
@@ -240,6 +242,11 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       await happened({ kind: 'wake', who, at: now });
       continue;
     }
+    if (!actor.asleep && spentAt(world, actor, now)) {
+      // Awake to the world's limit: the rules put the person to sleep, and no model is asked.
+      await happened({ kind: 'spent', who, at: now });
+      continue;
+    }
     const system = systemOf(world, shared, who), player = playerOf(who);
     // A sleeper who is due to wake folds all it lived through before the sleep. Anyone else folds its oldest lines
     // while it holds more than the short-term memory may: this is what bounds a request whatever the model chooses.
@@ -266,11 +273,13 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       const person = state.people[index];
       return person !== actor && person.place === place ? [`${tagged(character)}${person.asleep ? ', asleep' : ''}`] : [];
     });
-    const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now);
+    const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now), awake = debtAt(actor, now);
     const answer = await ask(player, { system, schema, messages: [{ role: 'user', content: [
       ...known(mind, mind.lines),
       `Now ${clockAt(world, now)}. You are in ${tagged(world.places.find(item => item.id === place)!)}. ${
         others.length ? `Here with you: ${others.join('; ')}.` : 'Nobody else is here.'}`,
+      `You have been awake for ${Math.floor(awake / 3600)} h ${Math.floor(awake / 60) % 60} min.${awake < world.tiredHours * 3600 ? ''
+        : ` You are tired and should sleep soon: at ${world.spentHours} h awake you fall asleep where you are.`}`,
       `Minutes from here: ${world.places.filter(item => item.id !== place).map(item => `${tagged(item)} ${travelSeconds(world, place, item.id) / 60}`).join(', ') || 'there is no other place'}.`,
       `This turn the \`text\` of a say or a call may hold ${limit} words at most.${
         pause ? '' : ` ${Math.floor((horizon - now) / 60)} min ${(horizon - now) % 60} s of the story are left.`}`,

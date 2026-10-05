@@ -18,6 +18,8 @@ import { readWorld, sizeOf } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
 const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '20:00', remote: 'radio', travelMinutes: 3, shortWords: 300, longWords: 60,
+  // Thirteen hours awake at the start, and the limit a quarter of an hour on, so that some reach it.
+  dayStart: '07:00', tiredHours: 13.1, spentHours: 13.25,
   places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {} })),
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.` })) });
 const world = readWorld(JSON.parse(source));
@@ -37,6 +39,7 @@ export const LAWS = {
   resume: 'A run stopped and continued from its file gives the same journal as one that never stopped.',
   deed: 'Every deed is followed by the world\'s answer and by nothing else.',
   waking: 'A sleeper wakes only when its sleep ends or a deed\'s result wakes it.',
+  spent: 'Nobody acts after being awake for the world\'s limit: at that turn it falls asleep instead.',
 };
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
@@ -89,8 +92,12 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
-    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0 };
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, result: 0, nothing: 0, woken: 0, spent: 0 };
   const sleepEnds = new Map<string, number>();
+  // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
+  const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
+  const debtOf = (id: string, now: number) => { const { debt, since } = debts.get(id)!; return asleep.has(id) ? Math.max(0, debt - 2 * (now - since)) : debt + now - since; };
+  const limit = world.spentHours * 3600;
   let at = 0;
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
@@ -106,6 +113,9 @@ test('thousands of steps of any answers leave a journal in which every law of th
       if (record.text === null) count.nothing += 1;
     }
     at = event.at;
+    if (record.kind === 'spent') count.spent += 1;
+    if (record.kind === 'act' || record.kind === 'spent') law('spent', (debtOf(record.who, record.at) >= limit) === (record.kind === 'spent'), seq);
+    if (event.kind === 'sleep' || event.kind === 'wake') debts.set(event.who, { debt: debtOf(event.who, event.at), since: event.at });
     if (record.kind === 'act') {
       law('absent', !away.has(record.who) && !asleep.has(record.who), seq);
       law('speech', record.at >= (held.get(record.who) ?? 0), seq);

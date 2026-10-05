@@ -117,6 +117,12 @@ The rules of time and hearing:
 - A sleeper hears and sees nothing and interrupts nobody. Only a deed that the world says wakes it ends its sleep
   early. A call to it is delivered when it wakes. The others see it fall asleep and wake,
   and are told that it is asleep when they are told who is with them.
+- Everyone has a sleep debt. It grows by a second for each second awake, on the way included, and falls by two for
+  each second asleep, never below zero. At the story's start it is the time since the world's `dayStart`, `07:00`
+  unless the world file says otherwise. Every turn says how long the character has been awake by that count. From
+  `tiredHours` on, 16 by default, it also says that the character is tired and should sleep soon. At `spentHours`,
+  24 by default, the rules put the character to sleep at its turn, where it is, for 8 hours: no model is asked, the
+  journal keeps it as a record of its own, and the others there see it fall asleep.
 - A leaving and an arrival are seen by everyone awake in the place and end their waiting. A `do`, a falling asleep
   and a waking are seen too, and a witness learns of them at its own next turn.
 - An answer that cannot be used counts as a wait of 30 seconds. The journal keeps the reason, one of seven: it was
@@ -165,9 +171,9 @@ What a character knows:
 The journal and the state file:
 
 - Everything that happens is a record in an append-only journal: an action as it was read from the answer, or the
-  reason why the answer could not be used, the world's answer to a deed, an
-  arrival or a waking, a memory rewrite. Each record is stored with the event the rules made of it. There is no
-  other state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
+  reason why the answer could not be used, the world's answer to a deed, an arrival, a waking or a falling asleep
+  at the limit, a memory rewrite. Each record is stored with the event the rules made of it. There is no other
+  state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
   plays the world. Any beginning of a journal is a whole world at that moment.
 - Without `--state` the journal lives in memory and ends with the run. Then the run is the whole story: a turn says
   how much of it is left, and speech shortens towards the end.
@@ -195,6 +201,7 @@ law and the record:
 - A run stopped and continued from its file gives the same journal as one that never stopped.
 - Every deed is followed by the world's answer and by nothing else.
 - A sleeper wakes only when its sleep ends or a deed's result wakes it.
+- Nobody acts after being awake for the world's limit: at that turn it falls asleep instead.
 
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
 rewrite is a request too. It stops at the first failure of the model connection and tries nothing again. It prints
@@ -222,6 +229,8 @@ What it lacks:
 - The world answers a deed and does nothing of its own accord. The facts of the world file never change: that a
   thing was taken or broken is known to the world only from the latest results it is shown for that place, and
   nothing checks its answer against the facts.
+- Tiredness is one number. It does not slow anyone or change what a character can do before the limit, and a
+  character who is on the way when it reaches the limit falls asleep only at its turn after the arrival.
 - The world answers only a `do`. What is claimed in a speech or a note is checked by nobody.
 - A rewrite is the model's own summary, and nothing checks that it adds no facts. What a character forgets cannot be
   looked up again: the journal keeps it, the character has no way to it.
