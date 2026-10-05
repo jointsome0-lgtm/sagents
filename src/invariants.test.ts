@@ -31,7 +31,9 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
   // Two places of the six have a clock and every fifth person carries one.
   // Every text of a body, of belongings, of things and of facts is one word that names its kind and its owner, so
   // that a request shows whose it holds.
-  places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {}, open: index % 2 === 1, clock: index % 3 === 0,
+  places: Array.from({ length: PLACES }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'A place.', minutesTo: index ? { p0: index } : {},
+    // Every place but the last says where it lies, so some walks take the straight line and some the world's minutes.
+    ...(index < PLACES - 1 ? { at: [index * 150, index % 2 * 2000] } : {}), open: index % 2 === 1, clock: index % 3 === 0,
     things: `things-p${index}-0`, facts: `facts-p${index}-0`,
     // Three things are hidden in every place: one that a few minutes of searching find, one that takes half an hour,
     // and one that no search here lasts long enough for.

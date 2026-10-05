@@ -24,10 +24,11 @@ export const LOST_SECONDS = 30;
 // `hidden` is what lies in a place and is not found without a search: each thing with the `minutes` one person must
 // have searched the place to find it, or which a deed finds at once by going straight to the spot its text names.
 // The world is told it apart from `things`, under its `id`, a label that is its number in the place's list.
+// `at` is where a place lies, in metres east and north of any point the world file likes, or null.
 // A place with a `clock` shows the time to everyone in it, and a character with one, a watch or a phone, reads it
 // anywhere. Neither changes in a run: a clock is not yet a thing that can be handed over.
 export type Place = { id: string; name: string; about: string; facts: string | null; things: string | null; hidden: Hidden[]; open: boolean; clock: boolean;
-  minutesTo: { [place: string]: number } };
+  at: [number, number] | null; minutesTo: { [place: string]: number } };
 export type Hidden = { id: string; text: string; minutes: number };
 export type Character = { id: string; name: string; place: string; sheet: string; facts: string | null; looks: string | null; pose: string | null;
   holds: string | null; has: string | null; clock: boolean };
@@ -38,10 +39,11 @@ export const LIMITS = { looks: 60, pose: 20, holds: 30, has: 60, things: 120, hi
 export type Change = { of: string; what: 'pose' | 'holds' | 'has' | 'things'; text: string };
 const CHANGES = ['pose', 'holds', 'has', 'things'] as const;
 // `remote` names the means by which people reach each other from afar; a world with null has none.
+// `walkMetresPerMinute` is the pace at which everyone walks between places that say where they lie.
 // `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `sleep` and
 // `weather` are the settings of the laws the clock drives (`laws.ts`), as the world file and its environment give them.
 export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null;
-  travelMinutes: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
+  travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // One answer of a character, as the schema asks for it: every field is there and an unused one is null.
@@ -100,11 +102,16 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
       return { id: `h${at + 1}`, text: boundedOf(textOf(thing.text, `${field}.hidden[${at}].text`), `${field}.hidden[${at}].text`, LIMITS.hidden) as string,
         minutes: amountOf(thing.minutes ?? null, `${field}.hidden[${at}].minutes`, 0) };
     });
+    const at = place.at === undefined || place.at === null ? null : place.at;
+    if (at !== null && !(Array.isArray(at) && at.length === 2 && at.every(part => typeof part === 'number' && Number.isFinite(part)))) {
+      return refuse(`${field}.at`, 'must be two numbers, the metres east and north');
+    }
     const minutesTo: { [place: string]: number } = {};
     for (const [to, minutes] of Object.entries(place.minutesTo ?? {})) minutesTo[to] = amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0);
     places.push({ id: idOf(place.id, `${field}.id`, places.map(known => known.id)), name: textOf(place.name, `${field}.name`),
       about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
-      things: boundedOf(place.things, `${field}.things`, LIMITS.things), hidden, open: place.open === true, clock: place.clock === true, minutesTo });
+      things: boundedOf(place.things, `${field}.things`, LIMITS.things), hidden, open: place.open === true, clock: place.clock === true,
+      at: at as [number, number] | null, minutesTo });
   }
   for (const [index, place] of places.entries()) {
     const unknown = Object.keys(place.minutesTo).find(to => to === place.id || !places.some(known => known.id === to));
@@ -124,7 +131,8 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   }
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
-    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5), shortWords: countOf(value.shortWords, 'shortWords', 2000),
+    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5),
+    walkMetresPerMinute: amountOf(value.walkMetresPerMinute, 'walkMetresPerMinute', 80), shortWords: countOf(value.shortWords, 'shortWords', 2000),
     longWords: countOf(value.longWords, 'longWords', 400), places, characters };
 }
 
@@ -183,10 +191,14 @@ export const speechSeconds = (world: World, words: number) => Math.max(2, Math.c
 // How many words one speech may hold when so many seconds are left before the horizon.
 export const wordLimit = (world: World, secondsLeft: number) => Math.max(1, Math.min(MAX_WORDS, Math.floor(secondsLeft * world.wordsPerMinute / 60)));
 
-// `minutesTo` is read both ways, and a pair that is not listed takes the world's `travelMinutes`.
+// `minutesTo` is read both ways. A pair that is not listed takes the straight line between the two at the world's
+// pace when both say where they lie, as whole minutes above ten and tenths of a minute up to there, and the world's
+// `travelMinutes` otherwise.
 export function travelSeconds(world: World, from: string, to: string): number {
-  const minutesTo = (a: string, b: string) => world.places.find(place => place.id === a)?.minutesTo[b];
-  return Math.max(1, Math.round((minutesTo(from, to) ?? minutesTo(to, from) ?? world.travelMinutes) * 60));
+  const a = world.places.find(place => place.id === from), b = world.places.find(place => place.id === to);
+  const walked = a?.at && b?.at ? Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1]) / world.walkMetresPerMinute : null;
+  const paced = walked === null ? null : walked > 10 ? Math.round(walked) : Math.round(walked * 10) / 10;
+  return Math.max(1, Math.round((a?.minutesTo[to] ?? b?.minutesTo[from] ?? paced ?? world.travelMinutes) * 60));
 }
 
 // What lies in the places of a run: the things of each, what is still hidden in each, and the seconds each person has

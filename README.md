@@ -113,7 +113,10 @@ The rules of time and hearing:
 - Everyone in the speaker's place hears a `say` and is held until it ends, so people in one place take turns.
 - A `call` goes through the world's `remote`, a telephone for example. The one called hears it wherever they are, and
   those next to the caller hear the caller's half. A world without `remote` has no calls.
-- A `go` leads to another place of the list and takes the minutes between the two. On the way a character hears
+- A `go` leads to another place of the list and takes the minutes between the two: those a `minutesTo` of either
+  place gives for the pair; else, when both places have `at`, `[x, y]` in metres, the straight line between them at
+  the world's `walkMetresPerMinute`, 80 by default, as whole minutes above ten and tenths of a minute up to there;
+  else the world's `travelMinutes`. A walk of some kilometres is one action, and the clock stands at its end when the walker arrives. On the way a character hears
   nothing and does not act. A call to it is delivered when it arrives.
 - A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
   next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours.
@@ -348,6 +351,8 @@ What it lacks:
 - A search is whatever the world calls one, and a deed went straight to a hidden thing when the world says so:
   nothing checks either, so a world that is generous finds a thing for someone who only guessed. Nobody is told how
   long a search has lasted or that there is anything left to find.
+- A walk is a straight line at one pace for everyone, whatever lies between and however tired the walker is. A
+  long walk cannot be broken off, nothing is perceived on it, and the walker is not told what the weather did meanwhile.
 - A `go` takes along everything a person holds and has, whatever its size, and nobody sees what lies in a place
   without a deed.
 - A clock is a mark in the world file and not a thing: a watch that is handed over, lost or stopped still shows its

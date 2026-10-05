@@ -10,7 +10,7 @@ import { advance, begin, JournalError, memoryStore, replay } from './journal.ts'
 import type { Record } from './journal.ts';
 import { INSTRUCTIONS, runLive, WORLD_INSTRUCTIONS } from './live.ts';
 import { readWorld } from './laws.ts';
-import { readAction } from './world.ts';
+import { readAction, travelSeconds } from './world.ts';
 
 // Sixty words a minute: one word is one second. Both rooms have a clock, so everyone reads the exact time.
 const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
@@ -194,6 +194,11 @@ test('a time of day is the next moment the clock shows it, within the span the a
   assert.equal(taken(wait).seconds, 600);
   assert.equal(taken('here').seconds, 30);
   for (const action of [{ ...wait, until: '10:00' }, 'tired', null]) assert.throws(() => taken(action), JournalError);
+  // A walk takes the minutes a pair gives, else the straight line at the world's pace, else the world's minutes.
+  const spread = readWorld({ title: 'T', about: 'A.', clock: '09:00', travelMinutes: 7, walkMetresPerMinute: 100, characters: [{ id: 'a', name: 'A', place: 'p', sheet: 'S' }],
+    places: [{ id: 'p', name: 'P', about: 'P.', at: [0, 0], minutesTo: { q: 2 } }, { id: 'q', name: 'Q', about: 'Q.', at: [3000, 4000] }, { id: 'r', name: 'R', about: 'R.', at: [30, 40] },
+      { id: 's', name: 'S', about: 'S.' }] });
+  assert.deepEqual([['q', 'p'], ['q', 'r'], ['p', 'r'], ['s', 'q']].map(([from, to]) => travelSeconds(spread, from, to)), [120, 3000, 30, 420]);
   // With no clock in the rooms only Boris, who has a watch, ends at the minute. Anna is off, within a twentieth of a
   // wait and a tenth of a sleep, and is told the part of the day and never the clock.
   const dark = { ...world, places: world.places.map(place => ({ ...place, clock: false })), characters: world.characters.map(character => ({ ...character, clock: character.id === 'boris' })) };
