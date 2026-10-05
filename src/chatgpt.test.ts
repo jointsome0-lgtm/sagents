@@ -171,7 +171,12 @@ test('failures of the API become codes, a used up limit is budget_exceeded, and 
     [sse([{ type: 'response.output_item.added', item: { type: 'function_call' } }]), 'unexpected_tools'],
     [sse([{ type: 'response.output_text.delta', delta: 'cut' }]), 'incomplete_stream'],
     [sse([{ type: 'response.output_item.added', item: { type: 'message' } }, { type: 'response.completed', response: { usage: { input_tokens: 5, output_tokens: 0 } } }]), 'empty_response'],
-    [sse([{ type: 'response.output_text.delta', delta: 'x' }, { type: 'response.incomplete', response: { incomplete_details: { reason: 'content_filter' } } }]), 'incomplete_stream'],
+    [sse([{ type: 'response.output_text.delta', delta: 'x' }, { type: 'response.incomplete', response: { incomplete_details: { reason: 'pause' } } }]), 'incomplete_stream'],
+    // The service declined to write, in each shape it may say so: by its content filter, in events of a refusal, and in a part of the closing event.
+    [sse([{ type: 'response.output_text.delta', delta: 'x' }, { type: 'response.incomplete', response: { incomplete_details: { reason: 'content_filter' } } }]), 'declined'],
+    [sse([{ type: 'response.output_item.added', item: { type: 'message' } }, { type: 'response.refusal.delta', delta: 'ACCESS-OLD' }]), 'declined'],
+    [sse([{ type: 'response.refusal.done', refusal: 'ACCESS-OLD' }]), 'declined'],
+    [sse([{ type: 'response.completed', response: { output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'ACCESS-OLD' }] }], usage: { input_tokens: 5, output_tokens: 3 } } }]), 'declined'],
     [new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } }), 'invalid_stream'],
     // An answer the model's own limit cut short is a failure, whatever was written by then.
     [sse([{ type: 'response.output_text.delta', delta: 'long' },

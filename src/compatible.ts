@@ -134,6 +134,9 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       const message = isObject(choice.message) ? choice.message : {};
       // No tools are sent, so a call of one is not an answer.
       if (choice.finish_reason === 'tool_calls' || (Array.isArray(message.tool_calls) && message.tool_calls.length)) throw new ModelError('unexpected_tools');
+      // The server declined to write: its content filter stopped the answer, or the message holds a refusal in place
+      // of content. Its words are never kept.
+      if (choice.finish_reason === 'content_filter' || (typeof message.refusal === 'string' && message.refusal.trim())) throw new ModelError('declined');
       // An answer that stopped short is no answer, whatever was written by then.
       if (choice.finish_reason === 'length') throw new ModelError('output_limit');
       if (choice.finish_reason !== 'stop') throw new ModelError('incomplete_stream');

@@ -91,6 +91,7 @@ call that ends in a failure, `wrong_model` included, may have handed over a part
 | `rate_limited`, `model_unavailable`, `provider_failed` | The service did not serve the request this time. `provider_failed` without `httpStatus` means it could not be reached. |
 | `invalid_request`, `context_limit` | The request cannot be served as it is. `param` names the field when the service did, and for `api:` the setting or the field that sagents itself refused, before anything was sent. |
 | `output_limit`, `incomplete_stream`, `invalid_stream`, `invalid_response`, `empty_response` | The answer did not arrive whole or cannot be read. |
+| `declined` | The service declined to write an answer. On the plan's stream that is an event of a refusal (`response.refusal.delta`, `response.refusal.done`), an answer left incomplete by the `content_filter`, or a part of type `refusal` in the closing event; from an `api:` server, a `finish_reason` of `content_filter` or a message with a `refusal`. Nothing of what the service wrote is kept. These shapes are taken from what the two APIs document: no refusal of a real service was seen, so a service that declines in another shape is reported under another code, `empty_response` or `incomplete_stream` most likely. |
 | `wrong_model` | The plan's service said that another model answers than the one asked for. Nothing of that answer is returned. Checked only for the ChatGPT plan, and only when the stream names a model: a stream that names none is taken as it is, and an `api:` server's answer is not checked. |
 | `timeout`, `cancelled` | The call's own limit, or its caller, stopped it. |
 | `storage_failed` | The account file or its lock could not be read or written. An account file that cannot be read or understood is left as it is; repair or remove it by hand in `~/.config/sagents/`. |
@@ -175,11 +176,18 @@ The rules of time and hearing:
   schema therefore cannot write a `go` to a place that is not there, which cost a resident played by a weak model
   14 turns of 28 in one run and 3 of 23 in another. From a server that does not hold to schemas such an answer is
   read and refused as before. The other fields are a text or null, or a whole number or null for `seconds`.
-- An answer that cannot be used counts as a wait of 30 seconds. The journal keeps the reason, one of eight: it was
+- An answer that cannot be used counts as a wait of 30 seconds. The journal keeps the reason, one of nine: it was
   not a JSON object, named no action, lacked its text, called nobody who can be called, led to the place the
-  character is already in or to no place of the list, lasted no time the action allows, or was cut short at the
-  model's limit of one answer. The character's next turn
-  says which, and what to do instead.
+  character is already in or to no place of the list, lasted no time the action allows, was cut short at the
+  model's limit of one answer, or the service declined to write it (`declined`). The character's next turn
+  says which, and what to do instead; after a declined turn it reads the sentence of an answer that was no JSON
+  object, since no sentence for it was measured, and only the journal tells the two apart.
+- A request that the service declined to answer is not sent again: the same words would be declined again. A turn
+  goes as the wait above, nothing comes of a deed whose answer the world's model declined, and a memory rewrite is
+  lost as after two answers that could not be used. Each counts as a request and as an unusable answer, with no
+  tokens known for it. The third in a run, whoever was asked and for what, ends the run as `failed (declined)`: a
+  service that keeps declining is not asked on. No refusal of a real service was seen: the shapes that are read as
+  one are those of the table of reasons above.
 
 The world answers a deed:
 
@@ -474,8 +482,8 @@ or put into another state, for each pose it changed, for each private feeling, f
 no note prints nothing,
 and a memory rewrite is shown whole, over as many lines as it has, marked as private like a note. With `--json`
 every event is one JSON object on one line, the silent waits too. Then comes one line of totals: the status and its
-reason, the story minutes played, the requests, the unusable answers of every kind and how many of them were cut
-at the output limit (`overlong`), the memory rewrites and how
+reason, the story minutes played, the requests, the unusable answers of every kind, how many of them were cut
+at the output limit (`overlong`) and how many the service declined to write (`declined`), the memory rewrites and how
 many of them were lost, the answers of the world that the rules of things refused and the deeds left with nothing, and the tokens: the input tokens, how many of them the service says it read from its cache (`cachedInputTokens`), and the output tokens. The tokens are summed over the answers that reported their usage: when some
 reported none, the totals say how many (`unreported`) and do not count them as zero; an answer that reported no cached count adds none. The totals also count the requests and the tokens by what a request was for, a resident's turn, a memory rewrite or an answer of the world, which is the result of a deed or a figure's answer, a second ask included: `--json` has them as `kinds`, and the text output adds one line for each, so that the turns are told from the world's answers when one model gives both.
 

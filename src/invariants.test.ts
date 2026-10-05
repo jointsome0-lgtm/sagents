@@ -242,6 +242,8 @@ function standIn(record: () => number) {
     // Now and then the model writes on to its limit, whatever it was asked: the connection then fails with this code.
     // The same request is cut again when it is asked again, so the runs here do not end at three in a row.
     if (random() < 0.02) throw new ModelError('output_limit');
+    // Now and then the service declines to write. The runs here do not end at the third either.
+    if (random() < 0.01) throw new ModelError('declined');
     return { text: typeof answer === 'string' ? answer : JSON.stringify(answer), usage: null };
   };
   return { seen, respond };
@@ -250,7 +252,7 @@ function standIn(record: () => number) {
 test('thousands of steps of any answers leave a journal in which every law of the world holds', async () => {
   const journal = memoryStore();
   const { seen, respond } = standIn(() => journal.all.length);
-  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, cutRun: Infinity });
+  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, cutRun: Infinity, declinedRun: Infinity });
   assert.deepEqual([whole.status, whole.reason, whole.calls], ['done', 'calls', 6000]);
   const turns = seen.turns!;
   seen.turns = null;
@@ -258,7 +260,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
-    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, result: 0, nothing: 0, woken: 0, spent: 0, posed: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0, reply: 0, silent: 0,
+    json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, declined: 0, result: 0, nothing: 0, woken: 0, spent: 0, posed: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0, reply: 0, silent: 0,
     moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0, felt: 0, feltAsleep: 0, feltAway: 0, feltEmpty: 0,
     lore: 0, loreMoved: 0, loreParted: 0, loreHidden: 0, beyond: 0, wokenBeyond: 0, wokenMute: 0, unwoken: 0, wokenFar: 0, hush: 0,
     keptWords: 0, keptBoth: 0, keptLists: 0, keptNone: 0 };
@@ -593,6 +595,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   for (const [id, things] of [...final.places, ...final.people]) walk(things, id);
   law('kept', isDeepStrictEqual(lying.sort(), [...ledger].map(([label, { name, n, holder }]) => `${label} ${name} ${n} ${holder}`).sort()), journal.all.length);
   assert.ok(whole.overlong > count.long, 'no answer of the world or memory was cut short');
+  assert.ok(whole.declined > count.declined, 'no answer of the world or memory was declined');
   law('request', seen.largest <= requestLimit(world), seen.record);
 
   // The record a replay refuses, which the journal's own sentence names, or null when it takes them all.
@@ -625,7 +628,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
         // Two runs cannot write one file, and a file does not take another world.
         assert.throws(() => openState(path, source, ENVIRONMENT), StateError);
         let last = '';
-        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, cutRun: Infinity, onEvent: event => { last = event.kind; } });
+        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, cutRun: Infinity, declinedRun: Infinity, onEvent: event => { last = event.kind; } });
         stops.push(last);
       } finally { state.close(); }
     }

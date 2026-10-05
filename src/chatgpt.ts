@@ -82,7 +82,7 @@ type Failure = { code?: unknown; param?: unknown } | null;
 type StreamEvent = {
   type?: unknown; delta?: unknown; code?: unknown; param?: unknown; error?: Failure; item?: { type?: unknown } | null;
   response?: {
-    model?: unknown; error?: Failure; incomplete_details?: { reason?: unknown } | null;
+    model?: unknown; error?: Failure; incomplete_details?: { reason?: unknown } | null; output?: unknown;
     usage?: { input_tokens?: unknown; output_tokens?: unknown; input_tokens_details?: { cached_tokens?: unknown } | null;
       output_tokens_details?: { reasoning_tokens?: unknown } | null } | null;
   } | null;
@@ -394,8 +394,12 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
           const answering = isObject(event.response) ? event.response.model : undefined;
           if (typeof answering === 'string' && answering && answering !== sent.model) throw new ModelError('wrong_model');
           if (event.type === 'response.failed') throw failure(event.response?.error?.code, undefined, event.response?.error?.param);
+          // The service declined to write: it says so in events of its own, by an answer its content filter stopped,
+          // or in a part of the closing event. Its words are never kept, like the text of any failure.
+          if (event.type === 'response.refusal.delta' || event.type === 'response.refusal.done') throw new ModelError('declined');
           // An answer that stopped short is no answer, whatever was written by then.
-          if (event.type === 'response.incomplete') throw new ModelError(event.response?.incomplete_details?.reason === 'max_output_tokens' ? 'output_limit' : 'incomplete_stream');
+          const stopped = event.response?.incomplete_details?.reason;
+          if (event.type === 'response.incomplete') throw new ModelError(stopped === 'max_output_tokens' ? 'output_limit' : stopped === 'content_filter' ? 'declined' : 'incomplete_stream');
           // No tools are sent, so an item of any other kind than these is not an answer.
           if (event.type === 'response.output_item.added' && !PASSIVE_ITEMS.includes(event.item?.type as string)) throw new ModelError('unexpected_tools');
           if (event.type === 'response.output_text.delta') {
@@ -410,6 +414,8 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
         current.throwIfAborted();
         // Only the closing event makes an answer: a limit can end a stream that has already begun.
         if (!completed) throw new ModelError('incomplete_stream');
+        const output = completed.response?.output;
+        if (Array.isArray(output) && output.some(item => isObject(item) && Array.isArray(item.content) && item.content.some(part => isObject(part) && part.type === 'refusal'))) throw new ModelError('declined');
         if (!text.trim()) throw new ModelError('empty_response');
         // input_tokens includes the cached part, output_tokens the reasoning.
         const usage = completed.response?.usage;

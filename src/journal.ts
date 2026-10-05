@@ -77,7 +77,9 @@ const INSTEAD = {
   time: `A \`do\` or a \`wait\` lasts 1 to ${MAX_SECONDS} seconds and a \`sleep\` 1 to ${MAX_SLEEP}, given as \`seconds\` or as \`until\`, a time of day like 06:30.`,
 };
 const NO_REMOTE = 'There is no means of remote contact here: to reach someone, go where they are.';
-export const refused = (world: World, reason: Refusal) => `${UNUSABLE} ${reason === 'to' && world.remote === null ? NO_REMOTE : INSTEAD[reason]}`;
+// A turn that the service declined to write has no sentence of its own: its character reads what one reads whose
+// answer was no JSON object, and only the record says which of the two it was.
+export const refused = (world: World, reason: Refusal) => `${UNUSABLE} ${reason === 'to' && world.remote === null ? NO_REMOTE : INSTEAD[reason === 'declined' ? 'json' : reason]}`;
 export const CUT = 'Your speech was longer than the limit: the others heard only its first words.';
 const NOTHING = 'Nothing came of it that could be noticed.';
 

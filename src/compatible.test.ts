@@ -118,7 +118,9 @@ test('a used up balance is budget_exceeded, nothing is sent again, and a failure
 
 test('an answer cut by the output limit, or without text, is a failure and its text is not given', async () => {
   for (const [reply, code] of [[() => answer(STORY, 'length'), 'output_limit'], [() => answer('  '), 'empty_response'],
-    [() => answer(STORY, 'content_filter'), 'incomplete_stream']] as [() => Response, string][]) {
+    [() => answer(STORY, 'tool_use'), 'incomplete_stream'],
+    // A server that declined to write, by its content filter or in a refusal of its own words, is `declined`.
+    [() => answer(STORY, 'content_filter'), 'declined'], [() => json(200, { choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: null, refusal: `${WORDS}: ${STORY}` } }] }), 'declined']] as [() => Response, string][]) {
     const server = standIn(reply);
     const error = await server.failed();
     assert.equal(error.code, code);

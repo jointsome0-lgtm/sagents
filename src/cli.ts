@@ -167,14 +167,14 @@ if (command === 'ask') {
         // Tokens are a sum over the answers that reported them, and the line says when some did not.
         const unreported = (count: number) => count ? `, without ${count} answers that reported no usage` : '';
         const tokens = (tally: { inputTokens: number; cachedInputTokens: number; outputTokens: number }) => `${tally.inputTokens} input tokens, ${tally.cachedInputTokens} of them cached, ${tally.outputTokens} output tokens`;
-        console.log(json ? JSON.stringify({ status: totals.status, reason: totals.reason, minutes: played, calls: totals.calls, invalid: totals.invalid, overlong: totals.overlong,
+        console.log(json ? JSON.stringify({ status: totals.status, reason: totals.reason, minutes: played, calls: totals.calls, invalid: totals.invalid, overlong: totals.overlong, declined: totals.declined,
           rewrites: totals.rewrites, lost: totals.lost, refused: totals.refused, void: totals.void, unreported: totals.unreported, inputTokens: totals.inputTokens, cachedInputTokens: totals.cachedInputTokens, outputTokens: totals.outputTokens, models: totals.models, kinds: totals.kinds })
-          : `${totals.status} (${totals.reason}): ${played} story minutes, ${totals.calls} calls, ${totals.invalid} invalid, ${totals.overlong} of them cut at the output limit, ${totals.rewrites} memory rewrites, ${
+          : `${totals.status} (${totals.reason}): ${played} story minutes, ${totals.calls} calls, ${totals.invalid} invalid, ${totals.overlong} of them cut at the output limit, ${totals.declined} of them declined by the service, ${totals.rewrites} memory rewrites, ${
             totals.lost} lost, ${totals.refused} answers of the world refused, ${totals.void} deeds left with nothing, ${tokens(totals)}${unreported(totals.unreported)}`);
         const models = Object.entries(totals.models);
         if (!json && models.length > 1) {
           for (const [name, tally] of models) {
-            console.log(`  ${name}: ${tally.calls} calls, ${tally.invalid} invalid, ${tally.overlong} of them cut at the output limit, ${tokens(tally)}${unreported(tally.unreported)}`);
+            console.log(`  ${name}: ${tally.calls} calls, ${tally.invalid} invalid, ${tally.overlong} of them cut at the output limit, ${tally.declined} of them declined by the service, ${tokens(tally)}${unreported(tally.unreported)}`);
           }
         }
         // What the requests were for: the turns of residents, the memories written anew and the answers of the world.

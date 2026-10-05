@@ -115,8 +115,8 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.match(sent.anna[3].messages[0].content, /may hold 65 words at most\. 1 min 15 s of the story are left\.$/);
   // Nobody is free before the horizon any more: the run ends without another call.
   assert.deepEqual({ ...outcome, events: journal.all.length },
-    { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, overlong: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90, events: 9,
-      models: { 'stand-in': { calls: 9, invalid: 1, overlong: 0, unreported: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90 } },
+    { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90, events: 9,
+      models: { 'stand-in': { calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90 } },
       kinds: { turn: { calls: 8, inputTokens: 800, cachedInputTokens: 320, outputTokens: 80 }, memory: { calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, world: { calls: 1, inputTokens: 100, cachedInputTokens: 40, outputTokens: 10 } } });
 
   const short = standIn({});
@@ -134,6 +134,20 @@ test('a failing connection stops the run at once with the events so far', async 
   assert.deepEqual(journal.all.map(({ event }) => `${event.who} ${event.kind}`), ['anna say', 'clara wait']);
   // The call that failed was the last one: nothing was tried again and nobody else was asked.
   assert.equal(Object.values(sent).flat().length, 3);
+});
+
+test('a request that the service declined is counted and not sent again, and the third ends the run', async () => {
+  const declined = () => new ModelError('declined');
+  const { sent, respond } = standIn({ clara: [act('do', { text: 'knocks', seconds: 5 })], dan: [declined(), act('wait', { seconds: 10 }), declined()], world: [declined()] });
+  const journal = memoryStore();
+  const outcome = await runLive({ world, respond, model: 'stand-in', journal });
+  // Dan's first turn goes as a wait of thirty seconds, which the journal names; nothing came of Clara's deed, and the
+  // world was asked for it once. Dan's third turn is the third refusal: the run ends there, and nobody is asked on.
+  assert.deepEqual(journal.all.map(({ event }) => `${event.who} ${event.kind} ${event.seconds ?? ''}`), ['anna wait 600', 'boris wait 600', 'clara do 5', 'clara result 0', 'dan wait 30', 'clara wait 600', 'dan wait 10']);
+  assert.equal(journal.all[4].record.kind === 'act' && journal.all[4].record.action, 'declined');
+  assert.match(sent.dan[1].messages[0].content, /\n09:00:00 Your answer could not be used and counted as a wait of 30 seconds\. Answer with one JSON object and nothing else, with one of the listed actions\.\n/);
+  assert.deepEqual([sent.dan.length, sent.world.length, Object.values(sent).flat().length], [3, 1, 8]);
+  assert.deepEqual([outcome.status, outcome.reason, outcome.calls, outcome.declined, outcome.invalid, outcome.void, outcome.kinds.world.calls], ['failed', 'declined', 8, 3, 3, 1, 1]);
 });
 
 test('a sleeper perceives nothing and wakes with the memory it wrote and the calls that waited; a rewrite that fails twice is lost in the open', async () => {
@@ -239,13 +253,13 @@ test('a character with a model of its own is asked through that connection under
   assert.deepEqual(journal.all.filter(entry => entry.event.who === 'anna').map(entry => [entry.record.kind, entry.by]),
     [['act', 'api:own'], ['wake', null], ['act', 'api:own'], ['act', 'api:own'], ['memory', 'api:own'], ['wake', null], ['act', 'api:own']]);
   assert.ok(journal.all.filter(entry => entry.event.who !== 'anna').every(entry => entry.by === 'common'));
-  assert.deepEqual(outcome.models['api:own'], { calls: 6, invalid: 1, overlong: 0, unreported: 0, inputTokens: 600, cachedInputTokens: 240, outputTokens: 60 });
+  assert.deepEqual(outcome.models['api:own'], { calls: 6, invalid: 1, overlong: 0, declined: 0, unreported: 0, inputTokens: 600, cachedInputTokens: 240, outputTokens: 60 });
   assert.equal(outcome.models.common.calls, outcome.calls - 6);
   // An answer cut at the model's limit is a lost turn, and the third in a row of one model ends the run, whatever
   // the other models answered meanwhile.
   const cut = standIn({ anna: Array.from({ length: 5 }, () => new ModelError('output_limit')) });
   const ended = await runLive({ world, respond: standIn({}).respond, model: 'common', cast: { anna: { respond: cut.respond, model: 'own' } }, minutes: 60 });
-  assert.deepEqual([ended.status, ended.reason, ended.models.own], ['failed', 'output_limit', { calls: 3, invalid: 3, overlong: 3, unreported: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }]);
+  assert.deepEqual([ended.status, ended.reason, ended.models.own], ['failed', 'output_limit', { calls: 3, invalid: 3, overlong: 3, declined: 0, unreported: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }]);
 });
 
 test('the world answers a deed from facts, bodies, things under labels and the weather, a resident is sent its own, what it sees of those with it and the weather that reaches it, and the answer has one place in the journal', async () => {
