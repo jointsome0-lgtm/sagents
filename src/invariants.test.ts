@@ -97,7 +97,7 @@ export const LAWS = {
   weather: 'The weather changes only when and as the world file gives, and whoever is asleep or on the way perceives none of it.',
   clock: 'Nobody is sent the clock of a moment at which it had no clock at hand, its own or its place\'s.',
   felt: 'Nobody is told what another\'s body feels, the world included, and nobody asleep or away is told a feeling.',
-  lore: 'The facts of a thing reach the world only in a request that lists the thing, wherever it then is, once and under its label, and no resident is sent any.',
+  lore: 'The facts of a thing reach the world only in a request that lists the thing, wherever it then is, in the line of the place and each text once, and no resident is sent any.',
   door: 'What of a deed is heard next door is told only to those awake in a place next door to the deed\'s, and to a sleeper there whom the deed wakes, in one line that names the deed\'s place and holds nothing else of the deed, and it ends their waiting; the world is told who is next door to a deed by name, awake or asleep, and is never told what was heard; of a deed in a place with no place next door nothing is heard.',
   earlier: 'A place keeps for the world the latest of what came of the deeds done in it and shows it at every request there: for each deed the world\'s words and after them what the rules moved, set and found, a line also when there were no words, and no line for a deed that left neither.',
 };
@@ -117,8 +117,8 @@ const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.
 // `feels` holds the words of what bodies feel in the request: the stand-in gives each as one word that names its owner.
 // `seen.feels` keeps, for the number of records the journal held, what the latest answer of the world gave of them,
 // and `seen.said` what it gave as heard next door and whom it named as woken.
-// `lore` holds every word of the facts of things in the request and `facts` those of them that stand in a line of
-// their own under a label, with the label. `doors` holds the lines of the places next door, and `sounds` every line
+// `lore` holds every word of the facts of things in the request and `facts` those of them that stand in its first
+// line, the place's. `doors` holds the lines of the places next door, and `sounds` every line
 // that holds a word of what was heard next door, which the stand-in gives as one word that names the deed's place,
 // or that tells of being woken. `earlier` holds the lines of what came of earlier deeds in the place.
 type Asked = { record: number; who: string; turn: boolean; reply?: boolean; marks: string[]; labelled: boolean; records: string[]; sky: string[]; now: string[]; clocks: string[]; feels: string[];
@@ -129,7 +129,7 @@ const asker = (request: Request) => /\nYou are Person \d+ \((c\d+)\)\./.exec(req
 const askedOf = (request: Request, record: number, who: string, turn: boolean): Asked => {
   const content = request.messages[0].content, body = `${request.system}${content}`;
   return { record, who, turn, marks: body.match(MARK) ?? [], labelled: /\bt\d+\b/.test(content), records: (content.replace(/\n[^\n]* Person \d+ did \([^\n]*/g, '').match(/\bt\d+ [^,;[\]\n]*/g) ?? []).map(found => found.replace(/\..*$/, '').trim()), sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [],
-    clocks: body.match(CLOCK) ?? [], feels: body.match(FEELS) ?? [], lore: body.match(LORE) ?? [], facts: [...content.matchAll(/\n- (t\d+): (lore-[\w-]+)\.(?=\n)/g)].map(found => `${found[1]} ${found[2]}`),
+    clocks: body.match(CLOCK) ?? [], feels: body.match(FEELS) ?? [], lore: body.match(LORE) ?? [], facts: content.slice(0, content.indexOf('\n')).match(LORE) ?? [],
     doors: [...content.matchAll(/\n- Place \d+ \((p\d+)\): ([^\n]*)/g)].map(found => `${found[1]} ${found[2]}`), sounds: body.split('\n').filter(line => /\bbeyond-|woke you/.test(line)),
     earlier: (/\nWhat came of earlier deeds here:\n((?:[^\n]* Person \d+ did \([^\n]*\n)*)/.exec(content)?.[1] ?? '').split('\n').filter(Boolean) };
 };
@@ -370,7 +370,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
         // And of the facts of exactly those things, each under its label, wherever the thing began and whatever it
         // was parted from.
         const lore = [...ledger].filter(([label, { facts }]) => facts !== null && roots.has(rootOf(label)) && !(turns[asked].reply && still.has(topOf(label))));
-        law('lore', isDeepStrictEqual([...turns[asked].facts].sort(), lore.map(([label, { facts }]) => `${label} ${facts}`).sort()), seq);
+        law('lore', isDeepStrictEqual([...turns[asked].facts].sort(), [...new Set(lore.map(([, { facts }]) => facts!))].sort()), seq);
         count.lore += lore.length;
         count.loreMoved += lore.filter(([, { facts }]) => /^lore-p\d+-/.test(facts!) && !facts!.startsWith(`lore-${spot}-`)).length;
         count.loreParted += lore.filter(([label]) => !first.has(label)).length;

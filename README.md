@@ -197,8 +197,14 @@ The world answers a deed:
   hold. Any thing may have them, wherever it stands: in a place, inside another thing, on a character. They go with
   the thing. The world is told the facts of every thing that its request lists, for a deed and for a figure's answer
   alike: lying in the place, in the hands or the pockets of someone there, inside another thing, or hidden. They
-  stand in lines of their own after the lists, under `Facts of things:`, each under the label of its thing, like
-  `- t23: …`, so that a long text does not stand in the notation. A part taken off a counted thing or out of a
+  stand in the first line of the request, the place's, after the place's own facts, as sentences with no label
+  and no heading: `The place: Red room (red), under a roof. Red walls. Facts: FACT-RED. FACT-KEY.` A text stands
+  once, at the first record that has it, however many parts of one stock or count are listed. So a thing's fact is
+  written as a sentence that names its thing, since the world reads it among the facts of the place with nothing
+  that says whose it is, and two like things need wording that tells them apart. A block of these facts under
+  labels, after the lists, was tried first: next to the `In the lists:` tails of the earlier lines a weak model then
+  moved things to where no deed had put them. This layout as the engine writes it has not been run on a real
+  model. A part taken off a counted thing or out of a
   stock has the facts of what it was taken from, and two counts become one record only when their facts are the
   same. In `examples/night-pass.json` what the guests' journal, the backpack, the map and the notebook say is with
   those things, so it is still known when one of them is carried to another place.

@@ -99,7 +99,7 @@ Write your memory anew as one running text of about ${Math.floor(world.longWords
 Answer with one JSON object that has the single field \`memory\`.`;
 
 // How the world is told of things, for a deed and for a figure's answer alike.
-const NOTATION = `Every thing here is listed once, under a label like t7. What a thing holds stands in square brackets after it: \`t8 parka [t9 cigarettes ×17; t10 lighter]\`. \`×17\` is how many there are, and a thing with no number is one. Empty brackets mean a thing that can hold others and holds nothing now; a thing with no brackets never holds anything. Under \`Things here\` is what stands or lies in the place. After \`Carries\` is what a person has in their hands or wears, in sight; what is in the brackets of such a thing is in its pockets or inside it, out of sight unless the thing is \`open\`. Marks after a thing: \`fixed\`, a part of the place, never moved; \`open\`, what it holds is in plain sight; \`stock\`, a supply with no count, which taking does not use up; \`food\`, it can be eaten or drunk; \`burns\`, it can burn up; \`fire\`, it can set things alight; \`state\`, how it is now, and in brackets the states it can have. Under \`Facts of things\`, after the lists, is what is true of a thing and is not seen at once, each line under the label of its thing.`;
+const NOTATION = `Every thing here is listed once, under a label like t7. What a thing holds stands in square brackets after it: \`t8 parka [t9 cigarettes ×17; t10 lighter]\`. \`×17\` is how many there are, and a thing with no number is one. Empty brackets mean a thing that can hold others and holds nothing now; a thing with no brackets never holds anything. Under \`Things here\` is what stands or lies in the place. After \`Carries\` is what a person has in their hands or wears, in sight; what is in the brackets of such a thing is in its pockets or inside it, out of sight unless the thing is \`open\`. Marks after a thing: \`fixed\`, a part of the place, never moved; \`open\`, what it holds is in plain sight; \`stock\`, a supply with no count, which taking does not use up; \`food\`, it can be eaten or drunk; \`burns\`, it can burn up; \`fire\`, it can set things alight; \`state\`, how it is now, and in brackets the states it can have.`;
 // What the world is told to be when it is asked what came of a deed. It is sent facts, bodies and things and no
 // person's sheet, note, memory or speech, and what it answers is held to the people, the place and the things the
 // rules know. This text has changed since it was measured and is to be measured anew: it now tells of the facts of
@@ -184,8 +184,9 @@ export const carriedOf = (things: Thing[]) => ` Carries: ${things.map(written).j
 
 // What an answer may name in a place, in the order the request lists it: the things in sight, the hidden ones when
 // the answer is a deed's, and what the people there carry. A thing that holds others is where a thing can be put.
-// A deed's answer may wake a sleeper next door too. `facts` are the lines of what is true of those things, each
-// under its label: the world is told the facts of every thing its request lists, wherever the thing has got to.
+// A deed's answer may wake a sleeper next door too. `facts` are the sentences of what is true of those things, in
+// that order and each once, however many records have it: the world is told the facts of every thing its request
+// lists, wherever the thing has got to.
 function namedOf(state: State, place: Place, deed: boolean) {
   const lies = state.things.places.get(place.id)!, people = state.people.filter(person => person.place === place.id);
   const things = all([...lies.filter(thing => !thing.hidden), ...(deed ? lies.filter(thing => thing.hidden) : []), ...people.flatMap(person => state.things.people.get(person.id)!)]);
@@ -194,7 +195,7 @@ function namedOf(state: State, place: Place, deed: boolean) {
       ...(deed ? SINKS.filter(sink => things.some(thing => sink === 'eaten' ? thing.food !== null : thing.burns)) : [])],
     stated: things.filter(thing => thing.states).map(thing => thing.label), states: [...new Set(things.flatMap(thing => thing.states ?? []))],
     of: people.map(person => person.id), awake: people.filter(person => !person.asleep).map(person => person.id), finds: lies.filter(thing => thing.hidden).map(thing => thing.label), wakes: sleepersNear(state.people, place).map(person => person.id),
-    facts: things.flatMap(thing => thing.facts === null ? [] : [`- ${thing.label}: ${closed(thing.facts)}`]) };
+    facts: [...new Set(things.flatMap(thing => thing.facts === null ? [] : [closed(thing.facts)]))] };
 }
 // A string that is one of a list, or any string when the list is empty: a strict schema may refuse an empty list.
 const oneOf = (list: string[]) => list.length ? { type: 'string', enum: list } : { type: 'string' };
@@ -233,18 +234,20 @@ const earlierOf = (state: State, place: Place) => {
 const crowdOf = (place: Place) => [...(place.crowd === null ? [] : [`Around, played by nobody: ${closed(place.crowd)}`]),
   ...(place.figures.length ? ['Of this place, played by nobody:', ...place.figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}${part('Facts', figure.facts)}`)] : [])];
 // The place as the world is told of it, with the things that lie in it in sight.
-const placeOf = (state: State, place: Place) => [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${part('Facts', place.facts)}`,
-  ...thingsOf(state.things.places.get(place.id)!.filter(thing => !thing.hidden))];
-// The facts of the things that a request lists, in lines of their own after the lists, so that a long text does not
-// stand in the notation.
-const factsOf = (state: State, place: Place, deed: boolean) => { const { facts } = namedOf(state, place, deed); return facts.length ? ['Facts of things:', ...facts] : []; };
+// The facts of the things that the request lists stand after the place's own, as sentences with no label: a block
+// of them under labels, after the lists, led a weak model to move things to where no deed had put them.
+const placeOf = (state: State, place: Place, deed: boolean) => {
+  const facts = [...(place.facts === null ? [] : [closed(place.facts)]), ...namedOf(state, place, deed).facts];
+  return [`The place: ${tagged(place)}, ${place.open ? 'under the open sky' : 'under a roof'}. ${place.about}${facts.length ? ` Facts: ${facts.join(' ')}` : ''}`,
+    ...thingsOf(state.things.places.get(place.id)!.filter(thing => !thing.hidden))];
+};
 // One speech to a figure as the world is asked what the figure answers: the place, who is there, the people of the
 // place, the facts of the things listed, what came of earlier deeds there, what was said to the figures before and answered, and the speech.
 function replyOf(world: World, state: State, said: Event): string {
   const place = world.places.find(item => item.id === said.place)!;
-  return [...placeOf(state, place),
+  return [...placeOf(state, place, false),
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...crowdOf(place),
-    ...factsOf(state, place, false), ...earlierOf(state, place),
+    ...earlierOf(state, place),
     `Now ${said.clock}. ${named(world.characters, said.who)} says to ${tagged(place.figures.find(figure => figure.id === said.to)!)}: "${said.text}"`,
     `What does ${named(place.figures, said.to)} answer?`].join('\n');
 }
@@ -257,14 +260,14 @@ function replyOf(world: World, state: State, said: Event): string {
 function deedOf(world: World, state: State, deed: Event): string {
   const place = world.places.find(item => item.id === deed.place)!;
   const { found } = sought(state.things, deed);
-  return [...placeOf(state, place),
+  return [...placeOf(state, place, true),
     ...state.things.places.get(place.id)!.filter(thing => thing.hidden).map(thing => `Hidden here (${thing.label}). This deed finds it ${found.includes(thing)
       ? 'if it is a search of the place, or if it goes straight to the spot named' : 'only if it goes straight to the spot named, and not by searching'}: ${thing.hidden!.spot}: ${written(thing)}`),
     ...(world.places.length > 1 ? [`Other places, which nobody reaches by a deed: ${world.places.filter(item => item !== place).map(tagged).join(', ')}.`] : []),
     ...(place.nextDoor.length ? ['Next door:', ...place.nextDoor.map(id => `- ${tagged(world.places.find(item => item.id === id)!)}: ${world.characters.flatMap((character, index) =>
       state.people[index].place === id ? [`${tagged(character)}, ${state.people[index].asleep ? 'asleep' : 'awake'}`] : []).join('; ') || 'nobody'}.`)] : []),
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...crowdOf(place),
-    ...factsOf(state, place, true), ...earlierOf(state, place),
+    ...earlierOf(state, place),
     `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`, 'What comes of it?'].join('\n');
 }
 

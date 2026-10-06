@@ -295,7 +295,7 @@ test('the world answers a deed from facts, bodies, things under labels and the w
   // The world is sent the facts of the world, the facts and things of the place, all of those in it with what they
   // carry, and the deed; its schema lets it name what is there and nothing else.
   assert.deepEqual(sent.world[1], { model: 'stand-in', system: `${WORLD_INSTRUCTIONS}\n\nThe world: Two rooms\nA house with two rooms.\nFacts: FACT-WORLD`,
-    schema: sent.world[1].schema, messages: [{ role: 'user', content: `The place: Red room (red), under a roof. Red walls. Facts: FACT-RED.
+    schema: sent.world[1].schema, messages: [{ role: 'user', content: `The place: Red room (red), under a roof. Red walls. Facts: FACT-RED. FACT-KEY.
 Things here:
 - t1 TABLE-RED, fixed, open [t2 KEY-RED]
 Other places, which nobody reaches by a deed: Blue yard (blue).
@@ -305,8 +305,6 @@ The weather outside: SKY-ONE. Under this roof: ROOF-ONE.
 Here:
 - Anna (anna), asleep. Looks: LOOKS-ANNA. Carries: t4 COAT-ANNA [t5 PURSE-ANNA]. Facts: FACT-ANNA.
 - Boris (boris), awake. Looks: LOOKS-BORIS. Pose: POSE-BORIS. Carries: t6 BAG-BORIS [t7 COINS-BORIS ×9]. Facts: FACT-BORIS.
-Facts of things:
-- t2: FACT-KEY.
 Now 09:00:07. Boris does, for 10 s: shakes Anna
 What comes of it?` }] });
   const lists = (sent.world[1].schema as { properties: { moves: { items: { properties: { what: object; to: object } } }; wakes: object; feels: { items: { properties: { of: object } } } } }).properties;
