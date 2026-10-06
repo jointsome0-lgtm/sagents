@@ -62,7 +62,12 @@ export class SignInError extends Error {}
 
 export type Message = { role: 'user' | 'assistant'; content: string };
 // `model` is `<id>` or `<id>@<effort>`; `schema` is a JSON Schema the answer must follow, in OpenAI's strict form.
-export type Request = { model: string; system?: string; messages: Message[]; schema?: object };
+// `cache` is a name the caller made up for whoever the request is one of, so that a service which keeps the
+// beginnings of requests it has read can bring one player's requests to the same place. It is `CACHE` and holds
+// nothing of the text; a request that has none is sent with none, since no connection makes one up.
+export type Request = { model: string; system?: string; messages: Message[]; schema?: object; cache?: string };
+// A name of that kind goes into headers, so it is letters, digits, `-` and `_`, as many as the service's key takes.
+export const CACHE = /^[A-Za-z0-9_-]{1,64}$/;
 export type Usage = { inputTokens: number | null; cachedInputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null };
 // An answer is whole or it is a failure: one that the model's own limit cut short is `output_limit`. `endpoint` is
 // the name a router gave to whoever answered, when the connection learned one: `ENDPOINT` is all a name may be, and a
@@ -293,12 +298,14 @@ function release(lock: string, mine: string, strict: boolean) {
 export function responsesBody(request: Request) {
   const [model, effort, ...more] = request.model.split('@');
   if (!model || more.length || (effort !== undefined && !EFFORTS.includes(effort))) throw new ModelError('invalid_request');
+  if (request.cache !== undefined && !CACHE.test(request.cache)) throw new ModelError('invalid_request', undefined, undefined, 'cache');
   return {
     model, store: false, stream: true,
     ...(request.system ? { instructions: request.system } : {}),
     input: request.messages.map(({ role, content }) => ({ role, content })),
     ...(effort ? { reasoning: { effort } } : {}),
     ...(request.schema ? { text: { format: { type: 'json_schema', name: 'reply', strict: true, schema: request.schema } } } : {}),
+    ...(request.cache ? { prompt_cache_key: request.cache } : {}),
   };
 }
 
@@ -370,8 +377,11 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       try {
         current.throwIfAborted();
         // The plan's route takes no output limit (`max_output_tokens` is refused); the length of the text is checked here.
+        // The caller's name for the player goes as the cache key of the body and as the session of the two headers:
+        // with the three the route read from its cache in 8 or 9 requests of 20, and with none in 1 to 3.
         const response = await fetcher(`${API}/responses`, { method: 'POST', redirect: 'error', signal: current, body,
-          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'text/event-stream' } });
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'text/event-stream',
+            ...(request.cache ? { 'session-id': request.cache, 'x-client-request-id': request.cache } : {}) } });
         if (!response.ok) {
           const refusal = await jsonOf(response).catch(() => null);
           throw failure(errorCodeOf(refusal), response.status, paramOf(refusal));

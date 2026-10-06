@@ -267,6 +267,30 @@ test('a character with a model of its own is asked through that connection under
   assert.deepEqual([ended.status, ended.reason, ended.models.own], ['failed', 'output_limit', { calls: 3, invalid: 3, overlong: 3, declined: 0, unreported: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }]);
 });
 
+test('with a name for its journal a run gives each resident and the world a name of its own for a service\'s cache, the same when the world is continued, and keeps it nowhere', async () => {
+  const SEED = 'SEED-OF-THE-JOURNAL';
+  const script = () => standIn({ anna: [act('do', { text: 'looks about', seconds: 5 }), act('sleep', { seconds: 20 }), JSON.stringify({ memory: 'LONG-ANNA' })], boris: [act('say', { text: 'hello' })] });
+  const names = (sent: { [id: string]: Request[] }) => Object.fromEntries(Object.entries(sent).map(([id, requests]) => [id, [...new Set(requests.map(request => request.cache))]]));
+  const first = script(), journal = memoryStore(), lines: string[] = [];
+  const outcome = await runLive({ world, respond: first.respond, model: 'stand-in', minutes: 1, journal, cache: SEED, onEvent: event => { lines.push(JSON.stringify(event)); } });
+  // One name for all the requests of one player, Anna's memory rewrite among hers, and five players with five names.
+  const given = names(first.sent);
+  assert.equal(first.sent.anna.length, 4);
+  assert.deepEqual(Object.keys(given).sort(), ['anna', 'boris', 'clara', 'dan', 'world']);
+  assert.ok(Object.values(given).every(own => own.length === 1 && /^[0-9a-f]{32}$/.test(own[0] as string)));
+  assert.equal(new Set(Object.values(given).flat()).size, 5);
+  // The run that continues the journal under its name gives the same names, and a journal under another name others.
+  const second = script(), other = script();
+  await runLive({ world, respond: second.respond, model: 'stand-in', minutes: 1, journal, cache: SEED });
+  await runLive({ world, respond: other.respond, model: 'stand-in', minutes: 1, cache: 'ANOTHER-SEED' });
+  for (const [id, own] of Object.entries(names(second.sent))) assert.deepEqual(own, given[id]);
+  assert.ok(Object.values(names(other.sent)).flat().every(name => !Object.values(given).flat().includes(name)));
+  // No name and nothing of the journal's is in what the run keeps, gives back or hands to whoever watches.
+  const kept = JSON.stringify([journal.all, outcome, lines]);
+  for (const mark of [SEED, ...Object.values(given).flat() as string[]]) assert.ok(!kept.includes(mark));
+  assert.ok(Object.values(first.sent).flat().every(request => !JSON.stringify({ ...request, cache: '' }).includes(SEED)));
+});
+
 test('the world answers a deed from facts, bodies, things under labels and the weather, a resident is sent its own, what it sees of those with it and the weather that reaches it, and the answer has one place in the journal', async () => {
   const withFacts = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', facts: 'FACT-WORLD', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
     places: [{ id: 'red', name: 'Red room', about: 'Red walls.', facts: 'FACT-RED', clock: true, nextDoor: ['blue'], things: [{ name: 'TABLE-RED', fixed: true, open: true, holds: [{ name: 'KEY-RED', facts: 'FACT-KEY' }] }] },

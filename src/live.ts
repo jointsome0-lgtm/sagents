@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
 import type { Request, Result } from './chatgpt.ts';
 import { advance, memoryStore, replay, RESULT_WORDS, SAID_WORDS } from './journal.ts';
@@ -359,9 +361,11 @@ export type Player = { respond: (request: Request) => Promise<Result>; model: st
 // name of the model whose answer it came of, or null. `worldPlayer` answers what came of a deed, and is the same
 // player as everyone's when it is not given. `cutRun` is how many answers of one model cut short at its limit, one
 // after another, end a run: 3 when it is not given. `declinedRun` is how many requests that a service declined to
-// answer end a run, wherever in it they came: 3 when it is not given.
+// answer end a run, wherever in it they came: 3 when it is not given. `cache` is a name of this world's journal that
+// its keeper made up, the same for every run that continues it: each resident's requests and the world's then carry a
+// name of their own made of it, as `cache` of a request, which says nothing of who that is. With none, no request has one.
 export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number;
-  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number; declinedRun?: number };
+  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number; declinedRun?: number; cache?: string };
 export type Tally = { calls: number; invalid: number; overlong: number; declined: number; unreported: number; inputTokens: number; cachedInputTokens: number; outputTokens: number };
 // What a request was for: a resident's turn, a memory written anew, or an answer of the world, to a deed or for a figure.
 export type Asked = 'turn' | 'memory' | 'world';
@@ -391,7 +395,7 @@ const spent = (): Spent => ({ calls: 0, inputTokens: 0, cachedInputTokens: 0, ou
 // `calls` counts the answers that arrived or were cut short at the model's limit, a memory's as well as a turn's. Any
 // other failure ends the run at once: nothing is tried again, and the journal holds everything up to it.
 export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
-  pause = false, cutRun = 3, declinedRun = 3 }: Live): Promise<Outcome> {
+  pause = false, cutRun = 3, declinedRun = 3, cache }: Live): Promise<Outcome> {
   const state = replay(world, journal.entries());
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
@@ -406,6 +410,9 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     if (!Object.hasOwn(under, name)) Object.defineProperty(under, name, { value: first(), enumerable: true, writable: true, configurable: true });
     return under[name];
   };
+  // Whose request it is, for a service that keeps what it has read: a resident's turns and memories under one name,
+  // the world's answers under another. A hash, so that the name holds no id of the story and not the journal's own name.
+  const owned = (...whose: string[]) => cache === undefined ? {} : { cache: createHash('sha256').update(JSON.stringify([cache, ...whose])).digest('hex').slice(0, 32) };
   const tallyOf = (player: { name: string }) => own(outcome.models, player.name, () => ({ invalid: 0, overlong: 0, declined: 0, unreported: 0, ...spent() }));
   const unusable = (player: { name: string }) => {
     outcome.invalid += 1;
@@ -484,7 +491,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null) => {
     let came: Came | null = null, again = '';
     for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
-      const answer = await ask(judge, 'world', { system, schema, messages: [{ role: 'user', content: `${content}${again}` }] });
+      const answer = await ask(judge, 'world', { system, schema, ...owned('world'), messages: [{ role: 'user', content: `${content}${again}` }] });
       if (answer === null) return null;
       // The world is not asked again for what it declined to answer: nothing came of the deed.
       if (answer === DECLINED) break;
@@ -547,7 +554,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     // while it holds more than the short-term memory may: this is what bounds a request whatever the model chooses.
     const folding = actor.asleep ? mind.lines : mind.size > world.shortWords ? oldest(mind, world.shortWords) : null;
     if (folding) {
-      const request = { system, schema: MEMORY_SCHEMA,
+      const request = { system, schema: MEMORY_SCHEMA, ...owned('resident', who),
         messages: [{ role: 'user' as const, content: [...known(mind, folding), rewriteOf(world, nowOf(world, actor, now), actor.asleep)].join('\n') }] };
       // An answer that cannot be used gets one more try. After that the old text stays and the lines are lost.
       let memory = null;
@@ -579,7 +586,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now);
     const spot = world.places.find(item => item.id === place)!;
     const body = `${part('Your pose', actor.pose)}${carries('You carry', who, true)}`.slice(1);
-    const answer = await ask(player, 'turn', { system, schema, messages: [{ role: 'user', content: [
+    const answer = await ask(player, 'turn', { system, schema, ...owned('resident', who), messages: [{ role: 'user', content: [
       ...known(mind, mind.lines),
       `${nowOf(world, actor, now)} You are in ${tagged(spot)}. ${others.length ? 'Here with you:' : spot.figures.length || spot.crowd !== null ? 'None of the people of the list is here with you.' : 'Nobody else is here.'}`,
       ...others,

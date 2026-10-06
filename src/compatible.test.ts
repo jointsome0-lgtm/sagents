@@ -35,7 +35,8 @@ test('an api: model goes to the server the address names, with what the caller g
   const fetcher = async (url: string, init: RequestInit) => { calls.push({ url, init }); return answer('{"ok":true}'); };
   const { respond, model } = modelFor(`api:${request.model}`, { env, fetch: fetcher });
   const parts: string[] = [];
-  const result = await respond({ ...request, model }, { onText: (part: string) => { parts.push(part); } });
+  // The caller's name for the player is in this request and no setting names a field for it, so it is not sent.
+  const result = await respond({ ...request, model, cache: 'player-1' }, { onText: (part: string) => { parts.push(part); } });
   assert.deepEqual(result, { text: '{"ok":true}', usage: { inputTokens: 120, cachedInputTokens: 100, outputTokens: 30, reasoningTokens: 0 } });
   assert.deepEqual(parts, ['{"ok":true}']);
   // A router's name for the endpoint that answered is kept when it is a short plain name, any other string is one
@@ -51,6 +52,12 @@ test('an api: model goes to the server the address names, with what the caller g
     reasoning: { enabled: false }, model: 'google/gemma-4-31b-it',
     messages: [{ role: 'system', content: 'Judge the story.' }, { role: 'user', content: STORY }], max_tokens: 512,
     response_format: { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema: request.schema } } });
+  // Under the field that the setting names it is sent, in the body alone, and a request with no name has no such field.
+  const named = createCompatible({ env: { ...env, SAGENTS_API_CACHE_FIELD: 'session_id' }, fetch: fetcher });
+  await named.respond({ ...request, cache: 'player-1' });
+  await named.respond(request);
+  assert.deepEqual(calls.slice(1).map(call => JSON.parse(call.init.body as string).session_id), ['player-1', undefined]);
+  assert.deepEqual(calls[1].init.headers, calls[0].init.headers);
 
   // Any other name is a model of the ChatGPT plan: nothing of it reaches the server of the address, and with no
   // account on this computer nothing is sent at all.
@@ -58,7 +65,7 @@ test('an api: model goes to the server the address names, with what the caller g
   assert.equal(plan.model, 'gpt-6.1-sol@low');
   const error = await plan.respond({ ...request, model: plan.model }).catch((thrown: unknown) => thrown) as Thrown;
   assert.equal(error.code, 'unauthorized');
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 3);
 });
 
 test('settings that cannot be used are refused by name before anything is sent', async () => {
@@ -82,6 +89,9 @@ test('settings that cannot be used are refused by name before anything is sent',
     assert.equal(await refusedBy({ ...env, SAGENTS_API_EXTRA: extra }), 'SAGENTS_API_EXTRA');
   assert.equal(await refusedBy({ ...env, SAGENTS_API_MAX_TOKENS: '2k' }), 'SAGENTS_API_MAX_TOKENS');
   assert.equal(await refusedBy(env, { ...request, model: 'google/gemma-4-31b-it@high' }), 'model');
+  // The field for a player's name replaces no field of this module and none of the extra ones, and a name is plain.
+  for (const field of ['max_tokens', 'reasoning', 'Session Id']) assert.equal(await refusedBy({ ...env, SAGENTS_API_CACHE_FIELD: field }), 'SAGENTS_API_CACHE_FIELD');
+  assert.equal(await refusedBy(env, { ...request, cache: 'two\nlines' }), 'cache');
 
   const sent: RequestInit[] = [];
   const local = createCompatible({ env: { SAGENTS_API_URL: 'http://127.0.0.1:8000/v1', SAGENTS_API_KEY: KEY },

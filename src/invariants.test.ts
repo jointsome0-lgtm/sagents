@@ -623,18 +623,23 @@ test('thousands of steps of any answers leave a journal in which every law of th
     const path = join(directory, 'world.sqlite');
     // Many of the runs are one call long, so that some stop between a deed and the world's answer to it. Every other
     // one is two calls long: an answer that cannot be used is asked for once more, and a run of one call stops there.
-    const stops: string[] = [];
+    const stops: string[] = [], caches = new Set<string>();
     for (const calls of [300, ...Array.from({ length: 60 }, (_, index) => 1 + index % 2), 250, 310]) {
       const state = openState(path, source, ENVIRONMENT);
       try {
         // Two runs cannot write one file, and a file does not take another world.
         assert.throws(() => openState(path, source, ENVIRONMENT), StateError);
+        caches.add(state.cache);
         let last = '';
         await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, cutRun: Infinity, declinedRun: Infinity, onEvent: event => { last = event.kind; } });
         stops.push(last);
       } finally { state.close(); }
     }
     assert.ok(stops.includes('do'), 'no run stopped between a deed and its result');
+    // The file's name for a service's cache is the same at every opening, and a journal begun in another file has another.
+    const fresh = openState(join(directory, 'fork.sqlite'), source, ENVIRONMENT);
+    fresh.close();
+    assert.ok(caches.size === 1 && !caches.has(fresh.cache));
     // A file takes neither another world file nor its own under another environment.
     assert.throws(() => openState(path, `${source} `, ENVIRONMENT), StateError);
     assert.throws(() => openState(path, source, `${ENVIRONMENT} `), StateError);

@@ -1,6 +1,6 @@
 // The state file of a live world: its journal in SQLite. This is the only part of the live mode that touches the disk.
 // The file holds the records with their events, and which world they belong to; everything else is rebuilt from them.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 import { StateError } from './journal.ts';
@@ -17,9 +17,12 @@ const sqliteCode = (error: unknown) => error instanceof Error && 'errcode' in er
 // one. A journal belongs to the two together: under another environment the same records would not be the same world. The file is held until `close` or the end
 // of the process, so that two runs cannot write one journal: the second is refused. A step is one transaction, and
 // the file is synced at each, so a run that was killed leaves a beginning of its journal, which is a whole world.
-export function openState(path: string, world: string, environment = ''): Store & { close(): void } {
+// `cache` is a random name the file was given when it began, or when a file older than the name was first opened: the
+// names of its players for a service's cache are made of it, so a world that is continued keeps them and a journal
+// begun in another file has others. It is no secret and nothing of the story, and it is never printed.
+export function openState(path: string, world: string, environment = ''): Store & { close(): void; cache: string } {
   const hash = createHash('sha256').update(JSON.stringify([world, environment])).digest('hex');
-  let database: DatabaseSync;
+  let database: DatabaseSync, cache: unknown;
   try {
     database = new DatabaseSync(path, { timeout: 0 });
     database.exec('PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE');
@@ -41,6 +44,7 @@ export function openState(path: string, world: string, environment = ''): Store 
       if (!known.has('format')) throw new StateError(FOREIGN);
       if (known.get('format') !== FORMAT) throw new StateError('The state file cannot be used: it was written by another version of `live`.');
       if (known.get('world') !== hash) throw new StateError('The state file belongs to another world file, or the world file has changed since.');
+      cache = known.get('cache');
     }
     database.exec('COMMIT; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL');
     if (fresh) {
@@ -49,6 +53,7 @@ export function openState(path: string, world: string, environment = ''): Store 
       database.prepare('INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)').run('format', FORMAT, 'world', hash);
       database.exec('COMMIT');
     }
+    if (typeof cache !== 'string') database.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('cache', cache = randomUUID());
   } catch (error) {
     database.close();
     if (sqliteCode(error) === NOT_A_DATABASE) throw new StateError(FOREIGN);
@@ -56,6 +61,7 @@ export function openState(path: string, world: string, environment = ''): Store 
   }
   const insert = database.prepare('INSERT INTO journal (seq, record, event, by) VALUES (?, ?, ?, ?)');
   return {
+    cache: cache as string,
     // Read row by row: a journal is not held in memory whole. The texts are JSON, which keeps every character as it was.
     *entries() {
       for (const row of database.prepare('SELECT seq, record, event, by FROM journal ORDER BY seq').iterate()) {

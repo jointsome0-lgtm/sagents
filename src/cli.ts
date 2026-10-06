@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { createChatgpt, ModelError, signIn, SignInError } from './chatgpt.ts';
@@ -18,7 +19,7 @@ node src/cli.ts live <world.json> [--model <id>] [--cast <character>=<id>]... [-
                                        --cast gives one character a model of its own; --world-model answers what comes of a deed;
                                        with --state the world is kept in that file and continues from it
 
-A request: {"model": "<id>", "<id>@<effort>" or "api:<id>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}}
+A request: {"model": "<id>", "<id>@<effort>" or "api:<id>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}, "cache": "<name>"}
 An answer: {"status": "done", "text": "...", "usage": {...}}, with "endpoint" when a router named who answered, or {"status": "failed", "reason": "<code>"}
 A failed answer also has "httpStatus", "providerCode" and "param" when the service gave them.
 "api:<id>" is a model of the chat completions server that SAGENTS_API_URL names, with SAGENTS_API_KEY if it asks for one.`;
@@ -53,8 +54,8 @@ async function requestFrom(input: NodeJS.ReadStream, limit: AbortSignal): Promis
   try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ModelError('invalid_request'); }
   if (!isObject(value) || typeof value.model !== 'string' || !Array.isArray(value.messages) || !value.messages.length
     || !value.messages.every(isMessage) || (value.system !== undefined && typeof value.system !== 'string')
-    || (value.schema !== undefined && !isObject(value.schema))) throw new ModelError('invalid_request');
-  return { model: value.model, system: value.system, messages: value.messages, schema: value.schema };
+    || (value.schema !== undefined && !isObject(value.schema)) || (value.cache !== undefined && typeof value.cache !== 'string')) throw new ModelError('invalid_request');
+  return { model: value.model, system: value.system, messages: value.messages, schema: value.schema, ...(value.cache === undefined ? {} : { cache: value.cache }) };
 }
 
 // What may be said about a failure: this tool's code, the HTTP status, and the service's own code and field name.
@@ -162,6 +163,8 @@ if (command === 'ask') {
         const { seconds, ...totals } = await runLive({ world, ...playerOf((given.values.model as string | undefined) ?? LIVE_MODEL),
           cast: Object.fromEntries([...names].map(([id, name]) => [id, playerOf(name)])),
           worldPlayer: typeof given.values['world-model'] === 'string' ? playerOf(given.values['world-model']) : undefined, minutes, calls, journal: state, pause: state !== undefined,
+          // The players' names for a service's cache are made of the state file's own, and of one made here for a run that keeps no file.
+          cache: state?.cache ?? randomUUID(),
           onEvent: (event, by) => { for (const line of json ? [JSON.stringify({ ...event, by })] : linesOf(world, event)) console.log(line); } });
         const played = Math.round(seconds / 6) / 10;
         // Tokens are a sum over the answers that reported them, and the line says when some did not.

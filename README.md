@@ -72,6 +72,7 @@ of tokens is never lost unsaved, and a call whose limit passed meanwhile ends wi
 | `messages` | `user` and `assistant` messages with text `content`. |
 | `system` | Optional instructions. |
 | `schema` | Optional JSON Schema, in OpenAI's strict form, that the answer must follow. |
+| `cache` | Optional name of your own for whoever the request is one of, 64 characters at most of letters, digits, `-` and `_`, so that a service that keeps the beginnings of requests it has read brings the requests under one name to the same place. It holds nothing of the text. See each connection for how it is sent; a request with none is sent with none. |
 
 ```json
 {"status":"done","text":"Hi.","usage":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0}}
@@ -474,7 +475,10 @@ The journal and the state file:
   a journal that does not is refused. The file belongs to one world file and its environment together, by a hash
   of the content of both, and refuses another of either, so neither can be edited or exchanged while the world is
   under way. A second run on a file that is in use is
-  refused. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
+  refused. The file also holds a random name of its own, made when it begins: every request of a run carries a name
+  made of it for its player, one for each resident and one for the world, as the request's `cache`, so a world that
+  is continued keeps those names and a journal begun in another file has others. A run with no state file makes one
+  for itself. No name is printed, and none is in the journal. A byte copy of a state file has the names of the original. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
   writes nothing to it.
 
 The laws of the world. Whatever the model answers, these hold in every journal. `npm test` plays thirty characters
@@ -581,6 +585,9 @@ What sagents keeps and what it sends:
 - The tokens are in `~/.config/sagents/chatgpt.json`, a file only your user can read. sagents does not keep the ID token
   or your email.
 - A request holds the instructions, the messages and the schema you gave it. sagents adds no text of its own.
+- A request that has a `cache` name carries it three times: as `prompt_cache_key` in the body and as the headers
+  `session-id` and `x-client-request-id`. The plan's route reads far more of a request from its cache with them:
+  8 or 9 requests of 20 against 1 to 3 without. A request with no name has none of the three.
 - Every request has `store: false`. sagents writes no log of requests or answers.
 - A failure is a code, with the HTTP status and OpenAI's own error code and field name when there were any. sagents
   never prints OpenAI's error text, which can quote the request.
@@ -600,6 +607,7 @@ A model written as `api:<id>` goes to any server that speaks the OpenAI chat com
 | `SAGENTS_API_KEY` | The key, when the server asks for one. |
 | `SAGENTS_API_MAX_TOKENS` | The output limit of one call, 2048 by default. |
 | `SAGENTS_API_EXTRA` | One JSON object of further body fields, such as `{"reasoning":{"enabled":false}}`, which keeps a model's reasoning off on OpenRouter. |
+| `SAGENTS_API_CACHE_FIELD` | The name of the body field that a request's `cache` name is sent under, such as `session_id` or `prompt_cache_key`. Not set, the name is not sent. |
 
 ```sh
 export SAGENTS_API_URL=https://openrouter.ai/api/v1 SAGENTS_API_EXTRA='{"reasoning":{"enabled":false}}'
@@ -615,6 +623,9 @@ What sagents sends and to whom:
   as a strict `json_schema` `response_format`, and the fields of `SAGENTS_API_EXTRA`. sagents adds no text of its own.
   An extra field cannot replace `model`, `messages`, `max_tokens`, `max_completion_tokens`, `response_format`, `stream`
   or `n`: a setting that names one is refused.
+- The `cache` name of a request goes out only when `SAGENTS_API_CACHE_FIELD` names the field for it, and then in the
+  body under that field and nowhere else: servers call such a field by different names, and one that checks its
+  fields refuses a name it does not know. The field cannot be one of those above or one of `SAGENTS_API_EXTRA`.
 - The key goes in the `authorization` header. sagents does not store it.
 - A router that serves one model from several endpoints may say in a top-level `provider` of its answer which one
   answered. When that is a string, `ask` gives it as `endpoint` and a `live` run counts the answers of each for the

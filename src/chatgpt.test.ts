@@ -53,6 +53,14 @@ test('a request holds only what the caller gave, and the answer comes with its u
   assert.equal(body.stream, true);
   assert.deepEqual(body.reasoning, { effort: 'high' });
   assert.equal(body.text?.format.strict, true);
+  // A request with no name for its player is sent with none. One that has a name carries it as the cache key and as
+  // the session of two headers, and a name that would be a second header is refused before anything is sent.
+  assert.deepEqual(Object.keys(calls[0].init.headers as object).sort(), ['accept', 'authorization', 'content-type']);
+  await chatgpt.respond({ ...request, cache: 'player-1' });
+  assert.equal(JSON.parse(calls[1].init.body as string).prompt_cache_key, 'player-1');
+  assert.deepEqual({ ...calls[1].init.headers as object, authorization: '' }, { ...calls[0].init.headers as object, authorization: '', 'session-id': 'player-1', 'x-client-request-id': 'player-1' });
+  const error = await chatgpt.respond({ ...request, cache: 'player\r\nx-other: 1' }).catch((thrown: unknown) => thrown) as { code?: string; param?: string };
+  assert.deepEqual([error.code, error.param, calls.length], ['invalid_request', 'cache', 2]);
 });
 
 test('an expiring token is refreshed once, both tokens are replaced together and the file stays private', async () => {

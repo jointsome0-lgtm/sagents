@@ -1,9 +1,11 @@
-import { ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
+import { CACHE, ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
 import type { Controls, Request, Result } from './chatgpt.ts';
 
 // Any server that speaks the OpenAI chat completions protocol: vLLM or llama.cpp on a rented card, OpenRouter. The
 // address, the key and the output limit come from the environment. A request goes to the server the address names and
-// nowhere else, and holds what the caller gave, the output limit and the fields of SAGENTS_API_EXTRA. Every call can
+// nowhere else, and holds what the caller gave, the output limit and the fields of SAGENTS_API_EXTRA. The caller's
+// name for a player, `cache`, goes out only under the field that SAGENTS_API_CACHE_FIELD names: servers call it by
+// different names, and one that checks its fields refuses a name it does not know. Every call can
 // cost money, so nothing is sent a second time: a failure is a code, and the caller decides what to do next.
 const DEFAULT_MAX_TOKENS = 2048;
 const MAX_ANSWER = 4_000_000;
@@ -12,6 +14,7 @@ const MAX_TEXT = 100_000;
 const FIXED = ['model', 'messages', 'max_tokens', 'max_completion_tokens', 'response_format', 'stream', 'n'];
 // A key is one header value; anything else in it would be a second header or a failure that quotes it.
 const KEY = /^[\x21-\x7e]+$/;
+const FIELD = /^[a-z][a-z0-9_]{0,39}$/;
 const LOOPBACK = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])$/;
 // How servers name a prompt that does not fit: OpenAI and vLLM by code, llama.cpp by type, OpenRouter in its sentence
 // only. The sentence is looked at for this and never carried.
@@ -47,19 +50,24 @@ function settingsOf(env: Env) {
     }
   }
   if (!isObject(extra) || FIXED.some(name => Object.hasOwn(extra, name))) throw refused('SAGENTS_API_EXTRA');
-  return { url: `${base.origin}${base.pathname.replace(/\/+$/, '')}/chat/completions`, key, maxTokens, extra };
+  // The field a player's name goes under is one of its own: not one this module sets, and not one of the extra fields.
+  const cacheField = env.SAGENTS_API_CACHE_FIELD || undefined;
+  if (cacheField && (!FIELD.test(cacheField) || FIXED.includes(cacheField) || Object.hasOwn(extra, cacheField))) throw refused('SAGENTS_API_CACHE_FIELD');
+  return { url: `${base.origin}${base.pathname.replace(/\/+$/, '')}/chat/completions`, key, maxTokens, extra, cacheField };
 }
 
 // The body of one request, whole: a caller that stores its hash can say exactly what the model saw.
 export function completionsBody(request: Request, env: Env = process.env) {
-  const { maxTokens, extra } = settingsOf(env);
+  const { maxTokens, extra, cacheField } = settingsOf(env);
   // A reasoning effort after `@` belongs to the ChatGPT connection; here the server's own switch goes in SAGENTS_API_EXTRA.
   if (!request.model || request.model.includes('@')) throw refused('model');
+  if (request.cache !== undefined && !CACHE.test(request.cache)) throw refused('cache');
   return {
     ...extra, model: request.model,
     messages: [...(request.system ? [{ role: 'system', content: request.system }] : []), ...request.messages.map(({ role, content }) => ({ role, content }))],
     max_tokens: maxTokens,
     ...(request.schema ? { response_format: { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema: request.schema } } } : {}),
+    ...(request.cache && cacheField ? { [cacheField]: request.cache } : {}),
   };
 }
 
