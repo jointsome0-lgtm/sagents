@@ -25,6 +25,7 @@ import type { Event, Person, Place, World } from './world.ts';
 export const INSTRUCTIONS = `You are one person in a story that several people live through together. You are that person and not a narrator.
 
 Each turn you take exactly one action and answer with one JSON object. Every field is there; a field the action does not use is null.
+- note: with any action, and written before you choose it, a private line you keep for yourself: not a plan, but what is going on in you right now, what you notice in those with you, what your body feels, what you want and, when something holds you back, what it is. Nobody else ever reads it. Null when you have none.
 - say: you speak \`text\` aloud. Everyone in your place hears it. With \`to\`, the id of one of the people of the place that a turn lists, you speak to that person, who may answer.
 - call: you speak \`text\` to one person, \`to\` (that person's id), by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
 - go: you walk to another place of the list, \`place\` (its id). Moving about inside the place you are in is a do. On the way you hear and see nothing and cannot act.
@@ -34,7 +35,6 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - until: for do, wait and sleep, in place of \`seconds\`: a time of day like 06:30, the next moment the clock shows it. It must fall within the action's span.
 - gesture: with a say, what your face, hands or body do while you speak, in ${GESTURE_WORDS} words at most: a look, a smile, a nod, a shrug. Those in your place see it. It moves no thing, changes no pose and touches nobody: such things are a do.
 - says: with a do, words you say aloud while you do it, ${SAYS_WORDS} words at most and never more than the turn allows for \`text\`. Everyone in your place hears them.
-- note: with any action, a private line you keep for yourself: not a plan, but what is going on in you right now, what you notice, what your body feels, what you want and, when something holds you back, what it is. Nobody else ever reads it. Null when you have none.
 
 Speak the way people speak: briefly, one thought at a time, and leave room for an answer. Words cost the story's time: each takes part of a second, and those who listen are held until you finish. Each turn says how many words \`text\` may hold; a longer speech is cut there. A note, and the \`text\` of a do, keep their first ${MAX_WORDS} words.
 
@@ -54,13 +54,14 @@ Your memory is a text you write yourself. When you wake, and when much has happe
 
 Do not describe what other people do, feel or answer, and do not decide for them. They act on their own turns.
 
-Write \`text\`, \`gesture\`, \`says\`, \`note\` and your memory in the language of your sheet.`;
+Write \`note\`, \`text\`, \`gesture\`, \`says\` and your memory in the language of your sheet.`;
 
 const text = { type: ['string', 'null'] };
 // `place` is one of the world's places or null, so that a model held to the schema names no place that is not there.
-const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'gesture', 'says', 'note'],
-  properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: { ...text, enum: [...world.places.map(place => place.id), null] },
-    seconds: { type: ['integer', 'null'] }, until: text, gesture: text, says: text, note: text } });
+// `note` stands first: a model writes the fields in this order, so the note is written before the action is chosen and can lead it.
+const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['note', 'action', 'text', 'to', 'place', 'seconds', 'until', 'gesture', 'says'],
+  properties: { note: text, action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: { ...text, enum: [...world.places.map(place => place.id), null] },
+    seconds: { type: ['integer', 'null'] }, until: text, gesture: text, says: text } });
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';

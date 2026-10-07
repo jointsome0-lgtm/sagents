@@ -5,14 +5,14 @@ import { clockAt, lasting, secondsUntil, speechSeconds, travelSeconds } from './
 import { GESTURE_WORDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, SAYS_WORDS } from './world.ts';
 import type { Event, Kind, Person, Place, World } from './world.ts';
 
-// One answer of a character, as the schema asks for it: every field is there and an unused one is null. `to` is the
+// One answer of a character, as the schema asks for it, the note first: every field is there and an unused one is null. `to` is the
 // character a `call` reaches, or the figure of the speaker's place a `say` is addressed to.
 // `do`, `wait` and `sleep` last `seconds`, or `until` the next moment the clock shows that time of day, `HH:MM`.
 // `gesture`, what the body of one who makes a `say` does meanwhile, and `says`, the words said aloud with a `do`, are
 // the two fields that are absent when there is none and never null, so that an action recorded before they existed
 // still reads back as itself.
-export type Action = { action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; until: string | null;
-  note: string | null; gesture?: string; says?: string };
+export type Action = { note: string | null; action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; until: string | null;
+  gesture?: string; says?: string };
 // Why an answer could not be used as an action: it was not a JSON object, named no action, lacked its text, called
 // nobody who can be called, led to the place the character is in or to no place, or lasted no time the action allows;
 // or it never arrived whole, because the model wrote on to the limit of one answer (`long`); or the service declined to
@@ -50,7 +50,7 @@ export function readAction(world: World, actor: Person, answer: string): Action 
   const line = (field: unknown) => typeof field === 'string' && field.trim() ? wordsOf(field).join(' ') : null;
   const short = (field: unknown, most = MAX_WORDS) => { const whole = line(field); return whole === null ? null : cut(whole, most).text || null; };
   const text = line(value.text);
-  const none = { text: null, to: null, place: null, seconds: null, until: null, note: short(value.note) };
+  const none = { note: short(value.note), text: null, to: null, place: null, seconds: null, until: null };
   // How long the action lasts, as the field that says it, or null when that is no span of 1 to `most` seconds.
   const span = (most: number): { seconds: number | null; until: string | null } | null => {
     const within = (seconds: unknown) => typeof seconds === 'number' && Number.isInteger(seconds) && seconds >= 1 && seconds <= most;
