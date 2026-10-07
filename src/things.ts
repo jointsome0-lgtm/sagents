@@ -2,7 +2,7 @@
 // with one holder, a person, a place or another thing. The world's answer names what a deed moved by label and where
 // it ended up; the rules check each entry, move the record and say what went from where to where. Nothing here reads
 // prose, and no text of a model changes a count.
-import { boundedOf, isObject, MAX_FACTS, refuse, textOf } from './reading.ts';
+import { amountOf, boundedOf, durationOf, isObject, MAX_FACTS, refuse, textOf } from './reading.ts';
 
 // The most entries one answer may move and set, the most taken from a stock by one entry, how deep a thing may lie
 // under a person or a place, and how many records a person and a place may hold, so that a request has a largest size.
@@ -81,7 +81,8 @@ export function readThings(value: unknown, field: string, labels: { next: number
     if (item.hidden !== undefined) {
       if (!top || !isObject(item.hidden)) return refuse(`${here}.hidden`, 'must be an object, on a thing of a place itself');
       const spot = boundedOf(textOf(item.hidden.spot, `${here}.hidden.spot`), `${here}.hidden.spot`, SPOT_WORDS) as string;
-      const minutes = typeof item.hidden.minutes === 'number' && Number.isFinite(item.hidden.minutes) && item.hidden.minutes > 0 ? item.hidden.minutes : refuse(`${here}.hidden.minutes`, 'must be a number above zero');
+      const minutes = amountOf(item.hidden.minutes ?? null, `${here}.hidden.minutes`, 0);
+      durationOf(Math.ceil(minutes * 60), `${here}.hidden.minutes`);
       hidden = { spot, minutes };
     }
     return { label, name, facts: boundedOf(item.facts, `${here}.facts`, MAX_FACTS), n, fixed, open, stock, food, burns, fire, states, state, money, holds, hidden };

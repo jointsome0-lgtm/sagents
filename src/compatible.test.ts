@@ -222,3 +222,54 @@ test('ask prints one line with codes for a refusal that quotes the key and the r
     { encoding: 'utf8', timeout: 30_000, env: { PATH: process.env.PATH, HOME: mkdtempSync(join(tmpdir(), 'compatible-check-')), SAGENTS_API_URL: 'https://server.invalid/v1', SAGENTS_API_KEY: KEY } });
   assert.match(two.stdout, /\n  api:google\/gemma-4-31b-it: 3 calls, [^\n]* output tokens, without 3 answers that reported no usage, answered by Beta\/fp8 1, Alpha 2\n/);
 });
+
+test('HTTP failures keep their status when the body breaks or is too large, and an oversized body is not cancelled with a held reader', async () => {
+  for (const [status, code] of [[402, 'budget_exceeded'], [401, 'unauthorized'], [403, 'unauthorized'], [429, 'rate_limited'], [503, 'model_unavailable'], [400, 'invalid_request'], [422, 'invalid_request']] as const) {
+    for (const broken of [true, false]) {
+      const response = new Response(new ReadableStream({ start(controller) {
+        if (broken) controller.error(new TypeError('broken body'));
+        else { controller.enqueue(new Uint8Array(4_000_001)); controller.close(); }
+      } }), { status });
+      const error = await standIn(() => response).failed();
+      assert.deepEqual([error.code, error.httpStatus, leaks(error)], [code, status, []]);
+    }
+  }
+  let cancelled = false;
+  const waiting = new Response(new ReadableStream({ cancel() { cancelled = true; return new Promise(() => {}); } }), { status: 402 });
+  assert.equal((await standIn(() => waiting).failed()).code, 'budget_exceeded');
+  assert.ok(cancelled);
+  const locked = new Response('unused', { status: 402 }), reader = locked.body!.getReader();
+  let touched = false;
+  locked.body!.cancel = async () => { touched = true; };
+  assert.equal((await standIn(() => locked).failed()).code, 'budget_exceeded');
+  assert.ok(!touched);
+  reader.releaseLock();
+  const error = await standIn(() => new Response(new Uint8Array(4_000_001))).failed();
+  assert.equal(error.code, 'invalid_response');
+});
+
+test('a limit or an abort ends a text callback, for a stream and for an answer given whole', async () => {
+  for (const streaming of [false, true]) {
+    const reply = () => streaming ? new Response('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n') : answer('ok');
+    const { respond } = createCompatible({ env: { ...env, ...(streaming ? { SAGENTS_API_STREAM: '1' } : {}) }, fetch: async () => reply() });
+    const held = setTimeout(() => {}, 1000);
+    try {
+      await assert.rejects(respond(request, { timeoutMs: 20, onText: () => new Promise(() => {}) }), { code: 'timeout' });
+      await assert.rejects(respond(request, { timeoutMs: 20, onText: () => { const until = performance.now() + 30; while (performance.now() < until) {} } }), { code: 'timeout' });
+      const stopped = new AbortController();
+      await assert.rejects(respond(request, { signal: stopped.signal, onText: () => { stopped.abort(); return new Promise(() => {}); } }), { code: 'cancelled' });
+      const aborted = new AbortController();
+      await assert.rejects(respond(request, { signal: aborted.signal, onText: () => aborted.abort() }), { code: 'cancelled' });
+      await assert.rejects(respond(request, { timeoutMs: 20, onText: () => new Promise(resolve => setTimeout(resolve, 40)) }), { code: 'timeout' });
+    } finally { clearTimeout(held); }
+  }
+});
+
+test('a stream keeps an output limit and rejects text after its end, while an empty final piece is ignored', async () => {
+  const chunk = (content: string, finish: string | null) => `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: finish }] })}\n\n`;
+  const failed = (events: string) => standIn(() => new Response(`${events}data: [DONE]\n\n`), { ...env, SAGENTS_API_STREAM: '1' }).failed();
+  assert.equal((await failed(chunk('partial', 'length') + chunk('', 'stop'))).code, 'output_limit');
+  assert.equal((await failed(chunk('whole', 'stop') + chunk(' extra', null))).code, 'invalid_stream');
+  const { respond } = createCompatible({ env: { ...env, SAGENTS_API_STREAM: '1' }, fetch: async () => new Response(`${chunk('whole', 'stop')}${chunk('', null)}data: [DONE]\n\n`) });
+  assert.equal((await respond(request)).text, 'whole');
+});

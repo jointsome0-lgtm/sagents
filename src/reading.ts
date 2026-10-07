@@ -41,6 +41,10 @@ export const amountOf = (value: unknown, field: string, absent: number): number 
   : typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : refuse(field, 'must be a number above zero');
 export const countOf = (value: unknown, field: string, absent: number): number => value === undefined ? absent
   : typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : refuse(field, 'must be a whole number above zero');
+// A duration derived from a setting must fit the journal's whole seconds, whatever units the setting uses.
+// For a threshold the check is of the first whole second that reaches it; the setting itself stays as given.
+export const durationOf = (seconds: number, field: string): number => Number.isInteger(seconds) && seconds >= 1 && seconds <= 1e12 ? seconds
+  : refuse(field, 'must give a whole number of seconds from 1 to 1000000000000');
 export const listOf = (value: unknown, field: string): unknown[] => Array.isArray(value) && value.length ? value : refuse(field, 'must be a list that is not empty');
 // A text of `limit` words at most, or null when there is none.
 export function boundedOf(value: unknown, field: string, limit: number): string | null {

@@ -188,6 +188,9 @@ before a failure of the connection ended the run, and 9 of the 15 answers could 
 
 The rules of time and hearing:
 
+- Every numeric setting must be finite, and each duration derived from the settings must be a whole number of
+  seconds from 1 to 10^12; a world of 0.1.0 with a longer derived duration, over thirty thousand years, is refused
+  on purpose. These checks cover settings and their derived durations, not seconds accumulated over a long story.
 - The clock counts whole seconds of the story, and from the second day on a time names its day. The character who
   is free first plays next. Of those free at one instant, whoever arrives comes first and whoever wakes after them,
   so everyone who comes or wakes at an instant has done so before anyone takes a turn at it: two who walk to a place
@@ -379,7 +382,8 @@ The world answers a deed:
   stopped between the two asks the world first when it continues. An answer that cannot be used is asked for once
   more; after that nothing came of the deed, and the answer counts as unusable. An answer that the rules of things
   refuse is asked for once more too, as «Things» says. The count of two asks is a run's own and no record keeps it:
-  a run that stops between the two, at its `--calls`, starts the count again when it continues.
+  a run that stops between the two, at its `--calls`, starts the count again when it continues. The explanation
+  of a refused answer is not kept either, so the next ask after continuing has none of it.
 - What a model tells in a `do` does not by itself make anything true: the deed is what was tried, and what came of
   it is what the world answered from the facts.
 
@@ -460,7 +464,7 @@ Things:
   what is in another state now and what was found where. It names things and people, and no label.
 - `pose` and the things start from the world file and then belong to the world's state. A `go` drops the walker's
   pose, and so does falling asleep, by a `sleep` or at the limit: a sleeper is shown as asleep and has no pose until
-  a deed gives it one, and wakes with none. The things a person carries go where the person goes.
+  a deed gives it one, and keeps that pose when it wakes. The things a person carries go where the person goes.
 - A character's `looks` are part of its own system text. Every turn says its own pose and what it carries, three
   things deep with the counts, and for each person in its place their looks, pose and what they carry, without what
   is inside a thing unless the thing is `open`. It is never sent what is inside a thing that another carries,
@@ -672,6 +676,7 @@ picks one. Ctrl+C stops it. A computer with no browser to open is no failure: th
 
 A directory is looked into six levels deep. Names that begin with a dot and `node_modules` are passed over, a link is
 followed only where it stays inside the directory given, and a `*.sqlite` is never opened: only its name is looked at.
+On a system without `/proc`, the lab trusts that nobody rewrites the given folders while it reads them.
 What is found is listed newest first, in groups by the folder it lies in, and typing a part of a name narrows the
 list. An experiment has one of three shapes:
 
@@ -805,7 +810,11 @@ What sagents keeps and what it sends:
 - When the plan's limit, or the share of it given to sagents, is used up, sagents stops with `budget_exceeded` and tries
   nothing else.
 - Several sagents processes may run at once. They take turns to renew the tokens through a lock next to the account
-  file, because OpenAI replaces the renewing token at every use.
+  file, because OpenAI replaces the renewing token at every use. An exclusive SQLite transaction in
+  `chatgpt.json.renew.sqlite`, made with the account file's permissions plus the owner's write bit and never removed,
+  holds the lock through renewal and saving. A process that dies gives it up; a stopped process keeps it, and waiters
+  time out after 90 seconds. Version 0.1.0 and this version do not shut each other out, so do not use them on one
+  account at the same moment.
 
 ## Development
 

@@ -1,4 +1,4 @@
-import { CACHE, ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
+import { CACHE, ENDPOINT, ModelError, OTHER_ENDPOINT, untilStopped } from './chatgpt.ts';
 import type { Controls, Request, Result } from './chatgpt.ts';
 
 // Any server that speaks the OpenAI chat completions protocol: vLLM or llama.cpp on a rented card, OpenRouter. The
@@ -82,10 +82,7 @@ async function jsonOf(response: Response): Promise<unknown> {
   let bytes = 0;
   for await (const chunk of response.body) {
     bytes += chunk.byteLength;
-    if (bytes > MAX_ANSWER) {
-      await response.body.cancel();
-      return null;
-    }
+    if (bytes > MAX_ANSWER) return null;
     chunks.push(Buffer.from(chunk));
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch (error) {
@@ -153,12 +150,18 @@ async function streamOf(body: Response['body'], onText: (delta: string) => unkno
       if ((Array.isArray(delta.tool_calls) && delta.tool_calls.length) || delta.function_call) throw new ModelError('unexpected_tools');
       if (typeof delta.refusal === 'string' && delta.refusal.trim()) throw new ModelError('declined');
       if (typeof delta.content === 'string') {
+        if (finish != null && delta.content) throw new ModelError('invalid_stream');
         text += delta.content;
         if (text.length > MAX_TEXT) throw new ModelError('output_limit');
         if (delta.content) await onText(delta.content);
       } else if (delta.content != null) throw new ModelError('invalid_stream');
-      if (choice.finish_reason != null) finish = choice.finish_reason;
+      if (choice.finish_reason === 'length') throw new ModelError('output_limit');
+      if (choice.finish_reason != null && finish == null) finish = choice.finish_reason;
     }
+  }
+  try { decoder.decode(); } catch (error) {
+    if (error instanceof TypeError) throw new ModelError('invalid_stream');
+    throw error;
   }
   throw new ModelError('incomplete_stream');
 }
@@ -171,19 +174,29 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       const { url, key, stream } = settingsOf(env);
       const body = JSON.stringify(completionsBody(request, env));
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
+      const until = performance.now() + timeoutMs;
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
       const current = signal ? AbortSignal.any([signal, timer]) : timer;
-      const stopped = () => signal?.aborted ? new ModelError('cancelled') : timer.aborted ? new ModelError('timeout') : null;
+      const stopped = () => signal?.aborted ? new ModelError('cancelled') : timer.aborted || performance.now() >= until ? new ModelError('timeout') : null;
       if (signal?.aborted) throw new ModelError('cancelled');
       let response: Response | undefined, answer: unknown, streamed = false;
       try {
         // One request and no other. A redirect is a failure: it would carry the key and the text to another server.
-        response = await fetcher(url, { method: 'POST', redirect: 'error', signal: current, body,
-          headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json' } });
+        response = await untilStopped(() => fetcher(url, { method: 'POST', redirect: 'error', signal: current, body,
+          headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json' } }), current, until);
+        if (response.status === 402) {
+          // The balance is already known to be used up. No broken or unfinished body can change that.
+          if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
+          throw failure(402, undefined);
+        }
         // A refusal by the status is one JSON body also when a stream was asked for, and so is the answer of a server
         // that gave it whole all the same.
         streamed = stream && response.ok && !response.headers.get('content-type')?.includes('application/json');
-        answer = streamed ? await streamOf(response.body, onText) : await jsonOf(response);
+        answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until)), current, until)
+          : await untilStopped(() => jsonOf(response!).catch(error => {
+            if (response!.ok || !(error instanceof Error)) throw error;
+            return null;
+          }), current, until);
       } catch (error) {
         const reason = stopped();
         if (reason) throw reason;
@@ -213,7 +226,11 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       if (typeof text !== 'string') throw new ModelError('invalid_response');
       if (text.length > MAX_TEXT) throw new ModelError('output_limit');
       if (!text.trim()) throw new ModelError('empty_response');
-      if (!streamed) await onText(text);
+      if (!streamed) {
+        try { await untilStopped(() => onText(text), current, until); } catch (error) { throw stopped() ?? error; }
+      }
+      const ended = stopped();
+      if (ended) throw ended;
       // prompt_tokens includes the cached part, completion_tokens the reasoning.
       const usage = isObject(answer.usage) ? answer.usage : {};
       const input = isObject(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};

@@ -16,7 +16,7 @@
 //   Only its text can be shown, and it is not opened before it is asked for.
 // A `*.sqlite` is never opened: only its name is looked at. Of a world file only the ids and names of characters and
 // places are ever given out, and of a chapter everything but its `carry`.
-import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { basename, join, resolve, sep } from 'node:path';
 
 import { natural, played, secondsOf } from './core.js';
@@ -62,14 +62,34 @@ export const namesOf = (value: unknown): Names | null => {
   return { characters: named(value.characters), places: named(value.places) };
 };
 
+// Read through the opened file, not through a pathname checked by an earlier walk. With /proc the descriptor's
+// own path is checked; without it the path is resolved again and its device and inode must still match.
+const openInside = (path: string, roots: string[]) => {
+  const within = (real: string) => roots.some(root => real.startsWith(root + sep));
+  const real = realpathSync(path);
+  if (!within(real)) return null;
+  const file = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const opened = fstatSync(file), current = realpathSync(statSync('/proc/self/fd', { throwIfNoEntry: false }) ? `/proc/self/fd/${file}` : real);
+    const now = statSync(current);
+    if (opened.isFile() && within(current) && opened.dev === now.dev && opened.ino === now.ino) return file;
+  } catch (error) {
+    closeSync(file);
+    throw error;
+  }
+  closeSync(file);
+  return null;
+};
+
 // The whole lines a file has grown by since the last look. A last line without its end waits for it: the bytes are
 // kept, and a line is cut at the byte of a newline, which is never a part of a character. `at` is the byte after the
 // last whole line given. A file that became shorter is another file: it is read from its start, and `anew` says so.
-export const tail = (path: string, from = 0) => {
+export const tail = (path: string, from = 0, roots = [realpathSync(resolve(path, '..'))]) => {
   let at = from, kept: Buffer = Buffer.alloc(0);
   return { get at() { return at; }, read(most = Infinity) {
-    let file: number;
-    try { file = openSync(path, 'r'); } catch (error) { if (!missing(error)) throw error; return { lines: [] as string[], anew: false, more: false }; }
+    let file: number | null;
+    try { file = openInside(path, roots); } catch (error) { if (!missing(error)) throw error; return { lines: [] as string[], anew: false, more: false }; }
+    if (file === null) return { lines: [] as string[], anew: false, more: false };
     try {
       const size = fstatSync(file).size, lines: string[] = [];
       let anew = false, seen = at + kept.length;
@@ -94,9 +114,10 @@ export const tail = (path: string, from = 0) => {
 };
 // A piece of a text file from the byte `from`, `most` bytes at most: it ends after a newline, or at the file's end,
 // and never inside a character. `at` is the byte after it.
-const piece = (path: string, from: number, most: number) => {
-  let file: number;
-  try { file = openSync(path, 'r'); } catch (error) { if (!missing(error)) throw error; return { from: 0, at: 0, size: 0, more: false, text: '' }; }
+const piece = (path: string, from: number, most: number, roots: string[]) => {
+  let file: number | null;
+  try { file = openInside(path, roots); } catch (error) { if (!missing(error)) throw error; return { from: 0, at: 0, size: 0, more: false, text: '' }; }
+  if (file === null) return { from: 0, at: 0, size: 0, more: false, text: '' };
   try {
     const size = fstatSync(file).size, start = Number.isInteger(from) && from > 0 && from <= size ? from : 0, chunk = Buffer.alloc(Math.min(most, size - start));
     let got = Math.max(0, readSync(file, chunk, 0, chunk.length, start));
@@ -125,6 +146,14 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   // Each root once, by its real path, under the last part of its path as its name.
   const roots = [...new Set(given.map(dir => realpathSync(dir)))].map(path => ({ path, label: basename(path) || path }));
   roots.forEach((root, at) => { const same = roots.slice(0, at).filter(other => other.label.replace(/ \(\d+\)$/, '') === root.label).length; if (same) root.label = `${root.label} (${same + 1})`; });
+  const paths = roots.map(root => root.path);
+  const readTail = (path: string, from = 0) => tail(path, from, paths);
+  const readPiece = (path: string, from: number, most: number) => piece(path, from, most, paths);
+  const readFile = (path: string) => {
+    const file = openInside(path, paths);
+    if (file === null) return '';
+    try { return readFileSync(file, 'utf8'); } finally { closeSync(file); }
+  };
   const modified = (path: string) => statSync(path, { throwIfNoEntry: false })?.mtimeMs ?? 0;
 
   // ---- The walk. A path is used only when, with every link in it followed, it is still under its root. A name is
@@ -198,7 +227,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   const counted = new Map<string, { reader: ReturnType<typeof tail>; events: number; first: Mark | null; last: Mark | null; who: Set<string> }>();
   const eventsCount = (path: string) => {
     let known = counted.get(path);
-    if (!known) counted.set(path, known = { reader: tail(path), events: 0, first: null, last: null, who: new Set() });
+    if (!known) counted.set(path, known = { reader: readTail(path), events: 0, first: null, last: null, who: new Set() });
     for (let more = true; more;) {
       const got = known.reader.read(5000);
       if (got.anew) Object.assign(known, { events: 0, first: null, last: null, who: new Set() });
@@ -221,7 +250,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   const usageCount = (path: string) => {
     const none = (): Tally => ({ requests: 0, failed: 0, input: 0, cached: 0, output: 0, residents: new Map(), world: new Map() });
     let known = usages.get(path);
-    if (!known) usages.set(path, known = { reader: tail(path), sums: none() });
+    if (!known) usages.set(path, known = { reader: readTail(path), sums: none() });
     for (let more = true; more;) {
       const got = known.reader.read(5000);
       if (got.anew) known.sums = none();
@@ -249,7 +278,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
     const key = `${stat.mtimeMs}:${stat.size}`, known = worlds.get(path);
     if (known?.key === key) return known.names;
     let names: Names | null = null;
-    try { names = namesOf(JSON.parse(readFileSync(path, 'utf8'))); } catch (error) { if (!(error instanceof SyntaxError) && !missing(error)) throw error; /* a file that cannot be read gives no names: the ids are shown */ }
+    try { names = namesOf(JSON.parse(readFile(path))); } catch (error) { if (!(error instanceof SyntaxError) && !missing(error)) throw error; /* a file that cannot be read gives no names: the ids are shown */ }
     worlds.set(path, { key, names });
     return names;
   };
@@ -266,7 +295,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   // The first line of a world's `about.txt`, 300 signs of it at most. The path is the walk's: a link that leads out
   // of the root gave none.
   const aboutIn = (found: Found) => found.about === null ? null
-    : [...piece(found.about, 0, 2048).text.split(/\r?\n/)[0].replace(/\ufffd+$/, '').trim()].slice(0, 300).join('') || null;
+    : [...readPiece(found.about, 0, 2048).text.split(/\r?\n/)[0].replace(/\ufffd+$/, '').trim()].slice(0, 300).join('') || null;
   // The stretches of an experiment in the order they were played (`played` of the core module): by the story second
   // of their first event, then by the natural order of their names; one without events stands last. This is the one
   // place that says what a world is made of.
@@ -288,7 +317,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
       let known = chapters.get(path);
       if (known?.key !== key) {
         let chapter = null;
-        try { chapter = chapterOf(JSON.parse(readFileSync(path, 'utf8')), Number(CHAPTER.exec(file)![1])); } catch (error) { if (!(error instanceof SyntaxError) && !missing(error)) throw error; /* a chapter that cannot be read is passed over */ }
+        try { chapter = chapterOf(JSON.parse(readFile(path)), Number(CHAPTER.exec(file)![1])); } catch (error) { if (!(error instanceof SyntaxError) && !missing(error)) throw error; /* a chapter that cannot be read is passed over */ }
         chapters.set(path, known = { key, chapter });
       }
       if (known.chapter) { got.push(known.chapter); latest = Math.max(latest, stat.mtimeMs); }
@@ -351,7 +380,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
       if (stretch === null && found.stretches.length) {
         stretch = found.stretches.find(known => known.name === wanted) ?? found.stretches.reduce((best, known) => modified(known.path) > modified(best.path) ? known : best);
         const size = statSync(stretch.path, { throwIfNoEntry: false })?.size ?? 0, start = Number.isInteger(from) && from > 0 && from <= size ? from : 0;
-        events = tail(stretch.path, start);
+        events = readTail(stretch.path, start);
         messages.push({ type: 'stretch', name: stretch.name, resumed: start > 0 });
       }
       let more = false;
@@ -364,7 +393,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
         // The usage files are those the walk names for the stretch now: one of its own may have appeared.
         const now = found.stretches.find(known => known.name === stretch!.name) ?? stretch;
         let reset = false, anew = false;
-        if (now.usage.join('\n') !== [...usage.keys()].join('\n')) { usage = new Map(now.usage.map(path => [path, tail(path)])); reset = true; }
+        if (now.usage.join('\n') !== [...usage.keys()].join('\n')) { usage = new Map(now.usage.map(path => [path, readTail(path)])); reset = true; }
         const rows: UsageRow[] = [];
         for (const reader of usage.values()) for (let on = !anew; on;) {
           const read = reader.read(5000);
@@ -373,7 +402,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
           on = !anew && read.more && read.lines.length > 0;
         }
         // A usage file that became shorter: all of them are read anew at the next look.
-        if (anew) usage = new Map([['', tail('')]]);
+        if (anew) usage = new Map([['', readTail('')]]);
         else if (reset || rows.length) messages.push({ type: 'usage', reset, rows, own: now.own });
       }
       if (!more && !caught) { caught = true; messages.push({ type: 'caught' }); }
@@ -383,7 +412,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   // The usage rows of a stretch as they are now, and whether they are its own.
   const usageRows = (stretch: Stretch) => {
     const rows: UsageRow[] = [];
-    for (const path of stretch.usage) for (let reader = tail(path), on = true; on;) {
+    for (const path of stretch.usage) for (let reader = readTail(path), on = true; on;) {
       const got = reader.read(5000);
       for (const line of got.lines) { const row = usageRow(parsed(line)); if (row) rows.push(row); }
       on = got.more && got.lines.length > 0;
@@ -399,7 +428,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
     const stretch = get(id)?.stretches.find(known => known.name === name);
     if (!stretch) return null;
     const size = statSync(stretch.path, { throwIfNoEntry: false })?.size ?? 0, start = Number.isInteger(from) && from > 0 && from <= size ? from : 0;
-    const reader = tail(stretch.path, start), got = reader.read(most);
+    const reader = readTail(stretch.path, start), got = reader.read(most);
     return { name, from: got.anew ? 0 : start, at: reader.at, lines: got.lines.filter(line => parsed(line) !== null), more: got.more && got.lines.length > 0, usage: usageRows(stretch) };
   };
   // The whole world of an experiment as it is now, joined, for a view without a browser: the events of every
@@ -432,7 +461,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   // null when the experiment has no transcript of that name.
   const transcriptOf = (id: string, name: string, from = 0) => {
     const known = get(id)?.texts.find(one => one.name === name);
-    return known ? { name, ...piece(known.path, from, TEXT_PIECE) } : null;
+    return known ? { name, ...readPiece(known.path, from, TEXT_PIECE) } : null;
   };
   return { list, names: (id: string) => { const found = get(id); return found === null ? null : namesFor(found); }, follow, part, world, story, text: transcriptOf };
 }

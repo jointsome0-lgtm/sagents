@@ -68,7 +68,14 @@ export async function startLab({ dirs, port = 0, log = () => {} }: { dirs: strin
     step();
   };
   const server = createServer((request, response) => {
-    const url = new URL(request.url ?? '/', `http://${HOST}`), prefix = `/${token}/`, asked = (key: string) => url.searchParams.get(key) ?? '';
+    let url: URL;
+    try { url = new URL(request.url ?? '/', `http://${HOST}`); } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      response.writeHead(404, { ...HEADERS, 'Content-Type': 'text/plain; charset=utf-8' });
+      response.end('not found\n');
+      return;
+    }
+    const prefix = `/${token}/`, asked = (key: string) => url.searchParams.get(key) ?? '';
     const name = request.method === 'GET' && url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : null;
     if (name !== null && Object.hasOwn(ASSETS, name)) {
       const [file, type] = ASSETS[name], body = asset(file);

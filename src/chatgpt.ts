@@ -1,12 +1,12 @@
 import { createHash, createPublicKey, randomBytes, randomUUID, verify } from 'node:crypto';
 import type { JsonWebKey } from 'node:crypto';
-import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync,
-  unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fchmodSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { DatabaseSync } from 'node:sqlite';
 
 // GPT on a ChatGPT plan, with no API key and no coding agent in between: OpenAI's "Sign in with ChatGPT" for
 // open-source and locally run tools (developers.openai.com/siwc/token-sharing-open-source). The person signs in once
@@ -31,8 +31,6 @@ const PASSIVE_ITEMS = ['message', 'reasoning'];
 // An access token lives an hour; one with less than this left is replaced before a request starts.
 const MARGIN_MS = 5 * 60_000;
 const GRANT_TIMEOUT_MS = 30_000;
-// Longer than any holder of the lock needs: a refresh has GRANT_TIMEOUT_MS and then writes one small file.
-const HOLD_MS = 60_000;
 const LOCK_WAIT_MS = 90_000;
 const MAX_STREAM = 16_000_000;
 const MAX_TEXT = 100_000;
@@ -79,6 +77,23 @@ export const ENDPOINT = /^[A-Za-z0-9 ./_-]{1,40}$/, OTHER_ENDPOINT = 'other';
 // server the whole text once, after its checks, or with SAGENTS_API_STREAM each piece at once like the plan's. Only
 // what a call returns is an answer.
 export type Controls = { signal?: AbortSignal; onText?: (delta: string) => unknown; timeoutMs?: number };
+
+// A caller's limit also ends a wait for its text callback, even when that callback never settles.
+export async function untilStopped<T>(work: () => T | PromiseLike<T>, signal: AbortSignal, until = Infinity): Promise<T> {
+  signal.throwIfAborted();
+  if (performance.now() >= until) throw new ModelError('timeout');
+  let abort: () => void = () => {};
+  const stopped = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try {
+    const value = await Promise.race([stopped, Promise.resolve().then(() => { signal.throwIfAborted(); return work(); })]);
+    signal.throwIfAborted();
+    if (performance.now() >= until) throw new ModelError('timeout');
+    return value;
+  } finally { signal.removeEventListener('abort', abort); }
+}
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 // What a sign-in leaves on this computer, in a file only its owner can read. `hostId` names this installation to
@@ -171,12 +186,18 @@ const paramOf = (body: unknown) => isObject(body) && isObject(body.error) ? body
 async function* events(body: Response['body'], limit: number) {
   if (!body) throw new ModelError('invalid_stream');
   const decoder = new TextDecoder('utf-8', { fatal: true });
+  const decode = (chunk?: Uint8Array) => {
+    try { return decoder.decode(chunk, { stream: chunk !== undefined }); } catch (error) {
+      if (error instanceof TypeError) throw new ModelError('invalid_stream');
+      throw error;
+    }
+  };
   let buffer = '';
   let bytes = 0;
   for await (const chunk of body) {
     bytes += chunk.byteLength;
     if (bytes > limit) throw new ModelError('output_limit');
-    buffer += decoder.decode(chunk, { stream: true });
+    buffer += decode(chunk);
     let end: RegExpExecArray | null;
     while ((end = /\r?\n\r?\n/.exec(buffer))) {
       const event = buffer.slice(0, end.index);
@@ -185,7 +206,7 @@ async function* events(body: Response['body'], limit: number) {
       if (data) yield data;
     }
   }
-  buffer += decoder.decode();
+  buffer += decode();
   if (buffer.trim()) throw new ModelError('invalid_stream');
 }
 
@@ -216,82 +237,45 @@ const withTokens = (account: Account, tokens: { readonly [field: string]: unknow
 });
 
 // Refresh tokens rotate: a second refresh with a spent one ends the session. So the processes of this computer take
-// turns through a lock, and read the account again once they hold it. The lock is a symbolic link: it can be made only
-// where there is none, and its target names its holder. A holder that died leaves its lock behind, and neither the
-// lock's age nor a process number shows that reliably: the computer may have slept, and a sandbox numbers its
-// processes anew. So a waiter takes a lock over only after it has seen the same one for longer than any holder needs,
-// by a clock that stands still while the computer sleeps.
+// turns through an exclusive SQLite transaction, and read the account again once they hold it. The kernel releases
+// the lock when a process dies; a stopped process keeps it. The file stays, and is not the link that 0.1.0 used.
+const sqliteCode = (error: unknown) => error instanceof Error && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode & 0xff : null;
 async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
-  const lock = `${path}.lock`, mine = randomUUID();
-  try { mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); } catch { throw new ModelError('storage_failed'); }
-  const started = performance.now();
-  let seen: string | undefined, since = started;
-  for (;;) {
-    try { symlinkSync(mine, lock); break; } catch (error) {
-      if (errnoOf(error) !== 'EEXIST') throw new ModelError('storage_failed');
-    }
-    const now = performance.now();
-    if (now - started > LOCK_WAIT_MS) throw new ModelError('timeout');
-    // '' stands for something that is no link at all, watched like a holder without a name; undefined for a lock that
-    // vanished between the two looks.
-    let holder: string | undefined;
-    try { holder = readlinkSync(lock); } catch (error) {
-      if (errnoOf(error) === 'EINVAL') holder = '';
-      else if (errnoOf(error) !== 'ENOENT') throw new ModelError('storage_failed');
-    }
-    if (holder === undefined || holder !== seen) { seen = holder; since = now; }
-    else if (now - since > HOLD_MS) { takeOver(lock, holder, mine); seen = undefined; continue; }
-    await sleep(holder === undefined ? 10 : 100);
-  }
-  let result: T;
-  try { result = await fn(); } catch (error) {
-    release(lock, mine, false);
-    throw error;
-  }
-  release(lock, mine, true);
-  return result;
-}
-
-// Takes away the lock of a holder that is gone. Renaming moves it out from under every waiter at once, and only a
-// link that names the watched holder is then removed. A lock made in between belongs to a live holder and gets its
-// name back, unless another lock stands there by now. Anything that is no link, or cannot be read, is never deleted:
-// it goes back under a second name or stays under the new one. One case stays open: a third process making its own
-// lock in the microseconds before a lock is put back.
-function takeOver(lock: string, holder: string, mine: string) {
-  const taken = `${lock}.${mine}`;
-  try { renameSync(lock, taken); } catch (error) {
-    // The holder let it go, or another waiter was first.
-    if (errnoOf(error) === 'ENOENT') return;
+  const lock = `${path}.renew.sqlite`;
+  let database: DatabaseSync;
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const mode = ((statSync(path, { throwIfNoEntry: false })?.mode ?? 0o600) & 0o777) | 0o200;
+    // Closing any descriptor of this file drops this process's locks on it. Open our own only to create a file
+    // that did not exist, so no other connection of this process can hold its lock yet.
+    try {
+      const file = openSync(lock, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, mode);
+      try { fchmodSync(file, mode); } finally { closeSync(file); }
+    } catch (error) { if (errnoOf(error) !== 'EEXIST') throw error; }
+    database = new DatabaseSync(lock, { timeout: 0 });
+  } catch (error) {
+    if (!errnoOf(error) && sqliteCode(error) === null) throw error;
     throw new ModelError('storage_failed');
   }
-  let moved: string | undefined;
-  try { moved = readlinkSync(taken); } catch (error) {
-    if (errnoOf(error) === 'EINVAL') moved = '';
-  }
+  const started = performance.now();
+  let held = false;
   try {
-    if (moved) {
-      if (moved !== holder) {
-        try { symlinkSync(moved, lock); } catch (error) {
-          if (errnoOf(error) !== 'EEXIST') throw error;
+    for (;;) {
+      if (performance.now() - started > LOCK_WAIT_MS) throw new ModelError('timeout');
+      try { database.exec('BEGIN EXCLUSIVE'); held = true; break; } catch (error) {
+        if (sqliteCode(error) !== 5) {
+          if (sqliteCode(error) === null) throw error;
+          throw new ModelError('storage_failed');
         }
       }
-      unlinkSync(taken);
-      return;
+      await sleep(100);
     }
-    // What was watched as no link stays under its new name, out of the way.
-    if (moved === holder) return;
-    // No link where one was watched, or an entry that cannot be read: put back, and a failure either way.
-    linkSync(taken, lock);
-    unlinkSync(taken);
-  } catch { /* what could not be put back stays under the new name */ }
-  throw new ModelError('storage_failed');
-}
-
-// A holder removes only its own lock: one that was taken over is someone else's by now. A lock that cannot be removed
-// is a failure when the work itself went well, and stays behind the work's own failure otherwise.
-function release(lock: string, mine: string, strict: boolean) {
-  try { if (readlinkSync(lock) === mine) unlinkSync(lock); } catch (error) {
-    if (strict && errnoOf(error) !== 'ENOENT' && errnoOf(error) !== 'EINVAL') throw new ModelError('storage_failed');
+    return await fn();
+  } finally {
+    try { if (held) database.exec('ROLLBACK'); } catch (error) {
+      if (sqliteCode(error) === null) throw error;
+      throw new ModelError('storage_failed');
+    } finally { database.close(); }
   }
 }
 
@@ -313,7 +297,7 @@ export function responsesBody(request: Request) {
 // A failure the API names, before a stream or inside one. A plan or an app limit that is used up is `budget_exceeded`:
 // the caller stops, and nothing here asks for more.
 const failure = (code: unknown, httpStatus?: number, param?: unknown) => new ModelError(
-  code === 'subscription_sharing_usage_limit_exceeded' ? 'budget_exceeded'
+  httpStatus === 402 || code === 'subscription_sharing_usage_limit_exceeded' ? 'budget_exceeded'
     : code === 'subscription_sharing_usage_unavailable' || code === 'subscription_sharing_user_unavailable' ? 'model_unavailable'
       : code === 'subscription_sharing_unsupported_capability' ? 'invalid_request'
         : code === 'context_length_exceeded' ? 'context_limit'
@@ -369,6 +353,7 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
     async respond(request: Request, { onText = async () => {}, signal, timeoutMs = 180_000 }: Controls = {}): Promise<Result> {
       const sent = responsesBody(request), body = JSON.stringify(sent);
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
+      const until = performance.now() + timeoutMs;
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
       const current = signal ? AbortSignal.any([signal, timer]) : timer;
       if (signal?.aborted) throw new ModelError('cancelled');
@@ -376,70 +361,87 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       // meanwhile: a new pair that could not be written must not look like a time limit.
       const token = await accessToken().catch(error => { throw error instanceof ModelError ? error : new ModelError('internal_error'); });
       try {
-        current.throwIfAborted();
-        // The plan's route takes no output limit (`max_output_tokens` is refused); the length of the text is checked here.
-        // The caller's name for the player goes as the cache key of the body and as the session of the two headers:
-        // with the three the route read from its cache in 8 or 9 requests of 20, and with none in 1 to 3.
-        const response = await fetcher(`${API}/responses`, { method: 'POST', redirect: 'error', signal: current, body,
-          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'text/event-stream',
-            ...(request.cache ? { 'session-id': request.cache, 'x-client-request-id': request.cache } : {}) } });
-        if (!response.ok) {
-          const refusal = await jsonOf(response).catch(() => null);
-          throw failure(errorCodeOf(refusal), response.status, paramOf(refusal));
-        }
-        // The plan's route names no content type for its stream. A type that is named must be a stream's, and only
-        // the closing event below makes an answer of what is read.
-        const type = response.headers.get('content-type');
-        if (type !== null && !type.includes('text/event-stream')) {
-          await response.body?.cancel();
-          throw new ModelError('invalid_stream');
-        }
-        let text = '';
-        let completed: StreamEvent | undefined;
-        // Every delta is an event of some 300 bytes, and the closing event repeats the whole answer.
-        for await (const data of events(response.body, MAX_STREAM)) {
-          if (data === '[DONE]') break;
-          let event: StreamEvent;
-          try { event = JSON.parse(data); } catch { throw new ModelError('invalid_stream'); }
-          if (!isObject(event)) throw new ModelError('invalid_stream');
-          if (event.type === 'error') throw failure(event.code ?? event.error?.code, undefined, event.param ?? event.error?.param);
-          // Nobody is moved to another model unnoticed: an event that names the model that answers must name the one
-          // asked for. An event that names none leaves nothing to compare.
-          const answering = isObject(event.response) ? event.response.model : undefined;
-          if (typeof answering === 'string' && answering && answering !== sent.model) throw new ModelError('wrong_model');
-          if (event.type === 'response.failed') throw failure(event.response?.error?.code, undefined, event.response?.error?.param);
-          // The service declined to write: it says so in events of its own, by an answer its content filter stopped,
-          // or in a part of the closing event. Its words are never kept, like the text of any failure.
-          if (event.type === 'response.refusal.delta' || event.type === 'response.refusal.done') throw new ModelError('declined');
-          // An answer that stopped short is no answer, whatever was written by then.
-          const stopped = event.response?.incomplete_details?.reason;
-          if (event.type === 'response.incomplete') throw new ModelError(stopped === 'max_output_tokens' ? 'output_limit' : stopped === 'content_filter' ? 'declined' : 'incomplete_stream');
-          // No tools are sent, so an item of any other kind than these is not an answer.
-          if (event.type === 'response.output_item.added' && !PASSIVE_ITEMS.includes(event.item?.type as string)) throw new ModelError('unexpected_tools');
-          if (event.type === 'response.output_text.delta') {
-            if (typeof event.delta !== 'string') throw new ModelError('invalid_stream');
-            text += event.delta;
-            if (text.length > MAX_TEXT) throw new ModelError('output_limit');
-            await onText(event.delta);
+        return await untilStopped(async () => {
+          current.throwIfAborted();
+          // The plan's route takes no output limit (`max_output_tokens` is refused); the length of the text is checked here.
+          // The caller's name for the player goes as the cache key of the body and as the session of the two headers:
+          // with the three the route read from its cache in 8 or 9 requests of 20, and with none in 1 to 3.
+          const response = await fetcher(`${API}/responses`, { method: 'POST', redirect: 'error', signal: current, body,
+            headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'text/event-stream',
+              ...(request.cache ? { 'session-id': request.cache, 'x-client-request-id': request.cache } : {}) } });
+          if (response.status === 402) {
+            if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
+            throw failure(undefined, 402);
           }
-          // The closing event ends the reading at once: a connection left open after it is not waited for.
-          if (event.type === 'response.completed') { completed = event; break; }
-        }
-        current.throwIfAborted();
-        // Only the closing event makes an answer: a limit can end a stream that has already begun.
-        if (!completed) throw new ModelError('incomplete_stream');
-        const output = completed.response?.output;
-        if (Array.isArray(output) && output.some(item => isObject(item) && Array.isArray(item.content) && item.content.some(part => isObject(part) && part.type === 'refusal'))) throw new ModelError('declined');
-        if (!text.trim()) throw new ModelError('empty_response');
-        // input_tokens includes the cached part, output_tokens the reasoning.
-        const usage = completed.response?.usage;
-        const inputTokens = count(usage?.input_tokens), outputTokens = count(usage?.output_tokens);
-        return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
-          cachedInputTokens: count(usage?.input_tokens_details?.cached_tokens), outputTokens,
-          reasoningTokens: count(usage?.output_tokens_details?.reasoning_tokens) } };
+          if (!response.ok) {
+            const refusal = await jsonOf(response).catch(() => null);
+            throw failure(errorCodeOf(refusal), response.status, paramOf(refusal));
+          }
+          // The plan's route names no content type for its stream. A type that is named must be a stream's, and only
+          // the closing event below makes an answer of what is read.
+          const type = response.headers.get('content-type');
+          if (type !== null && !type.includes('text/event-stream')) {
+            if (!response.body?.locked) await response.body?.cancel();
+            throw new ModelError('invalid_stream');
+          }
+          let text = '';
+          let completed: StreamEvent | undefined;
+          // Every delta is an event of some 300 bytes, and the closing event repeats the whole answer.
+          for await (const data of events(response.body, MAX_STREAM)) {
+            if (data === '[DONE]') break;
+            let event: StreamEvent;
+            try { event = JSON.parse(data); } catch (error) {
+              if (error instanceof SyntaxError) throw new ModelError('invalid_stream');
+              throw error;
+            }
+            if (!isObject(event)) throw new ModelError('invalid_stream');
+            if (event.type === 'error') throw failure(event.code ?? event.error?.code, undefined, event.param ?? event.error?.param);
+            // Nobody is moved to another model unnoticed: an event that names the model that answers must name the one
+            // asked for. An event that names none leaves nothing to compare.
+            const answering = isObject(event.response) ? event.response.model : undefined;
+            if (typeof answering === 'string' && answering && answering !== sent.model) throw new ModelError('wrong_model');
+            if (event.type === 'response.failed') throw failure(event.response?.error?.code, undefined, event.response?.error?.param);
+            // The service declined to write: it says so in events of its own, by an answer its content filter stopped,
+            // or in a part of the closing event. Its words are never kept, like the text of any failure.
+            if (event.type === 'response.refusal.delta' || event.type === 'response.refusal.done') throw new ModelError('declined');
+            // An answer that stopped short is no answer, whatever was written by then.
+            const stopped = event.response?.incomplete_details?.reason;
+            if (event.type === 'response.incomplete') throw new ModelError(stopped === 'max_output_tokens' ? 'output_limit' : stopped === 'content_filter' ? 'declined' : 'incomplete_stream');
+            // No tools are sent, so an item of any other kind than these is not an answer.
+            if (event.type === 'response.output_item.added' && !PASSIVE_ITEMS.includes(event.item?.type as string)) throw new ModelError('unexpected_tools');
+            if (event.type === 'response.output_text.delta') {
+              if (typeof event.delta !== 'string') throw new ModelError('invalid_stream');
+              text += event.delta;
+              if (text.length > MAX_TEXT) throw new ModelError('output_limit');
+              await untilStopped(() => onText(event.delta as string), current, until);
+            }
+            // The closing event ends the reading at once: a connection left open after it is not waited for.
+            if (event.type === 'response.completed') { completed = event; break; }
+          }
+          current.throwIfAborted();
+          // Only the closing event makes an answer: a limit can end a stream that has already begun.
+          if (!completed) throw new ModelError('incomplete_stream');
+          if (!isObject(completed.response) || Array.isArray(completed.response)) throw new ModelError('invalid_stream');
+          const output = completed.response.output;
+          if (output !== undefined && !Array.isArray(output)) throw new ModelError('invalid_stream');
+          if (Array.isArray(output) && output.some(item => !isObject(item) || !PASSIVE_ITEMS.includes(item.type as string))) throw new ModelError('unexpected_tools');
+          if (Array.isArray(output) && output.some(item => isObject(item) && Array.isArray(item.content) && item.content.some(part => isObject(part) && part.type === 'refusal'))) throw new ModelError('declined');
+          if (Array.isArray(output)) {
+            const parts = output.flatMap(item => isObject(item) && Array.isArray(item.content) ? item.content : []);
+            const closing = parts.filter(part => isObject(part) && part.type === 'output_text');
+            if (closing.some(part => typeof part.text !== 'string') || (closing.length && closing.map(part => part.text).join('') !== text)) throw new ModelError('invalid_stream');
+          }
+          if (!text.trim()) throw new ModelError('empty_response');
+          // input_tokens includes the cached part, output_tokens the reasoning.
+          const usage = completed.response?.usage;
+          const inputTokens = count(usage?.input_tokens), outputTokens = count(usage?.output_tokens);
+          return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
+            cachedInputTokens: count(usage?.input_tokens_details?.cached_tokens), outputTokens,
+            reasoningTokens: count(usage?.output_tokens_details?.reasoning_tokens) } };
+        }, current, until);
       } catch (error) {
         if (signal?.aborted) throw new ModelError('cancelled');
-        if (timer.aborted) throw new ModelError('timeout');
+        if (timer.aborted || performance.now() >= until) throw new ModelError('timeout');
         throw error instanceof ModelError ? error : new ModelError('provider_failed');
       }
     },

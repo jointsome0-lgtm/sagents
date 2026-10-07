@@ -452,3 +452,35 @@ What comes of it?` }] });
   // A person under the id of its place would share one list of things with it, so a world file that gives one is refused.
   assert.throws(() => readWorld({ title: 'T', about: 'A.', clock: '09:00', places: [{ id: 'red', name: 'Red', about: 'Red.' }], characters: [{ id: 'red', name: 'Anna', place: 'red', sheet: 'S' }] }), /`characters\[0\]\.id` repeats an id/);
 });
+
+test('world settings cannot overflow a duration or poison the replay of a move', () => {
+  const file = { title: 'Two places', about: 'A world.', clock: '09:00',
+    places: [{ id: 'p', name: 'P', about: 'P.' }, { id: 'q', name: 'Q', about: 'Q.' }],
+    characters: [{ id: 'a', name: 'A', place: 'p', sheet: 'S.' }] };
+  for (const patch of [{ travelMinutes: 1e308 }, { travelMinutes: (1e12 + 60) / 60 }, { wordsPerMinute: 1e-308 }, { wordsPerMinute: Infinity },
+    { walkMetresPerMinute: 1e-308, places: [{ ...file.places[0], at: [0, 0] }, { ...file.places[1], at: [1, 0] }] },
+    { tiredHours: 1e308 }, { spentHours: (1e12 + 3600) / 3600 }, { places: [{ ...file.places[0], minutesTo: { q: 1e308 } }, file.places[1]] },
+    { places: [{ ...file.places[0], at: [Infinity, 0] }, file.places[1]] },
+    { places: [{ ...file.places[0], at: [1e308, 0] }, { ...file.places[1], at: [-1e308, 0] }] },
+    { walkMetresPerMinute: 1, places: [{ ...file.places[0], at: [0, 0] }, { ...file.places[1], at: [1e12, 0] }] },
+    { places: [{ ...file.places[0], things: [{ name: 'Key', hidden: { spot: 'Under the floor.', minutes: 1e308 } }] }, file.places[1]] },
+    { weather: { seed: 1, states: [{ text: 'Clear.' }, { text: 'Rain.' }], minutes: [1, Number.MAX_SAFE_INTEGER] } },
+    { weather: { start: { text: 'Clear.' }, changes: [{ day: Number.MAX_SAFE_INTEGER, at: '09:00', text: 'Rain.' }] } }]) {
+    assert.throws(() => readWorld({ ...file, ...patch }), /The world file cannot be used/);
+  }
+  for (const [patch, seconds] of [[{ travelMinutes: 2880 }, 172_800], [{ travelMinutes: 0.01 }, 1], [{ travelMinutes: 1e12 / 60 }, 1e12],
+    [{ places: [{ ...file.places[0], minutesTo: { q: 2880 } }, file.places[1]] }, 172_800],
+    [{ places: [{ ...file.places[0], minutesTo: { q: 0.01 } }, file.places[1]] }, 1],
+    [{ places: [{ ...file.places[0], at: [0, 0] }, { ...file.places[1], at: [230_400, 0] }] }, 172_800],
+    [{ walkMetresPerMinute: 0.5, places: [{ ...file.places[0], at: [2_000_000, 0] }, { ...file.places[1], at: [2_000_010, 0] }] }, 1200],
+    [{ wordsPerMinute: 0.5, tiredHours: 200, spentHours: 240,
+      places: [{ ...file.places[0], things: [{ name: 'Key', hidden: { spot: 'Under the floor.', minutes: 1500 } }] }, file.places[1]],
+      weather: { seed: 1, states: [{ text: 'Clear.' }, { text: 'Rain.' }], minutes: [2880, 2880] } }, 300],
+    [{ walkMetresPerMinute: 1e-308, weather: { start: { text: 'Clear.' }, changes: [{ day: 36_501, at: '09:00', text: 'Rain.' }] } }, 300]] as const) {
+    const world = readWorld({ ...file, ...patch }), state = begin(world);
+    const record: Record = { kind: 'act', who: 'a', at: 0, limit: 65, action: readAction(world, state.people[0], act('go', { place: 'q' })) };
+    const event = advance(world, state, record);
+    assert.equal(event.seconds, seconds);
+    assert.deepEqual(replay(world, JSON.parse(JSON.stringify([{ seq: 0, record, event, by: 'stand-in' }]))).people, state.people);
+  }
+});

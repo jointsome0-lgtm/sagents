@@ -1,7 +1,7 @@
 // The world of the `live` mode as its file gives it and as a run holds it, with no model in it: named places, who is
 // where, and the events of a run. The rules are next to it: the clock and the distances in `time.ts`, what a
 // resident does in `action.ts`, and what the world answers to a deed or for a figure in `answer.ts`.
-import { boundedOf, amountOf, countOf, isObject, listOf, MAX_FACTS, refuse, textOf, TIME } from './reading.ts';
+import { boundedOf, amountOf, countOf, durationOf, isObject, listOf, MAX_FACTS, refuse, textOf, TIME } from './reading.ts';
 import { all, MAX_IN_PLACE, MAX_ON_PERSON, readThings, SINKS } from './things.ts';
 import type { Posting, Thing } from './things.ts';
 import type { Sleep } from './sleep.ts';
@@ -96,6 +96,10 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   if (!isObject(value)) return refuse('the file', 'must be a JSON object');
   if (typeof value.clock !== 'string' || !TIME.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
   if (value.remote !== undefined && value.remote !== null) textOf(value.remote, 'remote');
+  const walkMetresPerMinute = amountOf(value.walkMetresPerMinute, 'walkMetresPerMinute', 80);
+  const wordsPerMinute = amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), travelMinutes = amountOf(value.travelMinutes, 'travelMinutes', 5);
+  durationOf(Math.max(2, Math.ceil(MAX_WORDS / wordsPerMinute * 60)), 'wordsPerMinute');
+  durationOf(Math.max(1, Math.round(travelMinutes * 60)), 'travelMinutes');
   const places: Place[] = [], taken: string[] = [], labels = { next: 1 }, longWords = countOf(value.longWords, 'longWords', 400);
   const within = (things: Thing[], most: number, field: string) => all(things).length <= most ? things : refuse(field, `must hold ${most} things at most, with all that they hold`);
   for (const [index, place] of listOf(value.places, 'places').entries()) {
@@ -116,9 +120,13 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     });
     const at = place.at === undefined || place.at === null ? null : place.at;
     if (at !== null && !(Array.isArray(at) && at.length === 2 && at.every(part => typeof part === 'number' && Number.isFinite(part)))) {
-      return refuse(`${field}.at`, 'must be two numbers, the metres east and north');
+      return refuse(`${field}.at`, 'must be two finite numbers, the metres east and north');
     }
-    const minutesTo = Object.fromEntries(Object.entries(place.minutesTo ?? {}).map(([to, minutes]) => [to, amountOf(minutes ?? null, `${field}.minutesTo.${to}`, 0)]));
+    const minutesTo = Object.fromEntries(Object.entries(place.minutesTo ?? {}).map(([to, value]) => {
+      const name = `${field}.minutesTo.${to}`, minutes = amountOf(value ?? null, name, 0);
+      durationOf(Math.max(1, Math.round(minutes * 60)), name);
+      return [to, minutes];
+    }));
     places.push({ id: idOf(place.id, `${field}.id`, taken), name: textOf(place.name, `${field}.name`),
       about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
       things: within(readThings(place.things, `${field}.things`, labels, true), MAX_IN_PLACE, `${field}.things`), open: place.open === true, clock: place.clock === true,
@@ -127,6 +135,14 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   for (const [index, place] of places.entries()) {
     const unknown = Object.keys(place.minutesTo).find(to => to === place.id || !places.some(known => known.id === to));
     if (unknown !== undefined) return refuse(`places[${index}].minutesTo.${unknown}`, 'must name another place of the list');
+    for (const other of places) if (other !== place && place.at && other.at) {
+      const distance = Math.hypot(place.at[0] - other.at[0], place.at[1] - other.at[1]);
+      if (!Number.isFinite(distance)) return refuse(`places[${index}].at`, 'must have finite distances to every other place');
+      if (place.minutesTo[other.id] === undefined && other.minutesTo[place.id] === undefined) {
+        const walked = distance / walkMetresPerMinute, paced = walked > 10 ? Math.round(walked) : Math.round(walked * 10) / 10;
+        durationOf(Math.max(1, Math.round(paced * 60)), `places[${index}].at`);
+      }
+    }
     const stray = place.nextDoor.findIndex(to => to === place.id || !places.some(known => known.id === to));
     if (stray !== -1) return refuse(`places[${index}].nextDoor[${stray}]`, 'must name another place of the list');
   }
@@ -151,9 +167,9 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     for (const [at, figure] of place.figures.entries()) idOf(figure.id, `places[${index}].figures[${at}].id`, taken);
   }
   return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
-    wordsPerMinute: amountOf(value.wordsPerMinute, 'wordsPerMinute', 130), remote: typeof value.remote === 'string' ? value.remote : null,
-    travelMinutes: amountOf(value.travelMinutes, 'travelMinutes', 5),
-    walkMetresPerMinute: amountOf(value.walkMetresPerMinute, 'walkMetresPerMinute', 80), shortWords: countOf(value.shortWords, 'shortWords', 2000),
+    wordsPerMinute, remote: typeof value.remote === 'string' ? value.remote : null,
+    travelMinutes,
+    walkMetresPerMinute, shortWords: countOf(value.shortWords, 'shortWords', 2000),
     longWords, places, characters };
 }
 

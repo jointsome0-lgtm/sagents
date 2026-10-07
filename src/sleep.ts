@@ -1,7 +1,7 @@
 // Sleep debt, a law of a live world in the form of `laws.ts`: how long everyone has been awake, how that feels, and
 // the falling asleep of someone who stayed awake to the limit. No model and no disk here.
 import type { Law } from './laws.ts';
-import { amountOf, refuse, TIME } from './reading.ts';
+import { amountOf, durationOf, refuse, TIME } from './reading.ts';
 import { awakeIn } from './action.ts';
 import { clockAt, secondsUntil, timeFor } from './time.ts';
 import type { Person, World } from './world.ts';
@@ -38,6 +38,8 @@ export const sleep: Law<'sleep', 'debts'> = {
     const dayStart = file.dayStart ?? '07:00';
     if (typeof dayStart !== 'string' || !TIME.test(dayStart)) return refuse('dayStart', 'must be a time of day like `07:00`');
     const tiredHours = amountOf(file.tiredHours, 'tiredHours', 16), spentHours = amountOf(file.spentHours, 'spentHours', 24);
+    durationOf(Math.ceil(tiredHours * 3600), 'tiredHours');
+    durationOf(Math.ceil(spentHours * 3600), 'spentHours');
     if (spentHours < tiredHours) return refuse('spentHours', 'must not be less than `tiredHours`');
     return { sleep: { dayStart, tiredHours, spentHours } };
   },

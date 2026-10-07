@@ -47,10 +47,11 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
     ...(index < PLACES - 1 ? { at: [index * 150, index % 2 * 2000] } : {}), open: index % 2 === 1, clock: index % 3 === 0,
     facts: `facts-p${index}-0`,
     // Each place has things that are counted, among them money, food and what burns, two supplies with no count,
-    // things that hold others, and things with states, one of which is a fire while it is lit.
+    // things that hold others, and things with states. Some places have a permanent fire, some a stove that
+    // can go out, and some no fire at all.
     things: [{ name: `rack-p${index}`, fixed: true, open: true, holds: [{ name: 'coin', n: 40, money: true }, { name: 'bread', n: 30, food: 50, facts: 'lore-bread' }, { name: 'log', n: 30, burns: true },
       { name: `cup-p${index}`, holds: [] }, { name: `tool-p${index}`, facts: `lore-p${index}-tool` }] },
-    { name: `stove-p${index}`, fixed: true, states: ['lit', 'out'], state: 'lit', fire: 'lit' }, { name: `torch-p${index}`, fixed: true, fire: true },
+    { name: `stove-p${index}`, fixed: true, states: ['lit', 'out'], state: 'lit', fire: index % 2 === 0 ? 'lit' : false }, { name: `torch-p${index}`, fixed: true, fire: index % 3 === 0 },
     { name: `gate-p${index}`, fixed: true, states: ['open', 'shut', 'ajar'] }, { name: 'wood', stock: true, burns: true }, { name: 'water', stock: true, food: 0, facts: 'lore-water' },
     // Three things are hidden in every place: one that a few minutes of searching find, one that takes half an hour,
     // and one that no search here lasts long enough for.
@@ -91,6 +92,7 @@ export const LAWS = {
   spent: 'Nobody acts after being awake for the world\'s limit: at that turn it falls asleep instead.',
   body: 'How a person is placed changes only by the world\'s answer to a deed done in the place where it is; a pose is also dropped when its owner leaves or falls asleep.',
   kept: 'A thing is where the postings of events put it and nowhere else, and the world is told of exactly those of its place and of the people there: a record has one holder, lies no deeper than four under a person or a place, a person carries thirty records at most and a place holds sixty, and for every name what there is, what was eaten or burned and what was taken from a supply add up to what the world file gave; the sum of money never changes.',
+  burning: 'Nothing burns without a fire in the place or on someone there, before the answer changes any states.',
   moved: 'An answer of the world moves only what is in its place or on the people there, to them, into that place or, for a deed, out of the world by being eaten or burned; an answer that the rules refuse changes nothing, and so does one whose moves are all to where their things already are, which is refused.',
   unseen: 'No resident is sent a label, what lies inside a thing that another person carries and that is not open, what is hidden in a place before it is found, the facts of the people of a place whom nobody plays, or the looks or pose of a person in another place.',
   reply: 'Someone of a place whom nobody plays speaks only in answer to a speech addressed to it in its place, once and right after that speech.',
@@ -282,10 +284,12 @@ test('thousands of steps of any answers leave a journal in which every law of th
   // `given` is how many there were of each name at the start, `sunk` what was eaten or burned and `taken` what came
   // from a supply.
   const ledger = new Map<string, { name: string; n: number | null; holder: string; stock: boolean; money: boolean; facts: string | null }>();
+  const fires = new Map<string, { fire: Thing['fire']; state: string | null }>();
   const given = new Map<string, number>(), sunk = new Map<string, number>(), taken = new Map<string, number>();
   const more = (sums: Map<string, number>, name: string, n: number) => sums.set(name, (sums.get(name) ?? 0) + n);
   const enter = (things: Thing[], holder: string) => {
     for (const thing of things) {
+      if (thing.fire) fires.set(thing.label, { fire: thing.fire, state: thing.state });
       ledger.set(thing.label, { name: thing.name, n: thing.n, holder, stock: thing.stock, money: thing.money, facts: thing.facts });
       if (!thing.stock) more(given, thing.name, thing.n ?? 1);
       enter(thing.holds ?? [], thing.label);
@@ -437,6 +441,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
     }
     if (record.kind === 'result') {
       const beside = (id: string) => !away.has(id) && neighbours(event.place).includes(place.get(id)!), said = seen.said.get(seq);
+      law('waking', isDeepStrictEqual(event.wakes, record.wakes), seq);
       for (const id of record.wakes) {
         law('waking', asleep.has(id) && (place.get(id) === event.place || beside(id)), seq);
         sleepEnds.set(id, Math.min(sleepEnds.get(id)!, before.at + before.seconds));
@@ -512,6 +517,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
       law('kept', thing?.holder === posting.from && thing.name === posting.name && thing.stock === posting.stock, seq);
       law('kept', posting.n === null ? thing.n === null && !thing.stock : thing.stock || (posting.n >= 1 && posting.n <= thing.n!), seq);
       law('moved', here(posting.from) && (gone ? record.kind === 'result' && posting.as === null && !thing.money : here(posting.to)), seq);
+      if (posting.to === 'burned') law('burning', [...fires].some(([label, thing]) => here(label) && (thing.fire === true || thing.fire === thing.state)), seq);
       if (thing.stock) more(taken, thing.name, amount);
       else if (thing.n !== null && thing.n > amount) thing.n -= amount;
       else ledger.delete(posting.what);
@@ -523,6 +529,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
       } else ledger.set(posting.as!, { name: thing.name, n: posting.n, holder: posting.to, stock: false, money: thing.money, facts: thing.facts });
       count[gone ? posting.to as 'eaten' | 'burned' : thing.stock ? 'taken' : twin ? 'joined' : posting.as !== posting.what ? 'parted' : 'moved'] += 1;
     }
+    for (const entry of event.set ?? []) if (fires.has(entry.what)) fires.get(entry.what)!.state = entry.state;
     if (event.moved?.length) {
       const held = new Map<string, number>();
       for (const label of ledger.keys()) {

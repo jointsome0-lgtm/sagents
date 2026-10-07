@@ -4,7 +4,7 @@
 // file or a chapter sends a sheet or a narrator's own thread to the page, and a token in the arguments of a process
 // can be read by anyone on the computer.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -147,4 +147,22 @@ test('the browser is handed a file that only the user can read, never the addres
   // A computer with no command to open a browser is no failure.
   const none = openInBrowser(url, () => { throw Object.assign(new Error('spawn'), { code: 'ENOENT' }); });
   none.remove();
+});
+
+test('a retained follower reads no events, usage or names from a path replaced by an outside link', () => {
+  const { root, outside } = folders(), lab = openLab(root, { fresh: 60_000 });
+  const followed = lab.follow('day/kept', 'part1');
+  followed.poll();
+  for (const name of ['part1.events.jsonl', 'usage-part1.jsonl', 'world.json']) {
+    const path = join(root, 'day/kept', name);
+    unlinkSync(path);
+    symlinkSync(join(outside, 'secret.events.jsonl'), path);
+  }
+  assert.ok(!JSON.stringify(followed.poll()).includes('OUTSIDE-THE-ROOT'));
+  assert.ok(!JSON.stringify(lab.world('day/kept')).includes('OUTSIDE-THE-ROOT'));
+  // A replaced parent directory must not turn the saved event path into an outside path either.
+  renameSync(join(root, 'day/scenes'), join(root, 'day/saved'));
+  symlinkSync(outside, join(root, 'day/scenes'));
+  writeFileSync(join(outside, 'a.events.jsonl'), event(1, 'nina', 'OUTSIDE-THE-ROOT'));
+  assert.ok(!JSON.stringify(lab.part('day/scenes/a', 'a')).includes('OUTSIDE-THE-ROOT'));
 });

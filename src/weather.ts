@@ -2,7 +2,7 @@
 // the world file or its environment gives it. Nothing here is asked of a model and nothing is drawn by chance at run
 // time: the same settings always give the same weather at the same moment. No model and no disk here.
 import type { Law } from './laws.ts';
-import { boundedOf, CHARS_PER_WORD, closed, countOf, isObject, listOf, refuse, secondsOfDay, textOf, TIME } from './reading.ts';
+import { boundedOf, CHARS_PER_WORD, closed, countOf, durationOf, isObject, listOf, refuse, secondsOfDay, textOf, TIME } from './reading.ts';
 import { attend } from './action.ts';
 import { clockAt, timeFor } from './time.ts';
 
@@ -37,6 +37,8 @@ function readWeather(value: unknown, clock: string): Weather | null {
     const span: unknown[] = Array.isArray(value.minutes) ? value.minutes : [];
     const least = countOf(span[0] ?? null, 'weather.minutes[0]', 0), most = countOf(span[1] ?? null, 'weather.minutes[1]', 0);
     if (span.length !== 2 || most < least) return refuse('weather.minutes', 'must be two whole numbers, the least and the most minutes a state lasts');
+    durationOf(least * 60, 'weather.minutes[0]');
+    durationOf(most * 60, 'weather.minutes[1]');
     return { seed: value.seed, states, minutes: [least, most] };
   }
   const changes: (Sky & { at: number })[] = [];
@@ -47,6 +49,7 @@ function readWeather(value: unknown, clock: string): Weather | null {
     const day = countOf(change.day ?? null, `${field}.day`, 0);
     if (typeof change.at !== 'string' || !TIME.test(change.at)) return refuse(`${field}.at`, 'must be a time of day like `02:00`');
     const at = (day - 1) * 86_400 + secondsOfDay(change.at) - secondsOfDay(clock);
+    durationOf(at, `${field}.day`);
     if (at <= (changes.at(-1)?.at ?? 0)) return refuse(field, 'must come after the story\'s start and after the change before it');
     changes.push({ ...skyOf(change, field), at });
   }

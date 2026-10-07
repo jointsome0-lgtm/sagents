@@ -2,8 +2,9 @@
 // These are here because a mistake in this file loses a session or shows a token; the rest of sagents is not tested this way.
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, lstatSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -371,4 +372,77 @@ test('a sign-in that cannot be verified, was declined or lacks the plan permissi
   assert.equal(asked.address.searchParams.get('prompt'), 'consent');
   assert.deepEqual(asked.result, { value: { planUse: true } });
   assert.equal((await attempt(path)).address.searchParams.get('prompt'), null);
+});
+
+test('a closing event must hold a response, no tool call, and the same text as its pieces', async () => {
+  const path = join(folder(), 'chatgpt.json');
+  account(path);
+  const closing = (response: unknown) => sse([{ type: 'response.output_text.delta', delta: 'ok' }, { type: 'response.completed', response }]);
+  for (const [response, code] of [[null, 'invalid_stream'], [undefined, 'invalid_stream'],
+    [{ output: [{ type: 'function_call', name: 'look' }] }, 'unexpected_tools'],
+    [{ output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok missing tail' }] }] }, 'invalid_stream']] as const) {
+    await assert.rejects(createChatgpt({ path, fetch: async () => closing(response) }).respond(request), { code });
+  }
+  assert.equal((await createChatgpt({ path, fetch: async () => closing({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }] }) }).respond(request)).text, 'ok');
+});
+
+test('a limit or an abort ends a text callback even when it never settles', async () => {
+  const path = join(folder(), 'chatgpt.json');
+  account(path);
+  const { respond } = createChatgpt({ path, fetch: async () => answer('ok') });
+  const held = setTimeout(() => {}, 1000);
+  try {
+    await assert.rejects(respond(request, { timeoutMs: 20, onText: () => new Promise(() => {}) }), { code: 'timeout' });
+    await assert.rejects(respond(request, { timeoutMs: 20, onText: () => { const until = performance.now() + 30; while (performance.now() < until) {} } }), { code: 'timeout' });
+    const stopped = new AbortController();
+    await assert.rejects(respond(request, { signal: stopped.signal, onText: () => { stopped.abort(); return new Promise(() => {}); } }), { code: 'cancelled' });
+  } finally { clearTimeout(held); }
+});
+
+test('waiting renewals keep a live holder and reuse the saved tokens, ignoring the old lock link', async context => {
+  const path = join(folder(), 'chatgpt.json'), lock = `${path}.renew.sqlite`;
+  account(path, { expiresAt: Date.now() - 1000 });
+  fs.symlinkSync('dead', `${path}.lock`);
+  let clock = 0, refreshes = 0;
+  let ready: () => void = () => {}, finish: () => void = () => {};
+  const began = new Promise<void>(resolve => { ready = resolve; }), held = new Promise<void>(resolve => { finish = resolve; });
+  const fetcher = async (url: string) => {
+    if (!url.endsWith('/oauth/token')) return answer('ok');
+    refreshes += 1;
+    ready();
+    await held;
+    return refreshed();
+  };
+  const first = createChatgpt({ path, fetch: fetcher }), second = createChatgpt({ path, fetch: fetcher });
+  context.mock.method(performance, 'now', () => clock);
+  try {
+    const waiting = first.respond(request);
+    await began;
+    const other = second.respond(request);
+    clock = 61_000;
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(refreshes, 1);
+    finish();
+    assert.deepEqual((await Promise.all([waiting, other])).map(result => result.text), ['ok', 'ok']);
+    assert.equal(refreshes, 1);
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).refreshToken, 'REFRESH-NEW');
+    assert.equal(statSync(lock).mode & 0o777, statSync(path).mode & 0o777);
+    assert.equal(fs.readlinkSync(`${path}.lock`), 'dead');
+    assert.equal(lstatSync(`${path}.lock.guard`, { throwIfNoEntry: false }), undefined);
+    const holder = new DatabaseSync(lock, { timeout: 0 });
+    try {
+      holder.exec('BEGIN EXCLUSIVE');
+      account(path, { expiresAt: Date.now() - 1000 });
+      const timed = second.respond(request);
+      clock += 90_001;
+      await assert.rejects(timed, { code: 'timeout' });
+      assert.equal(refreshes, 1);
+      const stopped = new AbortController(), cancelled = first.respond(request, { signal: stopped.signal });
+      stopped.abort();
+      holder.exec('ROLLBACK');
+      await assert.rejects(cancelled, { code: 'cancelled' });
+      assert.equal(refreshes, 2);
+      assert.equal(JSON.parse(readFileSync(path, 'utf8')).refreshToken, 'REFRESH-NEW');
+    } finally { holder.close(); }
+  } finally { finish(); }
 });
