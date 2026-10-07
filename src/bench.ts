@@ -19,20 +19,20 @@ import { readWorld } from './laws.ts';
 const inMemory = process.argv.includes('--memory');
 const [people = 1000, places = 100, turns = 50] = process.argv.slice(2).filter(argument => argument !== '--memory').map(Number);
 const calls = people * turns;
-const source = JSON.stringify({ title: 'Город', about: 'Город из многих мест. '.repeat(10), clock: '08:00', remote: 'телефон', travelMinutes: 5,
+const source = JSON.stringify({ title: 'Town', about: 'A town of many places. '.repeat(10), clock: '08:00', remote: 'telephone', travelMinutes: 5,
   // A seeded series, and every other place under the open sky.
-  weather: { seed: 7, minutes: [5, 20], states: ['Ясно и тихо.', 'Идёт дождь.', 'Сильный ветер.'].map(text => ({ text, indoors: `За окном: ${text}` })) },
-  places: Array.from({ length: places }, (_, index) => ({ id: `p${index}`, name: `Место ${index}`, about: 'Обычное место в городе.',
-    things: [{ name: 'стол', fixed: true, open: true, holds: [{ name: 'ящик с инструментом', holds: [{ name: 'молоток' }] }] }, { name: 'скамья', fixed: true }, { name: 'скамья', fixed: true }], open: index % 2 === 1 })),
-  characters: Array.from({ length: people }, (_, index) => ({ id: `c${index}`, name: `Житель ${index}`, place: `p${index % places}`, sheet: 'Ты житель города. '.repeat(20),
-    looks: 'Человек средних лет в серой куртке.', pose: 'Стоит у стены.',
-    carries: [{ name: 'сумка', holds: [{ name: 'кошелёк', holds: [{ name: 'рубли', n: 500, money: true }] }, { name: 'ключи' }] }] })) });
+  weather: { seed: 7, minutes: [5, 20], states: ['Clear and still.', 'It is raining.', 'A strong wind.'].map(text => ({ text, indoors: `Outside the window: ${text}` })) },
+  places: Array.from({ length: places }, (_, index) => ({ id: `p${index}`, name: `Place ${index}`, about: 'An ordinary place in the town.',
+    things: [{ name: 'table', fixed: true, open: true, holds: [{ name: 'toolbox', holds: [{ name: 'hammer' }] }] }, { name: 'bench', fixed: true }, { name: 'bench', fixed: true }], open: index % 2 === 1 })),
+  characters: Array.from({ length: people }, (_, index) => ({ id: `c${index}`, name: `Resident ${index}`, place: `p${index % places}`, sheet: 'You are a resident of the town. '.repeat(20),
+    looks: 'A middle-aged person in a grey jacket.', pose: 'Stands by the wall.',
+    carries: [{ name: 'bag', holds: [{ name: 'wallet', holds: [{ name: 'rubles', n: 500, money: true }] }, { name: 'keys' }] }] })) });
 const world = readWorld(JSON.parse(source));
 
 let seed = 42;
 const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
-const speech = Array.from({ length: 20 }, (_, index) => `слово${index}`).join(' ');
-const memory = JSON.stringify({ memory: Array.from({ length: Math.ceil(world.longWords * 0.8) }, (_, index) => `память${index}`).join(' ') });
+const speech = Array.from({ length: 20 }, (_, index) => `word${index}`).join(' ');
+const memory = JSON.stringify({ memory: Array.from({ length: Math.ceil(world.longWords * 0.8) }, (_, index) => `memory${index}`).join(' ') });
 const none = { text: null, to: null, place: null, seconds: null, until: null, note: null };
 // The marks at a quarter, a half and the whole of the calls: the requests up to each, and the memory then.
 const marks = [calls / 4, calls / 2, calls].map(until => ({ until, characters: 0, largest: 0, rssMB: 0 }));
@@ -57,7 +57,7 @@ const respond = async (request: Request) => {
     return { text: memory, usage };
   }
   const roll = random();
-  const answer = roll < 0.55 ? { ...none, action: 'say', text: speech, note: 'заметка для себя' }
+  const answer = roll < 0.55 ? { ...none, action: 'say', text: speech, note: 'a note to self' }
     : roll < 0.6 ? { ...none, action: 'call', to: `c${Math.floor(random() * people)}`, text: speech }
       : roll < 0.7 ? { ...none, action: 'do', text: speech, seconds: 30 }
         : roll < 0.78 ? { ...none, action: 'wait', seconds: 30 }

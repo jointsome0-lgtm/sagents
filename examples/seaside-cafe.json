@@ -1,7 +1,7 @@
 {
-  "title": "Кафе у набережной",
-  "about": "Маленький приморский город в июле, середина дня. На набережной кафе «Якорь», в двух кварталах от него пляж, на холме над городом маяк. Двое давних знакомых договорились встретиться в кафе в час дня.",
-  "facts": "В кафе сегодня нет рыбы: лодка не выходила в море. Маяк открыт для посетителей до пяти вечера.",
+  "title": "The Café on the Seafront",
+  "about": "A small seaside town in July, the middle of the day. On the seafront is the café «Anchor», two blocks from it the beach, on the hill above the town a lighthouse. Two old acquaintances agreed to meet at the café at one in the afternoon.",
+  "facts": "There is no fish at the café today: the boat did not go out to sea. The lighthouse is open to visitors until five in the evening.",
   "clock": "12:50",
   "environment": "sea-summer",
   "wordsPerMinute": 130,
@@ -12,78 +12,78 @@
   "places": [
     {
       "id": "cafe",
-      "name": "Кафе «Якорь»",
-      "about": "Шесть столиков под полосатым навесом, стойка с кофемашиной, меловая доска с меню.",
+      "name": "Café «Anchor»",
+      "about": "Six tables under a striped awning, a counter with a coffee machine, a chalkboard with the menu.",
       "things": [
-        {"name": "стойка", "fixed": true, "open": true, "holds": [{"name": "кофемашина", "fixed": true}, {"name": "графин", "holds": [{"name": "вода", "n": 6, "food": 0}]}, {"name": "стакан", "holds": []}, {"name": "стакан", "holds": []}, {"name": "стакан", "holds": []}]},
-        {"name": "меловая доска с меню", "fixed": true, "facts": "На доске: кофе, лимонад, сырники, салат. Кофе стоит двести рублей, лимонад сто пятьдесят, сырники триста."},
-        {"name": "столик у края навеса", "fixed": true, "open": true, "holds": []}
+        {"name": "counter", "fixed": true, "open": true, "holds": [{"name": "coffee machine", "fixed": true}, {"name": "carafe", "holds": [{"name": "water", "n": 6, "food": 0}]}, {"name": "glass", "holds": []}, {"name": "glass", "holds": []}, {"name": "glass", "holds": []}]},
+        {"name": "chalkboard with the menu", "fixed": true, "facts": "On the board: coffee, lemonade, cheese pancakes, salad. Coffee costs two hundred rubles, lemonade one hundred and fifty, cheese pancakes three hundred."},
+        {"name": "table at the edge of the awning", "fixed": true, "open": true, "holds": []}
       ],
-      "facts": "Рыбы сегодня нет.",
+      "facts": "There is no fish today.",
       "clock": true,
       "at": [0, 0],
-      "crowd": "За двумя столиками сидят отдыхающие с детьми, у стойки ждёт курьер с рюкзаком.",
+      "crowd": "At two tables sit holidaymakers with children, at the counter a courier with a backpack is waiting.",
       "figures": [
         {
           "id": "raya",
-          "name": "Рая",
-          "looks": "Официантка лет сорока в синем фартуке, с блокнотом.",
-          "facts": "Рая работает здесь десять лет и знает всех местных. Она видела, что утром смотритель маяка ушёл наверх с ящиком инструментов. Отвечает коротко и приветливо."
+          "name": "Raya",
+          "looks": "A waitress of about forty in a blue apron, with a notepad.",
+          "facts": "Raya has worked here for ten years and knows all the locals. She saw the lighthouse keeper go up in the morning with a toolbox. She answers briefly and warmly."
         }
       ]
     },
     {
       "id": "beach",
-      "name": "Пляж",
-      "about": "Галечный пляж с лежаками и спасательной вышкой.",
+      "name": "Beach",
+      "about": "A pebble beach with sunbeds and a lifeguard tower.",
       "open": true,
       "at": [240, 80],
-      "crowd": "На лежаках и у воды много отдыхающих, дети бегают по гальке.",
+      "crowd": "Many holidaymakers on the sunbeds and by the water, children run over the pebbles.",
       "things": [
-        {"name": "лежак", "fixed": true, "open": true, "holds": []}
+        {"name": "sunbed", "fixed": true, "open": true, "holds": []}
       ]
     },
     {
       "id": "lighthouse",
-      "name": "Маяк",
-      "about": "Белая башня на холме над городом, у подножия скамья и калитка.",
+      "name": "Lighthouse",
+      "about": "A white tower on the hill above the town, at its foot a bench and a gate.",
       "open": true,
       "at": [1500, 2000],
       "things": [
-        {"name": "скамья", "fixed": true, "open": true, "holds": []},
-        {"name": "калитка", "fixed": true, "states": ["открыта", "закрыта"], "state": "открыта"}
+        {"name": "bench", "fixed": true, "open": true, "holds": []},
+        {"name": "gate", "fixed": true, "states": ["open", "closed"], "state": "open"}
       ]
     }
   ],
   "characters": [
     {
       "id": "nina",
-      "name": "Нина",
+      "name": "Nina",
       "place": "cafe",
-      "sheet": "Ты Нина, 34 года, учительница в отпуске. Говоришь ты спокойно и по делу.",
-      "memory": "Мы с Олегом договорились встретиться в 13:00 в кафе «Якорь». Я пришла раньше и жду его. Я хочу выпить кофе и уговорить Олега сходить вечером на маяк. В кошельке у меня 1 000 рублей.",
-      "looks": "Женщина за тридцать, светлые волосы собраны в хвост.",
-      "pose": "Сидит за столиком у края навеса.",
+      "sheet": "You are Nina, 34, a teacher on holiday. You speak calmly and to the point.",
+      "memory": "Oleg and I agreed to meet at 13:00 at the café «Anchor». I came early and am waiting for him. I want to have a coffee and to talk Oleg into going to the lighthouse in the evening. I have 1,000 rubles in my wallet.",
+      "looks": "A woman past thirty, fair hair gathered in a ponytail.",
+      "pose": "Sits at the table at the edge of the awning.",
       "carries": [
-        {"name": "летнее платье"},
-        {"name": "сандалии"},
-        {"name": "соломенная шляпа"},
-        {"name": "сумка", "holds": [{"name": "кошелёк", "holds": [{"name": "рубли", "n": 1000, "money": true}]}, {"name": "книга"}]}
+        {"name": "summer dress"},
+        {"name": "sandals"},
+        {"name": "straw hat"},
+        {"name": "bag", "holds": [{"name": "wallet", "holds": [{"name": "rubles", "n": 1000, "money": true}]}, {"name": "book"}]}
       ]
     },
     {
       "id": "oleg",
-      "name": "Олег",
+      "name": "Oleg",
       "place": "beach",
-      "sheet": "Ты Олег, 36 лет, инженер в отпуске. Говоришь ты весело и немного рассеянно.",
-      "memory": "Я с утра на пляже и к 13:00 иду в кафе «Якорь» к Нине: мы договорились там встретиться. Я голоден и хочу рыбы. В кармане шорт у меня 500 рублей.",
-      "looks": "Загорелый мужчина за тридцать, короткая стрижка.",
-      "pose": "Стоит у воды.",
+      "sheet": "You are Oleg, 36, an engineer on holiday. You speak cheerfully and a little absent-mindedly.",
+      "memory": "I have been at the beach since morning and by 13:00 I am going to the café «Anchor» to meet Nina: we agreed to meet there. I am hungry and want fish. I have 500 rubles in the pocket of my shorts.",
+      "looks": "A tanned man past thirty, short-cropped hair.",
+      "pose": "Stands by the water.",
       "clock": true,
       "carries": [
-        {"name": "шорты", "holds": [{"name": "рубли", "n": 500, "money": true}]},
-        {"name": "футболка"},
-        {"name": "полотенце"}
+        {"name": "shorts", "holds": [{"name": "rubles", "n": 500, "money": true}]},
+        {"name": "T-shirt"},
+        {"name": "towel"}
       ]
     }
   ]

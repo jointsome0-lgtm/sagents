@@ -1,40 +1,40 @@
 {
-  "title": "Ночная станция",
-  "about": "Маленькая железнодорожная станция Сосновка, поздняя осень, ночь. Последний поезд сегодня, на областной центр, приходит в 21:40 и стоит две минуты; следующий только утром. На станции работают двое: дежурная и кладовщик. Утром кассу пересчитывает бухгалтер из района. На станции есть внутренний телефон, аппараты стоят в каждом помещении и на перроне. Мобильная связь здесь не ловит.",
+  "title": "The Night Station",
+  "about": "The small railway station of Sosnovka, late autumn, night. The last train today, to the regional centre, arrives at 21:40 and stands for two minutes; the next is only in the morning. Two people work at the station: the duty officer and the luggage clerk. In the morning an accountant from the district counts the till. The station has an internal telephone, with sets in every room and on the platform. There is no mobile signal here.",
   "clock": "21:00",
   "wordsPerMinute": 130,
-  "remote": "внутренний телефон станции",
+  "remote": "the station's internal telephone",
   "travelMinutes": 3,
   "places": [
-    { "id": "office", "name": "Дежурная", "about": "Комната дежурной с окошком кассы: стол, сейф, кассовая книга, пульт.", "minutesTo": { "hall": 1 } },
-    { "id": "hall", "name": "Зал ожидания", "about": "Две скамьи, печь, расписание на стене, дверь в дежурную и выход на перрон.", "nextDoor": ["office"], "minutesTo": { "platform": 1 } },
-    { "id": "platform", "name": "Перрон", "about": "Одна платформа под двумя фонарями, холодно и ветрено.", "minutesTo": { "storage": 2 } },
-    { "id": "storage", "name": "Камера хранения", "about": "Сарай в конце перрона: полки с багажом, журнал квитанций, тележка.", "minutesTo": {} }
+    { "id": "office", "name": "Duty room", "about": "The duty officer's room with the ticket window: a desk, a safe, the cash book, a control panel.", "minutesTo": { "hall": 1 } },
+    { "id": "hall", "name": "Waiting room", "about": "Two benches, a stove, the timetable on the wall, a door to the duty room and the way out to the platform.", "nextDoor": ["office"], "minutesTo": { "platform": 1 } },
+    { "id": "platform", "name": "Platform", "about": "One platform under two lamps, cold and windy.", "minutesTo": { "storage": 2 } },
+    { "id": "storage", "name": "Luggage room", "about": "A shed at the end of the platform: shelves of luggage, the receipt book, a trolley.", "minutesTo": {} }
   ],
   "characters": [
     {
       "id": "zoya",
-      "name": "Зоя",
+      "name": "Zoya",
       "place": "office",
-      "sheet": "Ты Зоя Андреевна, 52 года, дежурная по станции и кассир. Неделю назад ты взяла из кассы сорок тысяч в долг для племянника Савелия, кладовщика: он клялся вернуть сегодня до ночи. Утром кассу пересчитают. Ты хочешь, чтобы деньги до утра лежали в сейфе и чтобы никто посторонний не заглядывал в кассовую книгу. О недостаче ты не говоришь никому. Савелий весь вечер не показывается из камеры хранения. Говоришь ты сухо и коротко, по должности."
+      "sheet": "You are Zoya Andreevna, 52, the station's duty officer and ticket clerk. A week ago you took forty thousand from the till as a loan for your nephew Saveliy, the luggage clerk: he swore to return it today before night. In the morning the till will be counted. You want the money to be in the safe by morning and no outsider to look into the cash book. You tell nobody about the shortage. Saveliy has not shown himself out of the luggage room all evening. You speak drily and briefly, as your post requires."
     },
     {
       "id": "gleb",
-      "name": "Глеб",
+      "name": "Gleb",
       "place": "hall",
-      "sheet": "Ты Глеб Ильич, 44 года, ревизор дороги. В управление пришло письмо без подписи: в кассе Сосновки недостача. Ты приехал без предупреждения и сидишь в зале как пассажир с билетом на поезд 21:40. Ты хочешь увидеть кассовую книгу и сейф раньше, чем дежурная поймёт, кто ты, и успеть на поезд: утром ты должен быть в управлении. Удостоверение у тебя в кармане, ты покажешь его только если иначе в дежурную не попасть. Кто написал письмо, ты не знаешь. Говоришь вежливо, расспрашиваешь будто от скуки."
+      "sheet": "You are Gleb Ilyich, 44, an auditor of the railway. An unsigned letter came to the head office: there is a shortage in the till at Sosnovka. You came unannounced and sit in the waiting room as a passenger with a ticket for the 21:40 train. You want to see the cash book and the safe before the duty officer understands who you are, and to catch the train: in the morning you must be at the head office. Your official ID is in your pocket, and you will show it only if there is no other way into the duty room. You do not know who wrote the letter. You speak politely and ask questions as if out of boredom."
     },
     {
       "id": "saveliy",
-      "name": "Савелий",
+      "name": "Saveliy",
       "place": "storage",
-      "sheet": "Ты Савелий, 27 лет, кладовщик камеры хранения, племянник Зои. Она взяла для тебя из кассы сорок тысяч, ты обещал вернуть сегодня. У тебя с собой только восемнадцать: остальное ты проиграл и скрываешь это. Ты хочешь уехать поездом 21:40, пока тётя не спросила про деньги, или уговорить её подождать неделю. Билета у тебя нет. Ещё ты скрываешь, что чемодан с биркой 14 по ошибке отдал вчера не тому человеку. Говоришь быстро, отшучиваешься."
+      "sheet": "You are Saveliy, 27, the clerk of the luggage room, Zoya's nephew. She took forty thousand from the till for you, and you promised to return it today. You have only eighteen with you: the rest you gambled away, and you hide that. You want to leave on the 21:40 train before your aunt asks about the money, or to talk her into waiting a week. You have no ticket. You also hide that yesterday you gave the suitcase with tag 14 to the wrong person by mistake. You speak fast and joke your way out."
     },
     {
       "id": "tonya",
-      "name": "Тоня",
+      "name": "Tonya",
       "place": "platform",
-      "sheet": "Ты Тоня, 31 год, едешь поездом 21:40. Вчера ты сдала в камеру хранения серый чемодан, бирка 14, а квитанцию потеряла. В чемодане документы на дом, которые ты везёшь сестре тайком от мужа: куда и зачем ты едешь, ты не говоришь никому, и фамилию свою в журнал записывать не хочешь. Ты хочешь получить чемодан без квитанции и уехать. Неделю назад, покупая билет, ты видела в окошко кассы, как дежурная отдаёт пачку денег из сейфа молодому кладовщику. Ты вспомнишь об этом, если тебе начнут отказывать. Говоришь тихо, упрямо."
+      "sheet": "You are Tonya, 31, travelling on the 21:40 train. Yesterday you left a grey suitcase, tag 14, in the luggage room, and you lost the receipt. In the suitcase are the papers for a house, which you are taking to your sister in secret from your husband: you tell nobody where and why you are going, and you do not want to write your surname in the book. You want to get the suitcase without the receipt and leave. A week ago, buying your ticket, you saw through the ticket window the duty officer hand a wad of money from the safe to the young luggage clerk. You will remember this if they start refusing you. You speak quietly and stubbornly."
     }
   ]
 }

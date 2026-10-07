@@ -4,21 +4,21 @@
   "spentHours": 24,
   "weather": {
     "start": {
-      "text": "Метель: ветер несёт густой снег, в пяти шагах ничего не видно, мороз.",
-      "indoors": "Ветер воет в трубе и швыряет снег в окна."
+      "text": "A blizzard: the wind drives thick snow, nothing can be seen five steps away, frost.",
+      "indoors": "The wind howls in the chimney and hurls snow at the windows."
     },
     "changes": [
       {
         "day": 2,
         "at": "02:00",
-        "text": "Метель стихает: снег падает редко и ровно, ветер улёгся, видно до ворот.",
-        "indoors": "Вой в трубе стих, за окнами тихо."
+        "text": "The blizzard is dying down: the snow falls thin and even, the wind has dropped, one can see as far as the gate.",
+        "indoors": "The howling in the chimney has died down, it is quiet outside the windows."
       },
       {
         "day": 2,
         "at": "05:30",
-        "text": "Небо ясное, звёзды, сильный мороз; снег скрипит под ногами.",
-        "indoors": "За окнами ясно и звёздно, стёкла в морозных узорах."
+        "text": "The sky is clear, stars, hard frost; the snow creaks underfoot.",
+        "indoors": "Outside the windows it is clear and starry, the panes are covered in frost patterns."
       }
     ]
   }

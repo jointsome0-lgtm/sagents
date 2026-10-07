@@ -10,20 +10,20 @@
     ],
     "states": [
       {
-        "text": "Ясно и жарко, с моря тянет лёгкий бриз.",
+        "text": "Clear and hot, a light breeze blows from the sea.",
         "indoors": null
       },
       {
-        "text": "Душно, небо затянуто, море гладкое.",
+        "text": "Stuffy, the sky is overcast, the sea is smooth.",
         "indoors": null
       },
       {
-        "text": "Тёплый ливень, по крышам и навесам стучит вода.",
-        "indoors": "По крыше стучит дождь."
+        "text": "A warm downpour, water drums on the roofs and awnings.",
+        "indoors": "Rain drums on the roof."
       },
       {
-        "text": "Сильный ветер с моря, волны с барашками.",
-        "indoors": "Ветер хлопает ставнями."
+        "text": "A strong wind from the sea, whitecaps on the waves.",
+        "indoors": "The wind bangs the shutters."
       }
     ]
   }

@@ -1,27 +1,27 @@
 {
-  "title": "Ночь на перевале",
-  "about": "Гостевой дом «Седло» на горном перевале, конец октября. К вечеру дорогу вниз закрыл снег; грейдер пройдёт её к утру, и в 07:30 от крыльца уходит единственный автобус в долину. Сейчас вечер. Все устали и на ночь расходятся спать наверх, каждый в свою комнату, а встают около шести, к автобусу. Мобильной связи на перевале нет; на случай обвала хозяйка раздала каждому карманную рацию, они лежат у всех при себе.",
-  "facts": "Кроме четверых в доме, на перевале никого нет, и в эфире раций никто больше не отвечает. Все четверо здоровы; тот, кто спит, просто спит. Дорога вниз до утра под снегом, пешком по ней ночью не пройти.",
+  "title": "A Night on the Pass",
+  "about": "The guest house «Saddle» on a mountain pass, the end of October. By evening snow closed the road down; the grader will clear it by morning, and at 07:30 the only bus to the valley leaves from the porch. It is evening now. Everyone is tired and for the night they go upstairs to sleep, each to their own room, and they get up around six, for the bus. There is no mobile signal on the pass; in case of a landslide the landlady gave everyone a pocket two-way radio, and everyone has theirs on them.",
+  "facts": "Besides the four in the house there is nobody on the pass, and nobody else answers on the radios. All four are healthy; whoever is asleep is simply asleep. The road down is under snow until morning, and it cannot be walked at night.",
   "clock": "20:30",
   "environment": "mountain-winter",
   "wordsPerMinute": 130,
-  "remote": "карманная рация",
+  "remote": "pocket two-way radio",
   "travelMinutes": 2,
   "shortWords": 1200,
   "longWords": 200,
   "places": [
     {
       "id": "hall",
-      "name": "Общая комната",
-      "about": "Длинный стол, печь, полка, стойка хозяйки. Над стойкой стенные часы.",
+      "name": "Common room",
+      "about": "A long table, a stove, a shelf, the landlady's counter. Above the counter a wall clock.",
       "clock": true,
       "things": [
-        {"name": "длинный стол", "fixed": true, "open": true, "holds": [{"name": "чайник", "holds": [{"name": "чай", "n": 6, "food": 40}]}, {"name": "кружка", "holds": []}, {"name": "кружка", "holds": []}, {"name": "ломти хлеба", "n": 6, "food": 80}]},
-        {"name": "печь", "fixed": true, "states": ["горит", "погасла"], "state": "горит", "fire": "горит"},
-        {"name": "поленья", "n": 5, "burns": true},
-        {"name": "полка", "fixed": true, "open": true, "holds": [{"name": "коробки с настольными играми", "n": 4}]},
-        {"name": "стойка", "fixed": true, "open": true, "holds": [{"name": "ящик стойки", "fixed": true, "holds": [{"name": "журнал постояльцев", "facts": "В журнале есть запись прошлой зимы, 14 февраля: «Константин Берестов, одна ночь», и ниже рукой Марты: «ушёл утром в метель, рюкзак оставил»."}]}, {"name": "ящик для ключей", "fixed": true, "holds": [{"name": "ключ от комнаты Марты"}, {"name": "ключ от комнаты Игната"}, {"name": "ключ от комнаты Лиды"}, {"name": "ключ от комнаты Павла"}, {"name": "ключ от сарая"}]}]},
-        {"name": "лампа над столом", "fixed": true, "states": ["горит", "погашена"], "state": "горит"}
+        {"name": "long table", "fixed": true, "open": true, "holds": [{"name": "teapot", "holds": [{"name": "tea", "n": 6, "food": 40}]}, {"name": "mug", "holds": []}, {"name": "mug", "holds": []}, {"name": "slices of bread", "n": 6, "food": 80}]},
+        {"name": "stove", "fixed": true, "states": ["burning", "out"], "state": "burning", "fire": "burning"},
+        {"name": "logs", "n": 5, "burns": true},
+        {"name": "shelf", "fixed": true, "open": true, "holds": [{"name": "boxes of board games", "n": 4}]},
+        {"name": "counter", "fixed": true, "open": true, "holds": [{"name": "counter drawer", "fixed": true, "holds": [{"name": "guest register", "facts": "The register has an entry of last winter, 14 February: «Konstantin Berestov, one night», and below it in Marta's hand: «left in the morning into the blizzard, left his backpack»."}]}, {"name": "key box", "fixed": true, "holds": [{"name": "key to Marta's room"}, {"name": "key to Ignat's room"}, {"name": "key to Lida's room"}, {"name": "key to Pavel's room"}, {"name": "key to the shed"}]}]},
+        {"name": "lamp over the table", "fixed": true, "states": ["lit", "out"], "state": "lit"}
       ],
       "minutesTo": {
         "upstairs": 1,
@@ -30,15 +30,15 @@
     },
     {
       "id": "upstairs",
-      "name": "Коридор наверху",
-      "about": "Узкий коридор под скатом крыши, лестница вниз в общую комнату и четыре двери спален. На каждой двери табличка с именем постояльца.",
+      "name": "Upstairs corridor",
+      "about": "A narrow corridor under the slope of the roof, the stairs down to the common room and four bedroom doors. On each door a plate with the guest's name.",
       "nextDoor": ["room-marta", "room-ignat", "room-lida", "room-pavel"],
       "minutesTo": {}
     },
     {
       "id": "room-marta",
-      "name": "Комната Марты",
-      "about": "Спальня Марты под скатом крыши: кровать, тумбочка, окно во двор. Дверь в коридор закрывается изнутри на задвижку.",
+      "name": "Marta's room",
+      "about": "Marta's bedroom under the slope of the roof: a bed, a nightstand, a window onto the yard. The door to the corridor bolts from the inside.",
       "minutesTo": {
         "upstairs": 0.5,
         "hall": 1.5,
@@ -49,8 +49,8 @@
     },
     {
       "id": "room-ignat",
-      "name": "Комната Игната",
-      "about": "Спальня Игната под скатом крыши: кровать, тумбочка, окно во двор. Дверь в коридор закрывается изнутри на задвижку.",
+      "name": "Ignat's room",
+      "about": "Ignat's bedroom under the slope of the roof: a bed, a nightstand, a window onto the yard. The door to the corridor bolts from the inside.",
       "minutesTo": {
         "upstairs": 0.5,
         "hall": 1.5,
@@ -60,8 +60,8 @@
     },
     {
       "id": "room-lida",
-      "name": "Комната Лиды",
-      "about": "Спальня Лиды под скатом крыши: кровать, тумбочка, окно во двор. Дверь в коридор закрывается изнутри на задвижку.",
+      "name": "Lida's room",
+      "about": "Lida's bedroom under the slope of the roof: a bed, a nightstand, a window onto the yard. The door to the corridor bolts from the inside.",
       "minutesTo": {
         "upstairs": 0.5,
         "hall": 1.5,
@@ -70,8 +70,8 @@
     },
     {
       "id": "room-pavel",
-      "name": "Комната Павла",
-      "about": "Спальня Павла под скатом крыши: кровать, тумбочка, окно во двор. Дверь в коридор закрывается изнутри на задвижку.",
+      "name": "Pavel's room",
+      "about": "Pavel's bedroom under the slope of the roof: a bed, a nightstand, a window onto the yard. The door to the corridor bolts from the inside.",
       "minutesTo": {
         "upstairs": 0.5,
         "hall": 1.5
@@ -79,16 +79,16 @@
     },
     {
       "id": "yard",
-      "name": "Двор",
-      "about": "Крыльцо, навес, сарай с генератором, остановка автобуса у ворот. Темно.",
+      "name": "Yard",
+      "about": "A porch, a canopy, a shed with the generator, the bus stop at the gate. It is dark.",
       "things": [
-        {"name": "навес", "fixed": true, "open": true, "holds": [{"name": "дрова", "stock": true, "burns": true}, {"name": "колода", "fixed": true, "open": true, "holds": [{"name": "топор"}]}]},
-        {"name": "крючок у двери", "fixed": true, "holds": []},
-        {"name": "скамья на крыльце", "fixed": true, "open": true, "holds": [{"name": "рукавицы"}]},
-        {"name": "фонарь над крыльцом", "fixed": true, "states": ["горит", "погашен"], "state": "горит"},
-        {"name": "столб остановки", "fixed": true}
+        {"name": "canopy", "fixed": true, "open": true, "holds": [{"name": "firewood", "stock": true, "burns": true}, {"name": "chopping block", "fixed": true, "open": true, "holds": [{"name": "axe"}]}]},
+        {"name": "hook by the door", "fixed": true, "holds": []},
+        {"name": "bench on the porch", "fixed": true, "open": true, "holds": [{"name": "mittens"}]},
+        {"name": "lantern over the porch", "fixed": true, "states": ["lit", "out"], "state": "lit"},
+        {"name": "bus stop post", "fixed": true}
       ],
-      "facts": "У ворот только столб остановки с расписанием: автобус в 07:30. Следов на снегу, кроме следов самих постояльцев, нет.",
+      "facts": "At the gate there is only the bus stop post with the timetable: the bus at 07:30. There are no tracks in the snow except the guests' own.",
       "open": true,
       "minutesTo": {
         "shed": 1
@@ -96,81 +96,81 @@
     },
     {
       "id": "shed",
-      "name": "Сарай",
-      "about": "Генератор, верстак. Пахнет топливом.",
+      "name": "Shed",
+      "about": "A generator, a workbench. It smells of fuel.",
       "things": [
-        {"name": "верстак", "fixed": true, "open": true, "holds": [{"name": "ящик с инструментами", "holds": [{"name": "отвёртка"}, {"name": "молоток"}, {"name": "фонарик", "states": ["включён", "выключен"], "state": "выключен"}]}, {"name": "моток верёвки"}]},
-        {"name": "генератор", "fixed": true, "states": ["работает", "заглушен"], "state": "работает"},
-        {"name": "канистра с топливом"},
-        {"name": "пустая канистра"},
-        {"name": "канистра с топливом"},
-        {"name": "старые лыжи"},
-        {"name": "лампочка под потолком", "fixed": true, "states": ["горит", "погашена"], "state": "горит"},
-        {"name": "синий рюкзак с нашивкой-совой", "facts": "Денег и документов в рюкзаке нет и не было.", "hidden": {"spot": "Под верстаком, за канистрами", "minutes": 10}, "holds": [{"name": "свитер"}, {"name": "пустой термос"}, {"name": "карта перевала", "facts": "На карте карандашом отмечена тропа к северному гребню."}, {"name": "записная книжка", "facts": "На первой странице записной книжки имя «Костя Берестов»."}]}
+        {"name": "workbench", "fixed": true, "open": true, "holds": [{"name": "toolbox", "holds": [{"name": "screwdriver"}, {"name": "hammer"}, {"name": "flashlight", "states": ["on", "off"], "state": "off"}]}, {"name": "coil of rope"}]},
+        {"name": "generator", "fixed": true, "states": ["running", "stopped"], "state": "running"},
+        {"name": "canister of fuel"},
+        {"name": "empty canister"},
+        {"name": "canister of fuel"},
+        {"name": "old skis"},
+        {"name": "bulb under the ceiling", "fixed": true, "states": ["lit", "out"], "state": "lit"},
+        {"name": "blue backpack with an owl patch", "facts": "There is no money and there are no documents in the backpack, and there never were.", "hidden": {"spot": "Under the workbench, behind the canisters", "minutes": 10}, "holds": [{"name": "sweater"}, {"name": "empty thermos"}, {"name": "map of the pass", "facts": "On the map a trail to the north ridge is marked in pencil."}, {"name": "notebook", "facts": "On the first page of the notebook is the name «Kostya Berestov»."}]}
       ],
-      "facts": "Генератор работает ровно.",
+      "facts": "The generator runs evenly.",
       "minutesTo": {}
     }
   ],
   "characters": [
     {
       "id": "marta",
-      "name": "Марта",
+      "name": "Marta",
       "place": "hall",
-      "sheet": "Ты Марта, 58 лет, хозяйка гостевого дома. Ты хочешь, чтобы утром все уехали спокойно и никто не лазил в сарай. Около десяти вечера ты ложишься спать до шести. Говоришь ты неторопливо, по-хозяйски, о своём молчишь. Твоя спальня наверху — «Комната Марты». В чужую спальню не входят без стука.",
-      "memory": "Водитель Игнат месяц назад привёз мне генератор и дал его в долг: я должна ему 30 000 рублей и обещала отдать до его отъезда утренним автобусом в 07:30. У меня есть только 12 000, они в кармане фартука, и я ещё не решила, сказать ему правду или попросить отсрочку. В сарае под верстаком с прошлой зимы лежит чужой рюкзак: постоялец ушёл в метель и не вернулся, я никому о рюкзаке не сказала и не открывала его. Ключ от сарая у меня на связке, второй висит в ящике для ключей.",
-      "looks": "Невысокая плотная женщина под шестьдесят, седые волосы, спокойное лицо.",
-      "pose": "Стоит за стойкой.",
+      "sheet": "You are Marta, 58, the landlady of the guest house. You want everyone to leave calmly in the morning and nobody to poke around in the shed. Around ten in the evening you go to bed until six. You speak unhurriedly, like the mistress of the house, and keep quiet about your own affairs. Your bedroom is upstairs: «Marta's room». Nobody enters another's bedroom without knocking.",
+      "memory": "A month ago the driver Ignat brought me a generator and let me have it on credit: I owe him 30,000 rubles and promised to pay before he leaves on the morning bus at 07:30. I have only 12,000, it is in my apron pocket, and I have not yet decided whether to tell him the truth or to ask for more time. Under the workbench in the shed someone else's backpack has lain since last winter: a guest went out into the blizzard and did not come back, I told nobody about the backpack and did not open it. The key to the shed is on my key ring, a second one hangs in the key box.",
+      "looks": "A short stout woman close to sixty, grey hair, a calm face.",
+      "pose": "Stands behind the counter.",
       "carries": [
-        {"name": "тёмное платье"},
-        {"name": "платок"},
-        {"name": "фартук", "holds": [{"name": "рубли", "n": 12000, "money": true}, {"name": "связка ключей", "holds": [{"name": "ключ от сарая"}]}, {"name": "карманная рация"}]}
+        {"name": "dark dress"},
+        {"name": "headscarf"},
+        {"name": "apron", "holds": [{"name": "rubles", "n": 12000, "money": true}, {"name": "key ring", "holds": [{"name": "key to the shed"}]}, {"name": "pocket two-way radio"}]}
       ]
     },
     {
       "id": "ignat",
-      "name": "Игнат",
+      "name": "Ignat",
       "place": "hall",
-      "sheet": "Ты Игнат, 46 лет, водитель грузовика. Просить о своём при посторонних тебе неловко. Ты очень устал за рулём и ляжешь спать рано, часов до шести. Говоришь ты коротко и прямо. Твоя спальня наверху — «Комната Игната». В чужую спальню не входят без стука.",
-      "memory": "Мой грузовик остался внизу, утром я еду за ним автобусом в 07:30. Марта должна мне 30 000 рублей за генератор, который я привёз ей месяц назад, и обещала отдать до отъезда. Деньги нужны мне завтра же: я сам обещал их брату. Я хочу получить долг до автобуса и жду случая поговорить с Мартой наедине. Павел занял у меня 5 000 на билет и обещал вернуть утром до автобуса.",
-      "looks": "Крупный мужчина за сорок, обветренное лицо, щетина.",
-      "pose": "Сидит у печи.",
+      "sheet": "You are Ignat, 46, a truck driver. You find it awkward to ask for what is yours in front of strangers. You are very tired from driving and will go to bed early, until about six. You speak briefly and bluntly. Your bedroom is upstairs: «Ignat's room». Nobody enters another's bedroom without knocking.",
+      "memory": "My truck stayed down below, in the morning I go for it on the 07:30 bus. Marta owes me 30,000 rubles for the generator I brought her a month ago, and promised to pay before I leave. I need the money tomorrow, no later: I myself promised it to my brother. I want to get the debt before the bus and am waiting for a chance to talk to Marta alone. Pavel borrowed 5,000 from me for a ticket and promised to return it in the morning before the bus.",
+      "looks": "A big man past forty, a weathered face, stubble.",
+      "pose": "Sits by the stove.",
       "clock": true,
-      "facts": "Игнат спит крепко.",
+      "facts": "Ignat sleeps soundly.",
       "carries": [
-        {"name": "рабочая куртка", "holds": [{"name": "мелочь", "n": 85, "money": true}, {"name": "карманная рация"}]},
-        {"name": "тяжёлые ботинки"},
-        {"name": "часы"}
+        {"name": "work jacket", "holds": [{"name": "small change", "n": 85, "money": true}, {"name": "pocket two-way radio"}]},
+        {"name": "heavy boots"},
+        {"name": "watch"}
       ]
     },
     {
       "id": "lida",
-      "name": "Лида",
+      "name": "Lida",
       "place": "hall",
-      "sheet": "Ты Лида, 24 года, студентка, идёшь через перевал одна. Ты ляжешь спать, когда разойдутся остальные, и встанешь раньше всех. Говоришь ты осторожно, больше спрашиваешь. Твоя спальня наверху — «Комната Лиды». В чужую спальню не входят без стука.",
-      "memory": "Прошлой зимой здесь пропал мой старший брат Костя: он ночевал в этом доме и утром ушёл в метель. Я никому не говорю, что я его сестра, и записалась в журнал под фамилией матери. Я хочу узнать, что он оставил и что говорил в последний вечер, и не хочу, чтобы хозяйка замкнулась, поняв, кто я. У Кости был синий рюкзак с нашивкой-совой. Его фотография с этим рюкзаком лежит у меня во внутреннем кармане куртки. Связи здесь нет, но часы и будильник в моём телефоне работают.",
-      "looks": "Худая девушка лет двадцати пяти, короткие тёмные волосы.",
-      "pose": "Сидит за длинным столом.",
+      "sheet": "You are Lida, 24, a student, crossing the pass alone. You will go to bed when the others have gone to theirs, and will get up before everyone. You speak carefully and mostly ask questions. Your bedroom is upstairs: «Lida's room». Nobody enters another's bedroom without knocking.",
+      "memory": "Last winter my elder brother Kostya went missing here: he spent the night in this house and in the morning went out into the blizzard. I tell nobody that I am his sister, and I signed the register under my mother's surname. I want to find out what he left behind and what he said on his last evening, and I do not want the landlady to close up when she understands who I am. Kostya had a blue backpack with an owl patch. A photograph of him with that backpack is in the inside pocket of my jacket. There is no signal here, but the clock and the alarm in my phone work.",
+      "looks": "A thin young woman of about twenty-five, short dark hair.",
+      "pose": "Sits at the long table.",
       "clock": true,
       "carries": [
-        {"name": "походная куртка", "holds": [{"name": "фотография Кости с синим рюкзаком"}, {"name": "карманная рация"}, {"name": "телефон"}]},
-        {"name": "штаны"},
-        {"name": "ботинки"}
+        {"name": "hiking jacket", "holds": [{"name": "photograph of Kostya with a blue backpack"}, {"name": "pocket two-way radio"}, {"name": "phone"}]},
+        {"name": "trousers"},
+        {"name": "boots"}
       ]
     },
     {
       "id": "pavel",
-      "name": "Павел",
+      "name": "Pavel",
       "place": "yard",
-      "sheet": "Ты Павел, 35 лет, фотограф. Ты забывчив и никого не хочешь обидеть. Вечером ты куришь на крыльце, потом идёшь в общую комнату и к одиннадцати ложишься спать до половины седьмого. Говоришь ты охотно и много, любишь рассказывать, что видел. Твоя спальня наверху — «Комната Павла». В чужую спальню не входят без стука.",
-      "memory": "Я застрял здесь третий день и хочу уехать автобусом в 07:30. Вчера, когда я искал в сарае сухие дрова, я увидел под верстаком синий рюкзак с нашивкой-совой и удивился, что он в пыли. Хозяйке я об этом не сказал. Я занял у Игната 5 000 на билет и обещал вернуть утром до автобуса; деньги у меня есть, 7 000 в бумажнике.",
-      "looks": "Высокий сутулый мужчина лет тридцати пяти, рыжая борода.",
-      "pose": "Стоит на крыльце под навесом.",
+      "sheet": "You are Pavel, 35, a photographer. You are forgetful and do not want to offend anyone. In the evening you smoke on the porch, then go to the common room and by eleven go to bed until half past six. You speak readily and a lot, and like to tell what you have seen. Your bedroom is upstairs: «Pavel's room». Nobody enters another's bedroom without knocking.",
+      "memory": "This is my third day stuck here and I want to leave on the 07:30 bus. Yesterday, when I was looking for dry firewood in the shed, I saw under the workbench a blue backpack with an owl patch and was surprised that it was covered in dust. I did not tell the landlady about it. I borrowed 5,000 from Ignat for a ticket and promised to return it in the morning before the bus; I have the money, 7,000 in my wallet.",
+      "looks": "A tall stooping man of about thirty-five, a red beard.",
+      "pose": "Stands on the porch under the canopy.",
       "carries": [
-        {"name": "вязаная шапка"},
-        {"name": "парка", "holds": [{"name": "бумажник", "holds": [{"name": "рубли", "n": 7000, "money": true}]}, {"name": "сигареты", "n": 17, "burns": true}, {"name": "зажигалка", "fire": true}, {"name": "карманная рация"}]},
-        {"name": "фотоаппарат"},
-        {"name": "ботинки"}
+        {"name": "knitted hat"},
+        {"name": "parka", "holds": [{"name": "wallet", "holds": [{"name": "rubles", "n": 7000, "money": true}]}, {"name": "cigarettes", "n": 17, "burns": true}, {"name": "lighter", "fire": true}, {"name": "pocket two-way radio"}]},
+        {"name": "camera"},
+        {"name": "boots"}
       ]
     }
   ]

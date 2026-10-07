@@ -10,20 +10,20 @@
     ],
     "states": [
       {
-        "text": "Ясно и тепло, в траве стрекочут кузнечики.",
+        "text": "Clear and warm, grasshoppers chirr in the grass.",
         "indoors": null
       },
       {
-        "text": "Пасмурно и тихо, пахнет дождём.",
+        "text": "Overcast and still, it smells of rain.",
         "indoors": null
       },
       {
-        "text": "Идёт ровный дождь, дорога раскисла.",
-        "indoors": "Дождь шуршит по крыше."
+        "text": "A steady rain is falling, the road has turned to mud.",
+        "indoors": "Rain rustles on the roof."
       },
       {
-        "text": "Гроза: гром, ливень стеной, порывы ветра.",
-        "indoors": "Гремит гром, ливень бьёт в окна."
+        "text": "A thunderstorm: thunder, a wall of rain, gusts of wind.",
+        "indoors": "Thunder rumbles, the downpour beats on the windows."
       }
     ]
   }

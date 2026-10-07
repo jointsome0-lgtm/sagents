@@ -116,8 +116,9 @@ and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional p
 `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
 what each one remembers after the night decides what happens; `examples/seaside-cafe.json` is a café with a
 crowd and a waitress whom nobody plays, in a town whose places lie on a map. The three examples are written in
-Russian. What the models are told is in English and asks for answers in the language of the world's description; no
-world in another language has been run with a real model.
+English, translated from Russian. What the models are told is in English and asks for answers in the language of the
+world's description; every measurement reported here was made on the Russian texts, and the translated examples
+have been played on no model yet.
 
 The rules of time and hearing:
 
@@ -212,7 +213,7 @@ The world answers a deed:
   moved things to where no deed had put them. This layout as the engine writes it has not been run on a real
   model. A part taken off a counted thing or out of a
   stock has the facts of what it was taken from, and two counts become one record only when their facts are the
-  same. In `examples/night-pass.json` what the guests' journal, the backpack, the map and the notebook say is with
+  same. In `examples/night-pass.json` what the guest register, the backpack, the map and the notebook say is with
   those things, so it is still known when one of them is carried to another place.
 - After every `do` the world is asked once what came of it, through the model of `--world-model`, which is
   `--model`'s unless given. It is sent the world's description and facts, the place with its facts and its things, what is hidden in it, the names
@@ -271,8 +272,8 @@ The world answers a deed:
   a real model: what was measured is the text before them.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
   each person and place, the seconds of that person's deeds there that the world called a search. A thing is found
-  by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «Ночь на
-  перевале», in one deed or in several. The rules know how long a deed lasts before the world is asked, so the
+  by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «A Night on the
+  Pass», in one deed or in several. The rules know how long a deed lasts before the world is asked, so the
   request lists the hidden things of the place in two kinds, those this deed finds if it is a search and those no
   search finds yet, and the world counts nothing.
 - The second way is a deed that goes straight to the very spot named for the hidden thing, however short: someone who
@@ -295,8 +296,8 @@ The world answers a deed:
   when there were any, then `In the lists:` with what the rules say went where, was eaten or burned, is in another
   state or was found, when there was any of that. It says what those in the place are told, in the world's own
   words for things: each thing under its label, every move, also one into a pocket of the same person, and where
-  the thing went as the answer's `to` named it and as a request writes that holder (`t38 фотоаппарат went to t1
-  длинный стол.`, `t15 ключ went to t33 походная куртка.`), with no word of where it came from. Told with names
+  the thing went as the answer's `to` named it and as a request writes that holder (`t38 camera went to t1
+  long table.`, `t15 key to the shed went to t33 hiking jacket.`), with no word of where it came from. Told with names
   alone, a key that went into a jacket reads as gone to the person, and a weak model then answered with the person
   where it had answered with the jacket. So a deed
   whose answer had entries and no words leaves a line too, and a deed that left neither leaves none. The line is
@@ -435,8 +436,8 @@ Environments, and the form of a law:
   for sleep, and `weather`. A world file names one with `"environment": "<name>"` and may give any of these
   settings itself, which then takes the place of the environment's. `--environment <name>` takes the place of the
   world file's choice. A world file that names none and gives none has the defaults and no weather.
-- There are three: `mountain-winter`, which «Ночь на перевале» lives in, `sea-summer` and `village-summer`. Their
-  texts are synthetic and in Russian, as the example worlds are.
+- There are three: `mountain-winter`, which «A Night on the Pass» lives in, `sea-summer` and `village-summer`. Their
+  texts are synthetic and in English, as the example worlds are.
 - The core reads no file: the command line reads the environment and hands it over with the world file.
 
 What a character knows:
