@@ -242,8 +242,10 @@ export function advance(world: World, state: State, record: Record): Event {
     if (mind.size > world.shortWords) return refuse('is an action of someone whose memory was not folded first');
     if (!Number.isInteger(record.limit) || record.limit < 1 || record.limit > MAX_WORDS) return refuse('holds a word limit that no turn has');
     // An answer that could not be used is kept as its reason, which must be one of the list; an action must read as itself.
-    const reason = typeof record.action === 'string' ? record.action : null;
-    if (reason ? !isRefusal(reason) : !isDeepStrictEqual(readAction(world, actor, JSON.stringify(record.action)), record.action)) {
+    // An action whose span was cut reads as itself from one second more, so the mark stands on nothing else.
+    const reason = typeof record.action === 'string' ? record.action : null, taken = typeof record.action === 'string' ? null : record.action as Action | null,
+      asked = taken?.capped === undefined ? taken : { ...taken, seconds: (taken.seconds ?? 0) + 1 };
+    if (reason ? !isRefusal(reason) : !isDeepStrictEqual(readAction(world, actor, JSON.stringify(asked)), record.action)) {
       return refuse('holds an action its character cannot take');
     }
     const action = typeof record.action === 'string' ? { action: 'wait' as const, text: null, to: null, place: null, seconds: LOST_SECONDS, until: null, note: null } : record.action;

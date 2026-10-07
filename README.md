@@ -144,7 +144,9 @@ The rules of time and hearing:
   else the world's `travelMinutes`. A walk of some kilometres is one action, and the clock stands at its end when the walker arrives. On the way a character hears
   nothing and does not act. A call to it is delivered when it arrives.
 - A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
-  next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours. A known limit:
+  next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours: an answer that asks for
+  more, in `seconds` or to a time of day further off, lasts that most in seconds and is no lost turn, the character reads the seconds it lasts and is not told of the cut, and the record's
+  action is marked `capped`, which no request holds. A known limit:
   a `do` ends early as a `wait` does, when someone speaks, comes or leaves nearby, something is heard from next door
   or the weather changes, and its
   doer is free again then, yet the deed is credited whole at once: the world answers for all its seconds, and a

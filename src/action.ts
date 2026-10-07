@@ -10,9 +10,10 @@ import type { Event, Kind, Person, Place, World } from './world.ts';
 // `do`, `wait` and `sleep` last `seconds`, or `until` the next moment the clock shows that time of day, `HH:MM`.
 // `gesture`, what the body of one who makes a `say` does meanwhile, and `says`, the words said aloud with a `do`, are
 // the two fields that are absent when there is none and never null, so that an action recorded before they existed
-// still reads back as itself.
+// still reads back as itself. `capped` is there only when the answer asked for a longer span than the action allows
+// and it lasts the longest one instead: a mark for whoever counts a journal, which no line, request or event holds.
 export type Action = { note: string | null; action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; until: string | null;
-  gesture?: string; says?: string };
+  gesture?: string; says?: string; capped?: true };
 // Why an answer could not be used as an action: it was not a JSON object, named no action, lacked its text, called
 // nobody who can be called, led to the place the character is in or to no place, or lasted no time the action allows;
 // or it never arrived whole, because the model wrote on to the limit of one answer (`long`); or the service declined to
@@ -36,7 +37,8 @@ export const next = (people: Person[]): Person => people.reduce((first, person) 
     || (due(person) === due(first) && (person.began ?? -1) < (first.began ?? -1)))) ? person : first);
 
 // A character's answer as an action it can take now, or the reason why it cannot be used. A field the action does not
-// use is dropped whatever it held, and of `until` and `seconds` only one is kept: `until` when it was given. A text
+// use is dropped whatever it held, and of `until` and `seconds` only one is kept: `until` when it was given, and the
+// longest span in `seconds` when either asked for more. A text
 // becomes one line; a note and what a `do` describes keep their first `MAX_WORDS` words, a gesture its first
 // `GESTURE_WORDS` and the words said with a `do` their first `SAYS_WORDS`, and a speech is cut when it
 // is made, at that turn's limit. The actor's `freeAt` is the moment of the turn.
@@ -51,13 +53,17 @@ export function readAction(world: World, actor: Person, answer: string): Action 
   const short = (field: unknown, most = MAX_WORDS) => { const whole = line(field); return whole === null ? null : cut(whole, most).text || null; };
   const text = line(value.text);
   const none = { note: short(value.note), text: null, to: null, place: null, seconds: null, until: null };
-  // How long the action lasts, as the field that says it, or null when that is no span of 1 to `most` seconds.
-  const span = (most: number): { seconds: number | null; until: string | null } | null => {
-    const within = (seconds: unknown) => typeof seconds === 'number' && Number.isInteger(seconds) && seconds >= 1 && seconds <= most;
-    if (value.until === undefined || value.until === null || (typeof value.until === 'string' && !value.until.trim())) return within(value.seconds) ? { seconds: value.seconds as number, until: null } : null;
+  // How long the action lasts, as the field that says it, or null when that is no whole number of seconds from 1 on
+  // and no time of day. A span longer than `most`, in seconds or to a time of day, is `most` seconds and is marked.
+  const span = (most: number): { seconds: number | null; until: string | null; capped?: true } | null => {
+    const capped = { seconds: most, until: null, capped: true as const };
+    if (value.until === undefined || value.until === null || (typeof value.until === 'string' && !value.until.trim())) {
+      const seconds = value.seconds;
+      return typeof seconds !== 'number' || !Number.isInteger(seconds) || seconds < 1 ? null : seconds > most ? capped : { seconds, until: null };
+    }
     const time = typeof value.until === 'string' ? /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.until.trim()) : null;
     const until = time ? `${time[1].padStart(2, '0')}:${time[2]}` : null;
-    return until && within(secondsUntil(world, actor.freeAt, until)) ? { seconds: null, until } : null;
+    return !until ? null : secondsUntil(world, actor.freeAt, until) > most ? capped : { seconds: null, until };
   };
   // A `say` is addressed only to a figure of the place the speaker is in; any other `to` is dropped.
   const figure = world.places.find(place => place.id === actor.place)?.figures.find(item => item.id === value.to)?.id ?? null;

@@ -20,7 +20,7 @@ import { readWorld } from './laws.ts';
 import { SINKS } from './things.ts';
 import type { Thing } from './things.ts';
 import { clockAt, speechSeconds } from './time.ts';
-import { GESTURE_WORDS, SAYS_WORDS, sizeOf, wordsOf } from './world.ts';
+import { GESTURE_WORDS, MAX_SECONDS, MAX_SLEEP, SAYS_WORDS, sizeOf, wordsOf } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
 // The weather changes every ten minutes of the story, from the fifth on; every third change does not get under a roof.
@@ -228,7 +228,8 @@ function standIn(record: () => number) {
       // A gesture and words for a deed come with any action, too long now and then: only a `say` keeps the one and a `do` the other.
       const none = { text: null, to: null, place: null, seconds: null, until: null, gesture: roll * 100 % 1 < 0.4 ? words(upTo(20)) : null, says: roll * 10_000 % 1 < 0.4 ? words(upTo(30)) : null,
         note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
-      // A time of day at random: for a wait it is mostly out of reach, for a sleep about half the time.
+      // A time of day at random: for a wait it is mostly out of reach, for a sleep about half the time, and such a span
+      // is cut to the longest one; now and then a wait names no time of day at all, which is refused.
       const figures = [...request.messages[0].content.matchAll(/\n- Figure \d+ \((f\d+)\)\./g)].map(match => match[1]);
       const until = `${String(upTo(24) - 1).padStart(2, '0')}:${String(upTo(60) - 1).padStart(2, '0')}`;
       answer = roll < 0.02 ? 'not an action' : roll < 0.03 ? { ...none, action: 'fly' } : roll < 0.04 ? { ...none, action: 'say' }
@@ -239,7 +240,7 @@ function standIn(record: () => number) {
             : roll < 0.7 ? { ...none, action: 'go', place: `p${upTo(PLACES) - 1}` }
               : roll < 0.8 ? { ...none, action: 'do', text: words(upTo(120)), seconds: upTo(600) }
                 : roll < 0.86 ? { ...none, action: 'wait', seconds: upTo(300) }
-                  : roll < 0.9 ? { ...none, action: 'wait', until, seconds: 5 }
+                  : roll < 0.9 ? { ...none, action: 'wait', until: roll < 0.87 ? 'noon' : until, seconds: 5 }
                     : roll < 0.95 ? { ...none, action: 'sleep', until } : { ...none, action: 'sleep', seconds: upTo(roll < 0.96 ? 43_200 : 1800) };
     }
     // Now and then the model writes on to its limit, whatever it was asked: the connection then fails with this code.
@@ -262,7 +263,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
 
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
-  const count = { say: 0, call: 0, gestured: 0, spoken: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
+  const count = { say: 0, call: 0, gestured: 0, spoken: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, capped: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
     json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, declined: 0, result: 0, nothing: 0, woken: 0, spent: 0, posed: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0, reply: 0, silent: 0,
     moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0, felt: 0, feltAsleep: 0, feltAway: 0, feltEmpty: 0,
     lore: 0, loreMoved: 0, loreParted: 0, loreHidden: 0, beyond: 0, wokenBeyond: 0, wokenMute: 0, unwoken: 0, wokenFar: 0, hush: 0,
@@ -556,6 +557,11 @@ test('thousands of steps of any answers leave a journal in which every law of th
       law('speech', record.at >= (held.get(record.who) ?? 0), seq);
       if (typeof record.action === 'string') count[record.action] += 1;
       else if (record.action.until !== null) count.until += 1;
+      else if (record.action.capped) {
+        // A span that was cut lasts the longest one.
+        law('limit', event.seconds === (event.kind === 'sleep' ? MAX_SLEEP : MAX_SECONDS), seq);
+        count.capped += 1;
+      }
     }
     for (const id of event.heard) {
       law('absent', !away.has(id) && !asleep.has(id), seq);

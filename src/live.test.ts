@@ -232,25 +232,49 @@ test('a time of day is the next moment the clock shows it, within the span the a
     const state = begin(world);
     for (const person of state.people) person.freeAt = at;
     const action = readAction(world, state.people[0], act('x', more));
-    return typeof action === 'string' ? action : [action.seconds, action.until, advance(world, state, { kind: 'act', who: 'anna', at, limit: 65, action }).seconds];
+    return typeof action === 'string' ? action : [action.seconds, action.until, advance(world, state, { kind: 'act', who: 'anna', at, limit: 65, action }).seconds,
+      ...(action.capped === undefined ? [] : [action.capped])];
   };
-  // Across midnight, and to the last second of each span; one minute more is refused, and so is the minute it is now.
+  // Across midnight, and to the last second of each span; one minute more, and the minute it is now, which is a whole
+  // day ahead, last the longest span in seconds, and only those are marked.
   assert.deepEqual(read({ action: 'wait', until: '00:10' }), [null, '00:10', 1200]);
   assert.deepEqual(read({ action: 'do', text: 'reads', until: '0:50', seconds: 5 }), [null, '00:50', 3600]);
-  assert.equal(read({ action: 'wait', until: '00:51' }), 'time');
+  assert.deepEqual(read({ action: 'wait', until: '00:51' }), [3600, null, 3600, true]);
   assert.deepEqual(read({ action: 'sleep', until: '11:50' }), [null, '11:50', 43_200]);
-  assert.equal(read({ action: 'sleep', until: '11:51' }), 'time');
-  assert.equal(read({ action: 'sleep', until: '23:50' }), 'time');
+  assert.deepEqual(read({ action: 'sleep', until: '11:51' }), [43_200, null, 43_200, true]);
+  assert.deepEqual(read({ action: 'sleep', until: '23:50' }), [43_200, null, 43_200, true]);
   assert.deepEqual(read({ action: 'wait', until: '23:51' }, late + 59), [null, '23:51', 1]);
-  assert.equal(read({ action: 'sleep', until: 'six' }), 'time');
   assert.deepEqual(read({ action: 'sleep', seconds: 43_200 }), [43_200, null, 43_200]);
-  assert.equal(read({ action: 'sleep', seconds: 43_201 }), 'time');
+  assert.deepEqual(read({ action: 'sleep', seconds: 43_201 }), [43_200, null, 43_200, true]);
+  assert.deepEqual(read({ action: 'wait', seconds: 43_200 }), [3600, null, 3600, true]);
+  assert.deepEqual(read({ action: 'do', text: 'reads', seconds: 3601 }), [3600, null, 3600, true]);
+  // What is no span at all is refused as before: no whole number from 1 on, no time of day, neither of the two.
+  for (const more of [{ until: 'six' }, { until: '24:00' }, { until: 600 }, { seconds: 0 }, { seconds: -5 }, { seconds: 5000.5 }, { seconds: '50000' }, {}]) {
+    for (const action of ['do', 'wait', 'sleep']) assert.equal(read({ action, text: 'reads', ...more }), 'time');
+  }
   // A record keeps one of the two, and a reason of the list or an action: the journal refuses the rest.
   const wait = { action: 'wait' as const, text: null, to: null, place: null, seconds: 600, until: null, note: null };
   const taken = (action: unknown) => advance(world, begin(world), { kind: 'act', who: 'anna', at: 0, limit: 65, action } as Record);
   assert.equal(taken(wait).seconds, 600);
   assert.equal(taken('here').seconds, 30);
   for (const action of [{ ...wait, until: '10:00' }, 'tired', null]) assert.throws(() => taken(action), JournalError);
+  // The mark of a cut span stands only on an action that lasts the longest span in seconds.
+  assert.equal(taken({ ...wait, seconds: 3600, capped: true }).seconds, 3600);
+  for (const action of [{ ...wait, capped: true }, { ...wait, seconds: 3600, capped: false }, { ...wait, seconds: null, until: '09:30', capped: true },
+    { ...wait, action: 'sleep', seconds: 3600, capped: true }, { ...wait, action: 'go', place: 'blue', seconds: null, capped: true }]) assert.throws(() => taken(action), JournalError);
+  // A run in which two ask for too much: neither turn is lost, each reads the seconds its action lasts in the line of
+  // any such action and nothing of the cut, the mark is in the record and not in the event, and the journal replays.
+  const over = standIn({ anna: [act('wait', { seconds: 7200 })], boris: [act('sleep', { until: '08:59' }), JSON.stringify({ memory: 'LONG-BORIS' })] });
+  const kept = memoryStore();
+  const ran = await runLive({ world, respond: over.respond, model: 'stand-in', minutes: 900, calls: 30, journal: kept });
+  const acts = ['anna', 'boris'].map(who => kept.all.find(entry => entry.record.kind === 'act' && entry.record.who === who)!);
+  assert.deepEqual(acts.map(({ record, event }) => [record.kind === 'act' && typeof record.action === 'object' && record.action.capped, event.kind, event.seconds, 'capped' in event]),
+    [[true, 'wait', 3600, false], [true, 'sleep', 43_200, false]]);
+  assert.equal(ran.invalid, 0);
+  assert.match(over.sent.anna[1].messages[0].content, /^So far:\n09:00:00 You wait \(3600 s\)\.\n/);
+  assert.doesNotMatch(JSON.stringify(over.sent), /capped|could not be used/);
+  assert.equal(replay(world, kept.all).seq, kept.all.length);
+  assert.throws(() => replay(world, kept.all.map(entry => entry === acts[0] ? { ...entry, record: { ...entry.record, action: { ...wait, seconds: 600, capped: true } } } : entry)), JournalError);
   // A walk takes the minutes a pair gives, else the straight line at the world's pace, else the world's minutes.
   const spread = readWorld({ title: 'T', about: 'A.', clock: '09:00', travelMinutes: 7, walkMetresPerMinute: 100, characters: [{ id: 'a', name: 'A', place: 'p', sheet: 'S' }],
     places: [{ id: 'p', name: 'P', about: 'P.', at: [0, 0], minutesTo: { q: 2 } }, { id: 'q', name: 'Q', about: 'Q.', at: [3000, 4000] }, { id: 'r', name: 'R', about: 'R.', at: [30, 40] },
