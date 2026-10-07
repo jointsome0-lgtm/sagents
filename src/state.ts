@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { StateError } from './journal.ts';
 import type { Entry, Store } from './journal.ts';
 
-const FORMAT = '17';
+const FORMAT = '18';
 // SQLite's own result codes for a statement that names what the file does not have, for a file another connection
 // holds, and for a file that is not a database.
 const NO_SUCH = 1, BUSY = 5, NOT_A_DATABASE = 26;

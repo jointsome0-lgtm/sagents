@@ -121,7 +121,11 @@ world in another language has been run with a real model.
 The rules of time and hearing:
 
 - The clock counts whole seconds of the story, and from the second day on a time names its day. The character who
-  is free first plays next.
+  is free first plays next. Of those free at one instant, whoever arrives comes first and whoever wakes after them,
+  so everyone who comes or wakes at an instant has done so before anyone takes a turn at it: two who walk to a place
+  together are both there when either looks around. This order has been run on no real model yet. A state file
+  written under the earlier order, where a turn could come between two arrivals of one instant, is of another
+  version and is refused.
 - Speech lasts as long as its words take at the world's `wordsPerMinute`, 130 by default. A `say` or a `call` holds at
   most 65 words. A longer one is cut. So are a note and the text of a `do`.
 - Everyone in the speaker's place hears a `say` and is held until it ends, so people in one place take turns.

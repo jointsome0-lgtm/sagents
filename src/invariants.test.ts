@@ -75,6 +75,7 @@ const world = readWorld(JSON.parse(source), JSON.parse(ENVIRONMENT));
 // The laws of a live world, each one sentence. A run that breaks one fails with that sentence and the record's number.
 export const LAWS = {
   time: 'Time never goes back.',
+  order: 'Nobody takes a turn at an instant before everyone who arrives or wakes at that instant has done so.',
   place: 'Nobody perceives what happened in another place, except the one a call was made to and those next door to a deed, who are told only what the world says is heard there.',
   absent: 'A traveller or a sleeper perceives nothing and takes no action.',
   speech: 'Nobody acts before a speech they are hearing or making has ended.',
@@ -263,8 +264,10 @@ test('thousands of steps of any answers leave a journal in which every law of th
     json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, declined: 0, result: 0, nothing: 0, woken: 0, spent: 0, posed: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0, reply: 0, silent: 0,
     moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0, felt: 0, feltAsleep: 0, feltAway: 0, feltEmpty: 0,
     lore: 0, loreMoved: 0, loreParted: 0, loreHidden: 0, beyond: 0, wokenBeyond: 0, wokenMute: 0, unwoken: 0, wokenFar: 0, hush: 0,
-    keptWords: 0, keptBoth: 0, keptLists: 0, keptNone: 0 };
+    keptWords: 0, keptBoth: 0, keptLists: 0, keptNone: 0, met: 0 };
   const sleepEnds = new Map<string, number>();
+  // The instant of the latest turn, an action or a falling asleep at the limit, and the latest arrival or waking.
+  let turned = -1, came = { at: -1, who: '' };
   // Each one's sleep debt, counted here from the events alone: one for a second awake, two back for a second asleep.
   const debts = new Map(world.characters.map(character => [character.id, { debt: 13 * 3600, since: 0 }]));
   const debtOf = (id: string, now: number) => { const { debt, since } = debts.get(id)!; return asleep.has(id) ? Math.max(0, debt - 2 * (now - since)) : debt + now - since; };
@@ -536,6 +539,15 @@ test('thousands of steps of any answers leave a journal in which every law of th
     if ((record.kind === 'act' || record.kind === 'spent' || record.kind === 'memory') && roused.has(record.who)) {
       law('door', record.at === Math.max(roused.get(record.who)!, held.get(record.who) ?? 0), seq);
       roused.delete(record.who);
+    }
+    if (record.kind === 'act' || record.kind === 'spent') {
+      // A turn of someone else at the instant at which someone came or woke: that one was there to be seen.
+      if (record.at === came.at && record.who !== came.who) count.met += 1;
+      turned = record.at;
+    }
+    if (record.kind === 'arrive' || record.kind === 'wake') {
+      law('order', record.at > turned, seq);
+      came = { at: record.at, who: record.who };
     }
     if (record.kind === 'act') {
       law('absent', !away.has(record.who) && !asleep.has(record.who), seq);

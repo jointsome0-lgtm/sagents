@@ -243,6 +243,16 @@ Now morning, as far as you can tell: no clock is at hand. You are in Red room (r
   assert.doesNotMatch(JSON.stringify(sent.anna), /\d\d:\d\d:\d\d/);
 });
 
+test('two who leave for one place at one instant have both arrived before either takes a turn there, and each is told the other is with it', async () => {
+  const { sent, respond } = standIn({ anna: [act('go', { place: 'blue' })], boris: [act('go', { place: 'blue' })] });
+  const journal = memoryStore();
+  await runLive({ world, respond, model: 'stand-in', minutes: 2, journal, pause: true });
+  const there = journal.all.filter(entry => entry.event.at === 60).map(entry => `${entry.record.kind} ${entry.event.who}`);
+  assert.deepEqual(there.slice(0, 4), ['arrive anna', 'arrive boris', 'act anna', 'act boris']);
+  assert.match(sent.anna[1].messages[0].content, /\nNow 09:01:00\. You are in Blue room \(blue\)\. Here with you:\n- Boris \(boris\)\.\n- Clara \(clara\)\.\n- Dan \(dan\)\.\n/);
+  assert.match(sent.boris[1].messages[0].content, /\n09:01:00 You arrive in Blue room\.\n\nNow 09:01:00\. You are in Blue room \(blue\)\. Here with you:\n- Anna \(anna\)\.\n/);
+});
+
 test('a character with a model of its own is asked through that connection under that name, for a turn and for a memory alike', async () => {
   const most = standIn({ boris: [act('say', { text: 'hello' })] });
   const hers = standIn({ anna: [act('sleep', { seconds: 5 }), act('wait', { seconds: 1 }), act('sleep', { seconds: 20 }), 'no memory', JSON.stringify({ memory: 'LONG-ANNA' }), act('wait', { seconds: 600 })] });

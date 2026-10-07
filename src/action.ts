@@ -22,9 +22,15 @@ export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(rea
 export const start = (world: World): Person[] => world.characters.map(({ id, place, pose }) =>
   ({ id, place, pose, heading: null, asleep: false, freeAt: 0, began: null, speaking: 0, listening: 0 }));
 
-// The next to play: the one free first, then the one whose own last action began earliest, then the world file's order.
+// What the clock brings someone who is free, before any turn: an arrival for one on the way, then a waking for a sleeper.
+const due = (person: Person) => person.place === null ? 0 : person.asleep ? 1 : 2;
+// The next to play: the one free first. Of those free at one instant, whoever arrives comes first and whoever wakes
+// after them, so that everyone who comes or wakes at an instant has done so before anyone takes a turn at it and no
+// turn is told that someone who is there is not. Then the one whose own last action began earliest, then the world
+// file's order.
 export const next = (people: Person[]): Person => people.reduce((first, person) =>
-  person.freeAt < first.freeAt || (person.freeAt === first.freeAt && (person.began ?? -1) < (first.began ?? -1)) ? person : first);
+  person.freeAt < first.freeAt || (person.freeAt === first.freeAt && (due(person) < due(first)
+    || (due(person) === due(first) && (person.began ?? -1) < (first.began ?? -1)))) ? person : first);
 
 // A character's answer as an action it can take now, or the reason why it cannot be used. A field the action does not
 // use is dropped whatever it held, and of `until` and `seconds` only one is kept: `until` when it was given. A text
