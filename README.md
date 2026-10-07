@@ -3,8 +3,8 @@
 Story agents. A coding agent gets a shell and a patch tool and works in a repository. A story agent gets an interactive
 story: its scenes, the moves that continue it, its checkpoints and its memory. sagents is the program that runs them.
 
-It is early. Today sagents sends one request to a model, through a ChatGPT plan or to a server that speaks the OpenAI
-chat completions protocol, and runs a first prototype of the live mode. The agent loop and the story tools come next;
+It is early. Today sagents sends one request to a model, to a server that speaks the OpenAI chat completions protocol
+or through a ChatGPT plan, and runs a first prototype of the live mode. The agent loop and the story tools come next;
 for the live world, [what comes next](#what-comes-next-for-the-live-world) is listed below. This page keeps what works
 and what is planned apart.
 
@@ -48,6 +48,60 @@ publishing it there by mistake. `npm link`, run once in the checkout, makes `sag
 link to `src/cli.ts`, so the command is always the checkout as it stands. Without it `node src/cli.ts` takes the same
 arguments, and `sagents help` lists them.
 
+With a server that speaks the OpenAI chat completions protocol, vLLM or llama.cpp on a card or OpenRouter, an example
+world is played from a clone like this:
+
+```sh
+git clone https://github.com/jointsome0-lgtm/sagents.git && cd sagents
+export SAGENTS_API_URL=http://127.0.0.1:8000/v1       # the versioned root of your server
+read -rs SAGENTS_API_KEY && export SAGENTS_API_KEY    # when the server asks for a key: typed, not shown, not in the history
+node src/cli.ts live examples/seaside-cafe.json --model api:google/gemma-4-31b-it --calls 12
+```
+
+After `api:` stands the id that your server knows the model by. `live` has that model play the two residents of
+`examples/seaside-cafe.json`, a café by the sea with a waitress whom nobody plays, and stops after 12 requests. It
+prints each event as it happens, one line with the story's clock, the place, who and what, with the resident's
+private note under it, and then the totals:
+
+```
+12:50:00 [Café «Anchor»] Nina to Raya (a small smile and a wave of the hand): "Could I have a coffee, please?"
+         private note of Nina: I'm early, but the wind is quite strong. I should get a drink before Oleg arrives so I'm settled.
+12:50:00 [Café «Anchor»] Raya answers Nina: "Of course, dear. I'll bring it right over."
+12:50:00 [Beach] Oleg leaves for Café «Anchor» (192 s)
+         private note of Oleg: I should head to the cafe now so I'm not late for Nina. I'm really looking forward to that fish.
+...
+done (calls): 3.9 story minutes, 12 calls, 0 invalid, 0 of them cut at the output limit, 0 of them declined by the service, 0 memory rewrites, 0 lost, 0 answers of the world refused, 0 deeds left with nothing, 24134 input tokens, 3520 of them cached, 1281 output tokens
+  api:google/gemma-4-31b-it: 12 calls, 0 invalid, 0 of them cut at the output limit, 0 of them declined by the service, 24134 input tokens, 3520 of them cached, 1281 output tokens, answered by CoreWeave 8, ModelRun 1, Venice 1, DeepInfra 2
+  turns: 10 calls, 20383 input tokens, 3520 of them cached, 1173 output tokens
+  memory rewrites: 0 calls, 0 input tokens, 0 of them cached, 0 output tokens
+  answers of the world: 2 calls, 3751 input tokens, 0 of them cached, 108 output tokens
+```
+
+These are the first lines and the totals of a real run: the check of release 0.1.0 ran the last command as it stands
+on OpenRouter with Gemma 4 31B, with nothing set but the address and the key, from a copy of the repository with
+nothing installed. The clone and the line of the key were not run in that check, and a model writes something else
+every time. The model's own line is there because that router names the endpoint that answered. The four endpoints
+are its choice for a run that is told nothing: [A server of your own](#a-server-of-your-own) says how one is named
+and what share of a request was then read from a cache.
+
+- The server must hold an answer to a schema: every request of `live` carries one as a strict `json_schema`
+  `response_format`. A server that refuses the field ends the run at its first request, and one that ignores it and
+  answers in plain text fails nothing. Both were played against a stand-in for such a server on the same computer.
+  When it answered HTTP 400, the totals began `failed (invalid_request 400 unsupported_parameter response_format)`,
+  the server's own code and field name after the status. When it answered in plain text, no answer could be used and
+  each counted as a wait of 30 seconds, which prints no line, so the run printed only its totals, `done (calls)` with
+  as many `invalid` as `calls`.
+- `--calls` is the most requests one run sends, 60 when it is not given, and every request counts, whatever it is
+  for: a resident's turn, the world's answer to a deed, a memory rewrite. The run also ends after `--minutes` of the
+  story, 30 by default.
+- Without `--model` the residents are played through the ChatGPT plan, which needs the `login` below.
+- The address is `https`, or plain `http` to this computer only; a card elsewhere is reached through an SSH tunnel to
+  a local port or over `https`. This, the other settings and what is sent to whom are under
+  [A server of your own](#a-server-of-your-own).
+
+With a ChatGPT plan in place of a server, `login` signs this computer in once. `ask` sends one request by either
+connection:
+
 ```sh
 sagents login
 sagents status
@@ -70,7 +124,7 @@ of tokens is never lost unsaved, and a call whose limit passed meanwhile ends wi
 
 | Field | Meaning |
 | --- | --- |
-| `model` | A model id of the ChatGPT plan, or `<id>@<effort>` with `minimal`, `low`, `medium`, `high` or `xhigh`. `api:<id>` is a model of [your own server](#a-server-of-your-own). |
+| `model` | `api:<id>`, a model of [your own server](#a-server-of-your-own); or a model id of the ChatGPT plan, alone or as `<id>@<effort>` with `minimal`, `low`, `medium`, `high` or `xhigh`. |
 | `messages` | `user` and `assistant` messages with text `content`. |
 | `system` | Optional instructions. |
 | `schema` | Optional JSON Schema, in OpenAI's strict form, that the answer must follow. |
@@ -97,12 +151,14 @@ call that ends in a failure, `wrong_model` included, may have handed over a part
 | `output_limit`, `incomplete_stream`, `invalid_stream`, `invalid_response`, `empty_response` | The answer did not arrive whole or cannot be read. |
 | `declined` | The service declined to write an answer. On the plan's stream that is an event of a refusal (`response.refusal.delta`, `response.refusal.done`), an answer left incomplete by the `content_filter`, or a part of type `refusal` in the closing event; from an `api:` server, a `finish_reason` of `content_filter` or a message with a `refusal`. Nothing of what the service wrote is kept. These shapes are taken from what the two APIs document: no refusal of a real service was seen, so a service that declines in another shape is reported under another code, `empty_response` or `incomplete_stream` most likely. |
 | `wrong_model` | The plan's service said that another model answers than the one asked for. Nothing of that answer is returned. Checked only for the ChatGPT plan, and only when the stream names a model: a stream that names none is taken as it is, and an `api:` server's answer is not checked. |
+| `unexpected_tools` | The answer held a call of a tool, and sagents offers none. Nothing of that answer is returned. |
 | `timeout`, `cancelled` | The call's own limit, or its caller, stopped it. |
 | `storage_failed` | The account file or its lock could not be read or written. An account file that cannot be read or understood is left as it is; repair or remove it by hand in `~/.config/sagents/`. |
+| `internal_error` | sagents itself failed in a way that has no code of its own. |
 
 In its own checks this code talks to stand-ins for both services and to nothing else. Beyond them it has been used
-with one account of a ChatGPT plan and with one chat completions server, so what another account or server does
-differently is not known.
+with one account of a ChatGPT plan and with two chat completions servers, a router (OpenRouter) and vLLM behind a
+gateway on a rented card, so what another account or server does differently is not known.
 
 ### A live world
 
@@ -112,15 +168,23 @@ sagents live examples/night-station.json [--model <id>] [--cast <character>=<id>
 ```
 
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
-each with a place and a sheet. Every character is played by the model, `gpt-6.1-sol@low` unless `--model` says
-otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-your-own). One turn is one request
+each with a place and a sheet. Every character is played by the model that `--model` names: `--model api:<id>` plays
+them on [a server of your own](#a-server-of-your-own), and without `--model` it is `gpt-6.1-sol@low` of the ChatGPT
+plan. One turn is one request
 and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note. A `say` may come with a `gesture`, what the speaker's face, hands or body do meanwhile, which those in the place are told in the line of the speech and which never reaches the world; a `do` may come with `says`, words said aloud while doing it, which everyone in the place hears as a speech of that moment before the deed goes to the world as any deed does. Both were measured together with the note's place in a rain scene of two, 160 requests: Gemma 4 31B gave a gesture with 11 speeches of 11 and words with 10 deeds of 13, GPT-6 Luna at low effort a gesture with 18 speeches of 18 and words with none of 7 deeds. The note is the first field of an answer, so that it is written before the action is chosen: in that measurement it was the first field written in 28 answers of 28 on Gemma and in 32 of 32 on Luna, where the action had been first before; whether an action now follows from its note was not counted. The rules ask a note to be no plan but what is going on in the character at that moment: what it notices in those with it, what its body feels, what it wants and what holds it back, so that no sheet has to say what a note is for.
 `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
 what each one remembers after the night decides what happens; `examples/seaside-cafe.json` is a café with a
 crowd and a waitress whom nobody plays, in a town whose places lie on a map. The three examples are written in
 English, translated from Russian. What the models are told is in English and asks for answers in the language of the
-world's description; every measurement reported here was made on the Russian texts, and the translated examples
-have been played on no model yet.
+world's description; every other measurement reported here was made on the Russian texts. The translated examples
+were played for release 0.1.0 on Gemma 4 31B through OpenRouter, 132 requests in all: each example for 36, with the
+model's reasoning off and one endpoint of the router named as the only one that may answer, and the station and the
+café for 12 more each by the command of the start above, with nothing set but the address and the key. Every request
+was answered, every answer could be used, and nothing was written in Russian. `examples/night-station.json` lists no
+things, so in its two runs the world answered all 7 deeds, 6 of them searches, with nothing found; the other two
+examples list theirs. Earlier that day, on the engine before its last two changes, the café was played once on a
+rented card, by a small Gemma (E2B) under vLLM behind a gateway, as a stream: 16 requests, of which 15 were answered
+before a failure of the connection ended the run, and 9 of the 15 answers could not be used.
 
 The rules of time and hearing:
 
@@ -510,8 +574,10 @@ law and the record. Each law is one sentence, and they are written in one place:
 `src/invariants.test.ts`.
 
 The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
-rewrite is a request too. It stops at the first failure of the model connection and tries nothing again, with one
-exception: an answer that the model's own limit cut short (`output_limit`) is an answer that cannot be used. For a
+rewrite is a request too. It stops at the first failure of the model connection and tries nothing again, with two
+exceptions. A request that the service declined to answer (`declined`) counts as a request and as an unusable answer,
+as the rules of time and hearing above say, and only the third in a run ends it. And an answer that the model's own
+limit cut short (`output_limit`) is an answer that cannot be used. For a
 turn it is a lost turn like any other, for the world's answer and a memory rewrite it is one of their two tries,
 and it counts as a request, with no tokens known for it. Three such answers of one model in a row, with no answer
 of that model arriving whole in between, end the run as `failed (output_limit)`. It prints
@@ -628,7 +694,8 @@ in English or in Russian: in the language that `--lang` names, or `SAGENTS_LAB_L
 with neither in Russian for a browser set to Russian and in English for any other. Any other value is refused. The
 language goes to the page in the address that the command prints and opens, as `?lang=ru`. In its review the page was
 opened in Chrome over synthetic runs, in English: the list with its groups, the folded rehearsals, the narrowing, the
-feed, the transcript and the numbers. The Russian page and the choice of the language were opened in no browser yet.
+feed, the transcript and the numbers. The Russian page was opened in the review of the command too, over synthetic
+runs: the list, the feed and the numbers.
 
 What the lab may do with the files, and `lab/lab.test.ts` holds it to that:
 
@@ -652,30 +719,6 @@ page is plain files that the browser loads as they are: `lab/page.html`, `lab/ap
 
 There are two, and the name of the model chooses between them (`src/model.ts`). Neither tries a request a second
 time: a failure comes back as a code, and the caller decides.
-
-### ChatGPT plan
-
-sagents uses OpenAI's [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) for
-open-source and locally run tools. At the first sign-in it registers itself as a client of your account. Its requests
-go to the public Responses API and count against your ChatGPT plan, so there is no API key. OpenAI offers this to
-eligible Plus and Pro accounts. In [ChatGPT's settings](https://chatgpt.com/settings/usage) you can limit the share of
-the plan that sagents may use, or disconnect it.
-
-What sagents keeps and what it sends:
-
-- The tokens are in `~/.config/sagents/chatgpt.json`, a file only your user can read. sagents does not keep the ID token
-  or your email.
-- A request holds the instructions, the messages and the schema you gave it. sagents adds no text of its own.
-- A request that has a `cache` name carries it three times: as `prompt_cache_key` in the body and as the headers
-  `session-id` and `x-client-request-id`. The plan's route reads far more of a request from its cache with them:
-  8 or 9 requests of 20 against 1 to 3 without. A request with no name has none of the three.
-- Every request has `store: false`. sagents writes no log of requests or answers.
-- A failure is a code, with the HTTP status and OpenAI's own error code and field name when there were any. sagents
-  never prints OpenAI's error text, which can quote the request.
-- When the plan's limit, or the share of it given to sagents, is used up, sagents stops with `budget_exceeded` and tries
-  nothing else.
-- Several sagents processes may run at once. They take turns to renew the tokens through a lock next to the account
-  file, because OpenAI replaces the renewing token at every use.
 
 ### A server of your own
 
@@ -721,6 +764,14 @@ What sagents sends and to whom:
   digits, space, `.`, `/`, `-` and `_`; any other string, and any name after the sixteenth of a model in one run,
   is counted as `other`. A server that sends no such field changes nothing. The journal and the state file do not
   hold it, and an answer that failed is counted under no endpoint.
+- A router that is told nothing may spread the requests of one run over its endpoints, and then little of a request
+  is read from a cache. In the check of release 0.1.0, on OpenRouter with Gemma 4 31B, two runs of 12 requests with
+  nothing set but the address and the key were answered by three and by four endpoints, and 7 and 15 percent of their
+  input tokens were read from a cache. Three runs of 36 requests whose `SAGENTS_API_EXTRA` named a session and the one
+  endpoint that may answer, `{"reasoning":{"enabled":false},"session_id":"<a name of the run>","provider":{"quantizations":["fp4"],"order":["<endpoint>"],"allow_fallbacks":false}}`,
+  were each answered by that endpoint alone and read 71 to 75 percent, 64 to 71 in their first 12 requests. For the
+  café, the one world played both ways, that is 71 percent of 24,247 input tokens against 15 percent of 24,134. These
+  are OpenRouter's own fields, which of them made the difference was not taken apart, and nothing else was compared.
 - The address is `https`, or plain `http` to this computer only (`localhost`, `127.0.0.1`, `::1`), with a key or
   without one: neither the key nor the text travels unencrypted. Any other address is refused before a request is
   made. Reach a rented card through an SSH tunnel to a local port or over `https`.
@@ -731,6 +782,30 @@ What sagents sends and to whom:
 - An answer cut by `max_tokens` is `output_limit`, without the text. An `@<effort>` after the id means nothing here
   and is refused; the server's own switch goes into `SAGENTS_API_EXTRA`.
 - HTTP 402 is `budget_exceeded`: sagents stops and tries nothing else.
+
+### ChatGPT plan
+
+sagents uses OpenAI's [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) for
+open-source and locally run tools. At the first sign-in it registers itself as a client of your account. Its requests
+go to the public Responses API and count against your ChatGPT plan, so there is no API key. OpenAI offers this to
+eligible Plus and Pro accounts. In [ChatGPT's settings](https://chatgpt.com/settings/usage) you can limit the share of
+the plan that sagents may use, or disconnect it.
+
+What sagents keeps and what it sends:
+
+- The tokens are in `~/.config/sagents/chatgpt.json`, a file only your user can read. sagents does not keep the ID token
+  or your email.
+- A request holds the instructions, the messages and the schema you gave it. sagents adds no text of its own.
+- A request that has a `cache` name carries it three times: as `prompt_cache_key` in the body and as the headers
+  `session-id` and `x-client-request-id`. The plan's route reads far more of a request from its cache with them:
+  8 or 9 requests of 20 against 1 to 3 without. A request with no name has none of the three.
+- Every request has `store: false`. sagents writes no log of requests or answers.
+- A failure is a code, with the HTTP status and OpenAI's own error code and field name when there were any. sagents
+  never prints OpenAI's error text, which can quote the request.
+- When the plan's limit, or the share of it given to sagents, is used up, sagents stops with `budget_exceeded` and tries
+  nothing else.
+- Several sagents processes may run at once. They take turns to renew the tokens through a lock next to the account
+  file, because OpenAI replaces the renewing token at every use.
 
 ## Development
 

@@ -1,10 +1,14 @@
 {
   "name": "sagents",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Story agents: models that live in an interactive story or evaluate one.",
   "private": true,
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jointsome0-lgtm/sagents.git"
+  },
   "engines": {
     "node": ">=24.9.0"
   },
