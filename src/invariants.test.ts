@@ -19,8 +19,8 @@ import { openState } from './state.ts';
 import { readWorld } from './laws.ts';
 import { SINKS } from './things.ts';
 import type { Thing } from './things.ts';
-import { clockAt } from './time.ts';
-import { sizeOf } from './world.ts';
+import { clockAt, speechSeconds } from './time.ts';
+import { GESTURE_WORDS, SAYS_WORDS, sizeOf, wordsOf } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
 // The weather changes every ten minutes of the story, from the fifth on; every third change does not get under a roof.
@@ -79,7 +79,7 @@ export const LAWS = {
   place: 'Nobody perceives what happened in another place, except the one a call was made to and those next door to a deed, who are told only what the world says is heard there.',
   absent: 'A traveller or a sleeper perceives nothing and takes no action.',
   speech: 'Nobody acts before a speech they are hearing or making has ended.',
-  limit: 'A speech never holds more words than its turn allowed.',
+  limit: 'A speech never holds more words than its turn allowed, the words said with a deed never more than that or than twenty, and a gesture never more than twelve; only a `say` has a gesture and only a `do` such words.',
   arrival: 'A traveller arrives in the place it set out for.',
   memory: 'A long-term memory never exceeds its limit in words.',
   folded: 'The record up to which a character\'s lines were folded never moves back.',
@@ -225,7 +225,9 @@ function standIn(record: () => number) {
       answer = roll < 0.08 ? { memory: '' } : roll < 0.12 ? { memory: 'x'.repeat(5000) } : { memory: words(roll < 0.3 ? 61 + upTo(100) : upTo(60)) };
     } else {
       seen.turns?.push(askedOf(request, record(), asker(request), true));
-      const none = { text: null, to: null, place: null, seconds: null, until: null, note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
+      // A gesture and words for a deed come with any action, too long now and then: only a `say` keeps the one and a `do` the other.
+      const none = { text: null, to: null, place: null, seconds: null, until: null, gesture: roll * 100 % 1 < 0.4 ? words(upTo(20)) : null, says: roll * 10_000 % 1 < 0.4 ? words(upTo(30)) : null,
+        note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
       // A time of day at random: for a wait it is mostly out of reach, for a sleep about half the time.
       const figures = [...request.messages[0].content.matchAll(/\n- Figure \d+ \((f\d+)\)\./g)].map(match => match[1]);
       const until = `${String(upTo(24) - 1).padStart(2, '0')}:${String(upTo(60) - 1).padStart(2, '0')}`;
@@ -260,7 +262,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
 
   const place = new Map(world.characters.map(character => [character.id, character.place]));
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
-  const count = { say: 0, call: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
+  const count = { say: 0, call: 0, gestured: 0, spoken: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
     json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, declined: 0, result: 0, nothing: 0, woken: 0, spent: 0, posed: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0, reply: 0, silent: 0,
     moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0, felt: 0, feltAsleep: 0, feltAway: 0, feltEmpty: 0,
     lore: 0, loreMoved: 0, loreParted: 0, loreHidden: 0, beyond: 0, wokenBeyond: 0, wokenMute: 0, unwoken: 0, wokenFar: 0, hush: 0,
@@ -593,7 +595,18 @@ test('thousands of steps of any answers leave a journal in which every law of th
       count.memory += 1;
       if (record.cut) count.memoryCut += 1;
       if (record.text === null) count.memoryLost += 1;
-    } else if (event.kind === 'do') count.do += 1;
+    } else if (event.kind === 'do') {
+      count.do += 1;
+      if (event.says !== undefined) {
+        // The words said with a deed hold the doer and those who hear them as a speech does, and the deed lasts as long at least.
+        const ends = event.at + speechSeconds(world, wordsOf(event.says).length);
+        law('limit', sizeOf(event.says) <= Math.min(SAYS_WORDS, record.kind === 'act' ? record.limit : 0) && event.at + event.seconds >= ends, seq);
+        for (const id of [event.who, ...event.heard]) held.set(id, Math.max(held.get(id) ?? 0, ends));
+        count.spoken += 1;
+      }
+    }
+    law('limit', (event.gesture === undefined || (event.kind === 'say' && sizeOf(event.gesture) <= GESTURE_WORDS)) && (event.says === undefined || event.kind === 'do'), seq);
+    if (event.gesture !== undefined) count.gestured += 1;
   }
   // The run had all of it in it, or the laws above were tried on little. The stand-in's answer comes from the text of
   // the request, so any change of a request's wording plays another run: a kind that then falls short is too rare in

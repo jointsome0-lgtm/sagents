@@ -126,6 +126,36 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.equal(Object.values(short.sent).flat().length, 3);
 });
 
+test('a gesture is seen with its speech, and words said with a deed are heard in its place as a speech and never reach the world', async () => {
+  const { sent, respond } = standIn({
+    anna: [act('say', { text: 'RED-WORD', gesture: 'GESTURE-WORD nods', says: 'DROPPED-SAYS' })],
+    boris: [act('do', { text: 'opens the window', seconds: 1, says: words(25), gesture: 'DROPPED-GESTURE' })],
+  });
+  const journal = memoryStore();
+  await runLive({ world, respond, model: 'stand-in', minutes: 2, journal });
+  // A field its action does not use is dropped, and the words are cut at twenty; neither field is in a record without it.
+  const none = { text: null, to: null, place: null, seconds: null, until: null, note: null };
+  const acts = journal.all.flatMap(({ record }) => record.kind === 'act' && ['anna', 'boris'].includes(record.who) ? [record.action] : []);
+  assert.deepEqual(acts.slice(0, 2),
+    [{ ...none, action: 'say', text: 'RED-WORD', gesture: 'GESTURE-WORD nods' }, { ...none, action: 'do', text: 'opens the window', seconds: 1, says: words(20) }]);
+  assert.equal(journal.all.filter(entry => /gesture|says/.test(JSON.stringify(entry))).length, 2);
+  // Twenty words are twenty seconds: the deed of one second lasts as long, and Anna, who hears them, is held until they end.
+  assert.match(sent.boris[0].messages[0].content, /^So far:\n09:00:00 Anna says \(GESTURE-WORD nods\): "RED-WORD"\n\nNow 09:00:02\./);
+  assert.equal(sent.anna[1].messages[0].content.split('\n\n')[0], `So far:
+09:00:00 You say (GESTURE-WORD nods): "RED-WORD"
+09:00:02 Boris says: "${words(20)}"
+09:00:02 Boris does (20 s): opens the window`);
+  assert.match(sent.anna[1].messages[0].content, /\n\nNow 09:00:22\./);
+  assert.match(sent.boris[1].messages[0].content, /\n09:00:02 You say: "w1 [^\n]* w20"\n09:00:02 You do \(20 s\): opens the window\n09:00:02 Nothing came of it/);
+  // The world is asked about the deed as it is about any, with none of the words; the other room heard nothing.
+  assert.match(sent.world[0].messages[0].content, /\nNow 09:00:02\. Boris does, for 20 s: opens the window\nWhat comes of it\?$/);
+  for (const id of ['world', 'clara', 'dan']) assert.doesNotMatch(JSON.stringify(sent[id]), /w20|GESTURE-WORD/);
+  assert.doesNotMatch(JSON.stringify(sent), /DROPPED|w21/);
+  // The journal replays, and it refuses a record that holds a field with an action that has none.
+  replay(world, journal.all);
+  assert.throws(() => advance(world, begin(world), { kind: 'act', who: 'anna', at: 0, limit: 65, action: { ...none, action: 'say', text: 'RED-WORD', says: 'aside' } }), JournalError);
+});
+
 test('a failing connection stops the run at once with the events so far', async () => {
   const { sent, respond } = standIn({ anna: [act('say', { text: 'one two' })], clara: [act('wait', { seconds: 5 })], dan: [new ModelError('budget_exceeded', 429)] });
   const journal = memoryStore();

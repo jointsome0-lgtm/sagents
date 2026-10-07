@@ -10,6 +10,8 @@ import type { Weather } from './weather.ts';
 export { CHARS_PER_WORD, cut, MAX_FACTS, sizeOf, wordsOf, WorldError } from './reading.ts';
 
 export const MAX_WORDS = 65;
+// The most words of what a speaker's body does meanwhile, and of the words said aloud with a deed.
+export const GESTURE_WORDS = 12, SAYS_WORDS = 20;
 export const MAX_SECONDS = 3600;
 export const MAX_SLEEP = 43_200;
 // What an answer that cannot be used becomes: a wait of this many seconds.
@@ -51,6 +53,8 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // `place` is where it happened; `to` is the character called, the figure spoken to, or the place a `go` leads to; `heard` holds the ids of
 // those who perceived it when it happened, without the one who did it. A `memory` is a character's long-term text
 // written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
+// `gesture`, which only a `say` may have, is what the speaker's face, hands or body did meanwhile, as those in `heard` saw it; `says`, which only a
+// `do` may have, the words said aloud with the deed, which those in `heard` heard as a speech of that moment, and `cut` then says that they were cut at the turn's limit.
 // A `result` is the world's answer to the `do` before it, of the same `who`: `text` is what came of the deed, or null
 // when nothing did that could be noticed, `wakes` the sleepers the deed wakes, `poses` the poses it changed and
 // `feels` what the deed makes a body feel, each line for its owner alone and never part of what those in `heard`
@@ -64,7 +68,7 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // weather, which nobody does and which has no place: `who` and `place` are empty, `text` is the new weather under the
 // open sky and `indoors`, which only this kind has, what of it reaches someone under a roof, or null.
 export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result' | 'reply' | 'weather'; who: string; place: string; to: string | null;
-  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; wakes?: string[];
+  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; gesture?: string; says?: string; wakes?: string[];
   indoors?: string | null; search?: boolean; finds?: string[]; moved?: Posting[]; set?: { what: string; name: string; state: string }[];
   poses?: { of: string; text: string }[]; feels?: { of: string; text: string }[]; beyond?: string | null; nearby?: string[]; found?: { what: string; name: string; spot: string }[] };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in

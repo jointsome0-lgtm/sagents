@@ -2,14 +2,17 @@
 // action as an event, with the actor and those who perceive it moved on.
 import { cut, isObject, wordsOf } from './reading.ts';
 import { clockAt, lasting, secondsUntil, speechSeconds, travelSeconds } from './time.ts';
-import { MAX_SECONDS, MAX_SLEEP, MAX_WORDS } from './world.ts';
+import { GESTURE_WORDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, SAYS_WORDS } from './world.ts';
 import type { Event, Kind, Person, Place, World } from './world.ts';
 
 // One answer of a character, as the schema asks for it: every field is there and an unused one is null. `to` is the
 // character a `call` reaches, or the figure of the speaker's place a `say` is addressed to.
 // `do`, `wait` and `sleep` last `seconds`, or `until` the next moment the clock shows that time of day, `HH:MM`.
+// `gesture`, what the body of one who makes a `say` does meanwhile, and `says`, the words said aloud with a `do`, are
+// the two fields that are absent when there is none and never null, so that an action recorded before they existed
+// still reads back as itself.
 export type Action = { action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; until: string | null;
-  note: string | null };
+  note: string | null; gesture?: string; says?: string };
 // Why an answer could not be used as an action: it was not a JSON object, named no action, lacked its text, called
 // nobody who can be called, led to the place the character is in or to no place, or lasted no time the action allows;
 // or it never arrived whole, because the model wrote on to the limit of one answer (`long`); or the service declined to
@@ -34,7 +37,8 @@ export const next = (people: Person[]): Person => people.reduce((first, person) 
 
 // A character's answer as an action it can take now, or the reason why it cannot be used. A field the action does not
 // use is dropped whatever it held, and of `until` and `seconds` only one is kept: `until` when it was given. A text
-// becomes one line; a note and what a `do` describes keep their first `MAX_WORDS` words, and a speech is cut when it
+// becomes one line; a note and what a `do` describes keep their first `MAX_WORDS` words, a gesture its first
+// `GESTURE_WORDS` and the words said with a `do` their first `SAYS_WORDS`, and a speech is cut when it
 // is made, at that turn's limit. The actor's `freeAt` is the moment of the turn.
 export function readAction(world: World, actor: Person, answer: string): Action | Refusal {
   let value: unknown;
@@ -44,7 +48,7 @@ export function readAction(world: World, actor: Person, answer: string): Action 
   }
   if (!isObject(value)) return 'json';
   const line = (field: unknown) => typeof field === 'string' && field.trim() ? wordsOf(field).join(' ') : null;
-  const short = (field: unknown) => { const whole = line(field); return whole === null ? null : cut(whole, MAX_WORDS).text || null; };
+  const short = (field: unknown, most = MAX_WORDS) => { const whole = line(field); return whole === null ? null : cut(whole, most).text || null; };
   const text = line(value.text);
   const none = { text: null, to: null, place: null, seconds: null, until: null, note: short(value.note) };
   // How long the action lasts, as the field that says it, or null when that is no span of 1 to `most` seconds.
@@ -57,7 +61,8 @@ export function readAction(world: World, actor: Person, answer: string): Action 
   };
   // A `say` is addressed only to a figure of the place the speaker is in; any other `to` is dropped.
   const figure = world.places.find(place => place.id === actor.place)?.figures.find(item => item.id === value.to)?.id ?? null;
-  if (value.action === 'say') return text ? { ...none, action: 'say', text, to: figure } : 'text';
+  const gesture = short(value.gesture, GESTURE_WORDS), says = short(value.says, SAYS_WORDS);
+  if (value.action === 'say') return text ? { ...none, action: 'say', text, to: figure, ...(gesture === null ? {} : { gesture }) } : 'text';
   if (value.action === 'call') {
     const known = world.remote !== null && value.to !== actor.id && world.characters.some(character => character.id === value.to);
     return !known ? 'to' : text ? { ...none, action: 'call', text, to: value.to as string } : 'text';
@@ -68,7 +73,7 @@ export function readAction(world: World, actor: Person, answer: string): Action 
   }
   if (value.action === 'do') {
     const done = short(text), lasts = span(MAX_SECONDS);
-    return !done ? 'text' : lasts ? { ...none, ...lasts, action: 'do', text: done } : 'time';
+    return !done ? 'text' : lasts ? { ...none, ...lasts, action: 'do', text: done, ...(says === null ? {} : { says }) } : 'time';
   }
   if (value.action === 'wait' || value.action === 'sleep') {
     const lasts = span(value.action === 'wait' ? MAX_SECONDS : MAX_SLEEP);
@@ -94,7 +99,7 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
   const event: Event = { at: now, clock: clockAt(world, now), kind: action.action, who: actor.id, place, to: null, text: action.text,
     seconds: action.until === null ? action.seconds ?? 0 : lasting(world, actor, action.action as 'do' | 'wait' | 'sleep', now, action.until), cut: false,
     heard: here.map(person => person.id),
-    note: action.note };
+    note: action.note, ...(action.gesture === undefined ? {} : { gesture: action.gesture }) };
   actor.began = now;
   if (action.action === 'say' || action.action === 'call') {
     Object.assign(event, cut(action.text as string, limit));
@@ -120,10 +125,20 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     for (const witness of here) attend(witness, now);
     // Whoever leaves is no longer placed as it was.
     Object.assign(actor, { place: null, heading: action.place, pose: null });
+  } else if (action.action === 'do' && action.says !== undefined) {
+    // Words said with a deed are a speech of that moment, cut at the turn's limit: they hold those who hear them
+    // until they end, and the deed lasts at least as long as they take.
+    const said = cut(action.says, limit), ends = now + speechSeconds(world, wordsOf(said.text).length);
+    Object.assign(event, { says: said.text, cut: said.cut, seconds: Math.max(event.seconds, ends - now) });
+    for (const listener of here) {
+      listener.listening = Math.max(listener.listening, ends);
+      attend(listener, now);
+    }
+    actor.speaking = ends;
   } else if (action.action === 'wait') event.heard = [];
   // Whoever falls asleep is no longer placed as it was awake: a sleeper has no pose unless a deed gives it one.
   else if (action.action === 'sleep') Object.assign(actor, { asleep: true, pose: null });
-  // A `do`, and a falling asleep, are left: they are seen and interrupt nobody, and a witness learns of them at its
+  // A `do` with no words, and a falling asleep, are left: they are seen and interrupt nobody, and a witness learns of them at its
   // own next turn. Otherwise every gesture in a room would cost one call to the model for each person who waits there.
   actor.freeAt = now + event.seconds;
   return event;

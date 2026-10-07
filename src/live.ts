@@ -14,7 +14,7 @@ import type { Answer } from './answer.ts';
 import { all, MAX_IN_PLACE, MAX_MOVES, MAX_ON_PERSON, MAX_SETS, MAX_STOCK, NAME_WORDS, RECORD, shown, SINKS, sought, written } from './things.ts';
 import type { Refused, Thing } from './things.ts';
 import { clockAt, DRIFT, hasClock, sensed, SENSED, travelSeconds, wordLimit } from './time.ts';
-import { CHARS_PER_WORD, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, namesOf } from './world.ts';
+import { CHARS_PER_WORD, GESTURE_WORDS, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, namesOf, SAYS_WORDS } from './world.ts';
 import type { Event, Person, Place, World } from './world.ts';
 
 // The `live` mode: every character of a world is played by a model, one call for one action, under the story's clock.
@@ -32,6 +32,8 @@ Each turn you take exactly one action and answer with one JSON object. Every fie
 - wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). The wait ends at once when someone speaks near you, comes or leaves, or when something is heard from next door, so a long wait loses nothing: do not wait in short steps.
 - sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}), or \`until\` a time of day. Asleep you hear and see nothing, and only someone's deed can wake you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
 - until: for do, wait and sleep, in place of \`seconds\`: a time of day like 06:30, the next moment the clock shows it. It must fall within the action's span.
+- gesture: with a say, what your face, hands or body do while you speak, in ${GESTURE_WORDS} words at most: a look, a smile, a nod, a shrug. Those in your place see it. It moves no thing, changes no pose and touches nobody: such things are a do.
+- says: with a do, words you say aloud while you do it, ${SAYS_WORDS} words at most and never more than the turn allows for \`text\`. Everyone in your place hears them.
 - note: with any action, a private line you keep for yourself: not a plan, but what is going on in you right now, what you notice, what your body feels, what you want and, when something holds you back, what it is. Nobody else ever reads it. Null when you have none.
 
 Speak the way people speak: briefly, one thought at a time, and leave room for an answer. Words cost the story's time: each takes part of a second, and those who listen are held until you finish. Each turn says how many words \`text\` may hold; a longer speech is cut there. A note, and the \`text\` of a do, keep their first ${MAX_WORDS} words.
@@ -52,13 +54,13 @@ Your memory is a text you write yourself. When you wake, and when much has happe
 
 Do not describe what other people do, feel or answer, and do not decide for them. They act on their own turns.
 
-Write \`text\`, \`note\` and your memory in the language of your sheet.`;
+Write \`text\`, \`gesture\`, \`says\`, \`note\` and your memory in the language of your sheet.`;
 
 const text = { type: ['string', 'null'] };
 // `place` is one of the world's places or null, so that a model held to the schema names no place that is not there.
-const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'note'],
+const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['action', 'text', 'to', 'place', 'seconds', 'until', 'gesture', 'says', 'note'],
   properties: { action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: { ...text, enum: [...world.places.map(place => place.id), null] },
-    seconds: { type: ['integer', 'null'] }, until: text, note: text } });
+    seconds: { type: ['integer', 'null'] }, until: text, gesture: text, says: text, note: text } });
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
@@ -276,6 +278,7 @@ function deedOf(world: World, state: State, deed: Event): string {
 // No request of a world is longer than this many characters, system text and message together, however long the
 // world has run. A line holds a speech, a note or a deed of `MAX_WORDS` words under a head of names and a time, a
 // character's own action is four lines at most with what came of it and a fifth of what its body felt, and the lines of one request are `shortWords` and one such action.
+// The line of a speech holds a gesture besides, and the words said with a deed are one line more.
 // A pose is as long as its limit of words lets it be, since the world's answer may make it so, a person carries and
 // a place holds as many records as the rules of things let them, each as long as a record can be, and every law adds
 // what it says it may. One answer of the world adds one line of what it moved, set and found, and one of what was heard next door.
@@ -293,7 +296,7 @@ export function requestLimit(world: World): number {
   const spots = Math.max(...world.places.map(place => place.things.reduce((sum, thing) => sum + (thing.hidden ? thing.hidden.spot.length + 160 : 0), 0)));
   const holder = Math.max(longest(people), longest(places), NAME_WORDS * CHARS_PER_WORD);
   const told = (MAX_MOVES + MAX_SETS) * (NAME_WORDS * CHARS_PER_WORD + 2 * holder + 80) + spots + MAX_IN_PLACE * NAME_WORDS * CHARS_PER_WORD + longest(people);
-  const lines = (world.shortWords + 4 * (head + MAX_WORDS) + head + LIMITS.feels + head + LIMITS.beyond) * (CHARS_PER_WORD + 1) + told;
+  const lines = (world.shortWords + 4 * (head + MAX_WORDS) + GESTURE_WORDS + head + SAYS_WORDS + head + LIMITS.feels + head + LIMITS.beyond) * (CHARS_PER_WORD + 1) + told;
   const laws = LAWS.reduce((sum, law) => sum + law.size(world), 0);
   const visible = LIMITS.pose * CHARS_PER_WORD + MAX_ON_PERSON * RECORD + 60;
   // The people of one place whom nobody plays, as a request lists them: for the world with their facts.
@@ -323,11 +326,12 @@ export function requestLimit(world: World): number {
 
 // One event of a live run as lines for a person, or none for a wait that left no note. A note, a memory and what a
 // body feels are the character's own and are marked as private: no other character was sent them. What was heard
-// next door is one line under the result.
+// next door is one line under the result. A gesture stands in brackets before the speech it came with, and the words
+// said with a deed are one line under the deed.
 export function linesOf(world: World, event: Event): string[] {
   const who = named(namesOf(world), event.who);
   const speech = `"${event.text}"${event.cut ? ' (cut)' : ''}`;
-  const what = event.kind === 'say' ? `${who}${event.to === null ? '' : ` to ${named(namesOf(world), event.to)}`}: ${speech}`
+  const what = event.kind === 'say' ? `${who}${event.to === null ? '' : ` to ${named(namesOf(world), event.to)}`}${event.gesture === undefined ? '' : ` (${event.gesture})`}: ${speech}`
     : event.kind === 'reply' ? event.text === null ? `${who} does not answer ${named(world.characters, event.to)}` : `${who} answers ${named(world.characters, event.to)}: ${speech}`
     : event.kind === 'call' ? `${who} calls ${named(world.characters, event.to)}: ${speech}`
       : event.kind === 'go' ? `${who} leaves for ${named(world.places, event.to)} (${event.seconds} s)`
@@ -341,6 +345,7 @@ export function linesOf(world: World, event: Event): string[] {
                   event.wakes?.length ? ` (wakes ${event.wakes.map(id => named(world.characters, id)).join(', ')})` : ''}${event.search ? ' (a search)' : ''}`
                   : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}` : `${who} waits (${event.seconds} s)`;
   return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} ${event.place ? `[${named(world.places, event.place)}] ` : ''}${what}`]),
+    ...(event.says === undefined ? [] : [`         says with it: "${event.says}"${event.cut ? ' (cut)' : ''}`]),
     ...(event.found ?? []).map(thing => `         found: ${thing.what} ${thing.name} (${thing.spot})`),
     ...(event.moved ?? []).map(posting => `         moved: ${posting.what} ${posting.name}${posting.n === null ? '' : ` ×${posting.n}`}, ${posting.from} -> ${posting.to}${
       posting.as === null || posting.as === posting.what ? '' : ` as ${posting.as}`}`),

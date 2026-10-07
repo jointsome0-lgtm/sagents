@@ -104,32 +104,34 @@ const listed = (world: World, things: Things, event: Event, doer: string) => {
 };
 // A speech as it opens when it is addressed to a figure of the place.
 const toFigure = (world: World, event: Event) => event.kind === 'say' && event.to !== null ? ` to ${named(namesOf(world), event.to)}` : '';
+// What the speaker's body did meanwhile, as the line of a speech holds it before the words.
+const gestured = (event: Event) => event.gesture === undefined ? '' : ` (${event.gesture})`;
 
-// An event as one who perceived it remembers it, under the time as that one could tell it, `when`. A note is never
-// part of it.
-function perceived(world: World, event: Event, viewer: string, when: string): string {
+// An event as one who perceived it remembers it, under the time as that one could tell it, `when`: one line, and
+// before the line of a deed done with words the line of those words, as of a speech. A note is never part of it.
+function perceived(world: World, event: Event, viewer: string, when: string): string[] {
   const who = named(world.characters, event.who);
-  const what = event.kind === 'say' ? `${who} says${toFigure(world, event)}: "${event.text}"`
+  const what = event.kind === 'say' ? `${who} says${toFigure(world, event)}${gestured(event)}: "${event.text}"`
     : event.kind === 'call' ? `${who} calls ${event.to === viewer ? 'you' : named(world.characters, event.to)} (${world.remote}): "${event.text}"`
       : event.kind === 'go' ? `${who} leaves towards ${named(world.places, event.to)}.`
         : event.kind === 'arrive' ? `${who} arrives.`
           : event.kind === 'sleep' ? `${who} falls asleep.`
             : event.kind === 'wake' ? `${who} wakes.` : `${who} does (${event.seconds} s): ${event.text}`;
-  return `${when} ${what}`;
+  return [...(event.says === undefined ? [] : [`${who} says: "${event.says}"`]), what].map(line => `${when} ${line}`);
 }
 
 // What a character remembers of its own action: the action, its note, and the sentence about a speech that was cut.
-// The first line is the action itself. `when` is the time as the character could tell it, and `span` how long the
+// The first line is the action itself, or the words said with a deed, and the deed is then the second. `when` is the time as the character could tell it, and `span` how long the
 // action lasts as the character knows it.
 function own(world: World, event: Event, when: string, span = `${event.seconds} s`): string[] {
-  const what = event.kind === 'say' ? `You say${toFigure(world, event)}: "${event.text}"`
+  const what = event.kind === 'say' ? `You say${toFigure(world, event)}${gestured(event)}: "${event.text}"`
     : event.kind === 'call' ? `You call ${named(world.characters, event.to)} (${world.remote}): "${event.text}"`
       : event.kind === 'go' ? `You leave towards ${named(world.places, event.to)}.`
         : event.kind === 'arrive' ? `You arrive in ${named(world.places, event.place)}.`
           : event.kind === 'sleep' ? `You lie down to sleep (${span}).`
             : event.kind === 'wake' ? 'You wake.'
               : event.kind === 'do' ? `You do (${span}): ${event.text}` : `You wait (${span}).`;
-  return [what, ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : [])].map(line => `${when} ${line}`);
+  return [...(event.says === undefined ? [] : [`You say: "${event.says}"`]), what, ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : [])].map(line => `${when} ${line}`);
 }
 
 export const begin = (world: World): State =>
@@ -218,7 +220,7 @@ export function advance(world: World, state: State, record: Record): Event {
     if (!isDeepStrictEqual(record, put)) return refuse('comes where the rules put a record of their own by the clock');
     const { event, lines } = law.put(world, state.laws, people, put);
     for (const [id, line] of lines) remember(minds.get(id)!, { ...lineOf(seq, line.text), ...(line.idle ? { idle: true as const } : {}) });
-    for (const id of event.heard) if (!lines.has(id)) remember(minds.get(id)!, lineOf(seq, perceived(world, event, id, when(id, event.at))));
+    for (const id of event.heard) if (!lines.has(id)) remember(minds.get(id)!, ...perceived(world, event, id, when(id, event.at)).map(line => lineOf(seq, line)));
     for (const other of LAWS) other.after?.(state.laws, event);
     state.seq += 1;
     return event;
@@ -261,7 +263,7 @@ export function advance(world: World, state: State, record: Record): Event {
     event = record.kind === 'wake' ? wake(world, people, actor, record.at) : arrive(world, people, actor, record.at);
     remember(mind, ...mind.waiting.splice(0), ...own(world, event, when(actor.id, event.at)).map(line => ({ ...lineOf(seq, line), ...(record.kind === 'wake' ? { idle: true as const } : {}) })));
   }
-  for (const id of event.heard) remember(minds.get(id)!, lineOf(seq, perceived(world, event, id, when(id, event.at))));
+  for (const id of event.heard) remember(minds.get(id)!, ...perceived(world, event, id, when(id, event.at)).map(line => lineOf(seq, line)));
   if (event.kind === 'call' && !event.heard.includes(event.to as string)) {
     // The call was not heard: it waits for the arrival or the waking of the one called.
     const callee = people.find(person => person.id === event.to)!;

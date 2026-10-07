@@ -111,7 +111,7 @@ node src/cli.ts live examples/night-station.json [--model <id>] [--cast <charact
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
 each with a place and a sheet. Every character is played by the model, `gpt-6.1-sol@low` unless `--model` says
 otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-your-own). One turn is one request
-and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note. The rules ask a note to be no plan but what is going on in the character at that moment: what it notices, what its body feels, what it wants and what holds it back, so that no sheet has to say what a note is for.
+and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note. A `say` may come with a `gesture`, what the speaker's face, hands or body do meanwhile, which those in the place are told in the line of the speech and which never reaches the world; a `do` may come with `says`, words said aloud while doing it, which everyone in the place hears as a speech of that moment before the deed goes to the world as any deed does. Both are a candidate that has been run on no real model. The rules ask a note to be no plan but what is going on in the character at that moment: what it notices, what its body feels, what it wants and what holds it back, so that no sheet has to say what a note is for.
 `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
 what each one remembers after the night decides what happens; `examples/seaside-cafe.json` is a café with a
 crowd and a waitress whom nobody plays, in a town whose places lie on a map. The three examples are written in
@@ -127,7 +127,7 @@ The rules of time and hearing:
   written under the earlier order, where a turn could come between two arrivals of one instant, is of another
   version and is refused.
 - Speech lasts as long as its words take at the world's `wordsPerMinute`, 130 by default. A `say` or a `call` holds at
-  most 65 words. A longer one is cut. So are a note and the text of a `do`.
+  most 65 words. A longer one is cut. So are a note and the text of a `do`, a `gesture` at 12 words, and the `says` of a `do` at 20 and at the turn's limit. A deed lasts at least as long as its `says` take, and they hold those who hear them as a speech does.
 - Everyone in the speaker's place hears a `say` and is held until it ends, so people in one place take turns.
 - A place of a world file may list `nextDoor`, the ids of the places that share a door or a thin wall with it. Two
   places are next door to each other whichever of them lists the other; the place itself or an id that is no place
@@ -497,7 +497,7 @@ turn it is a lost turn like any other, for the world's answer and a memory rewri
 and it counts as a request, with no tokens known for it. Three such answers of one model in a row, with no answer
 of that model arriving whole in between, end the run as `failed (output_limit)`. It prints
 each event as it happens. In the text output an event is one line, followed by a line for each thing it found, moved
-or put into another state, for each pose it changed, for each private feeling, for what was heard next door and for a private note; a `wait` with
+or put into another state, for each pose it changed, for each private feeling, for what was heard next door, for the words said with a deed and for a private note; a gesture stands in brackets before its speech; a `wait` with
 no note prints nothing,
 and a memory rewrite is shown whole, over as many lines as it has, marked as private like a note. With `--json`
 every event is one JSON object on one line, the silent waits too. Then comes one line of totals: the status and its
