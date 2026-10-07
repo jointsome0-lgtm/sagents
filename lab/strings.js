@@ -30,7 +30,14 @@ const en = {
   text: 'Transcript', textTitle: 'Transcript: the run as the command line printed it (X)', follow: 'follow', followTitle: 'Keep the newest in view (F)', faceTitle: 'The face of the text: with serifs or without',
   helpTitle: 'Keys (?)', who: 'Who', where: 'Where', searchHint: 'Search in the text ( / )', prevTitle: 'Previous (Shift+Enter)', nextTitle: 'Next (Enter)', onlyFound: 'only what was found',
   thoughts: 'thoughts', thoughtsTitle: 'Private notes and rewritten memory (M)', lists: 'lists of the world', listsTitle: 'What moved, poses, what a body feels (L)', clear: 'Clear ✕', clearTitle: 'Take off every filter and the search (0)',
-  mapTitle: 'The whole world by the story clock: a click or a drag goes there',
+  stripTitle: 'The whole world by the story clock: a click or a drag goes there',
+  // The map.
+  map: 'Map', mapTitle: 'Map: the places of the world and who is where (P)', mapPrev: 'The previous move (K)', mapNext: 'The next move (J)', mapMoment: 'The moment of the story that the map shows',
+  mapLeft: 'the map is of the left experiment alone', mapLoading: 'the map is loading…', mapOnWay: (from, to, clock) => `${from} → ${to}, due ${clock}`, mapDue: (to, clock) => `→ ${to} ${clock}`, mapAsleep: 'asleep',
+  mapUnknown: 'not yet known', mapMany: count => `${count} travellers`, mapNowhere: 'in no place of the world file', mapHere: 'here now', mapNobody: 'nobody is here now', mapFigures: 'of the place, played by nobody', mapWays: 'from here',
+  mapFilter: 'A click puts the place into the feed’s filter by place, or takes it out.', mapFiltered: 'in the feed’s filter',
+  keyRoof: 'under a roof', keyOpen: 'under the open sky', keyDoor: 'next door: a door or a thin wall', keyLink: 'a way between groups, not to scale', keyAsleep: 'asleep',
+  keyScale: 'Each grey group is drawn to a scale of its own: the rule in its corner.',
   // The comparison.
   rightStretch: 'The stretch on the right', rowSpan: 'How much story time one row holds', cmpClose: 'Remove the comparison (C)', auto: 'auto',
   // The numbers.
@@ -49,8 +56,8 @@ const en = {
   // Theme and help.
   themes: { '': 'as the system', light: 'light', dark: 'dark' }, themeTitle: name => `Theme: ${name} (T)`, keys: 'Keys', close: 'Close',
   kSearch: 'search in the text; Enter and Shift+Enter go to the next and the previous', kWho: 'put a character in the focus, or take it out, by number', kClear: 'take off every filter and the search',
-  kFollow: 'follow the newest', kStep: 'the next and the previous event', kEnds: 'to the top and to the bottom', kNumbers: 'the feed or the numbers', kStory: 'the feed or the story: the narrator’s chapters',
-  kText: 'the feed or the transcript', kCompare: 'the comparison: with the next experiment, or off', kExperiments: 'the previous and the next experiment', kList: 'the list of experiments',
+  kFollow: 'follow the newest', kStep: 'the next and the previous event; on the map, the next and the previous move', kEnds: 'to the top and to the bottom', kNumbers: 'the feed or the numbers', kStory: 'the feed or the story: the narrator’s chapters',
+  kText: 'the feed or the transcript', kMap: 'the feed or the map: the places and who is where', kCompare: 'the comparison: with the next experiment, or off', kExperiments: 'the previous and the next experiment', kList: 'the list of experiments',
   kSwitches: 'thoughts; lists of the world', kTheme: 'the theme', kHelp: 'this help; Esc closes it',
   focusNote: 'A focus on characters keeps what they said, did and wrote down, what came of their deeds, what their bodies felt, what was addressed to them and what they heard. The thoughts and the feelings of others are hidden then.',
 };
@@ -78,7 +85,13 @@ const ru = {
   text: 'Текст', textTitle: 'Текст: прогон, как его напечатала командная строка (X)', follow: 'следить', followTitle: 'Держать в виду самое новое (F)', faceTitle: 'Шрифт текста: с засечками или без',
   helpTitle: 'Клавиши (?)', who: 'Кто', where: 'Где', searchHint: 'Поиск в тексте ( / )', prevTitle: 'Предыдущее (Shift+Enter)', nextTitle: 'Следующее (Enter)', onlyFound: 'только найденное',
   thoughts: 'мысли', thoughtsTitle: 'Личные заметки и переписанная память (M)', lists: 'списки мира', listsTitle: 'Что переместилось, позы, что чувствует тело (L)', clear: 'Сбросить ✕', clearTitle: 'Снять все фильтры и поиск (0)',
-  mapTitle: 'Весь мир по часам истории: щелчок или перетаскивание переносит туда',
+  stripTitle: 'Весь мир по часам истории: щелчок или перетаскивание переносит туда',
+  map: 'Карта', mapTitle: 'Карта: места мира и кто где (P)', mapPrev: 'Предыдущее перемещение (K)', mapNext: 'Следующее перемещение (J)', mapMoment: 'Момент истории, который показывает карта',
+  mapLeft: 'карта только левого эксперимента', mapLoading: 'карта загружается…', mapOnWay: (from, to, clock) => `${from} → ${to}, будет в ${clock}`, mapDue: (to, clock) => `→ ${to} ${clock}`, mapAsleep: 'спит',
+  mapUnknown: 'пока неизвестно', mapMany: count => `${count} в пути`, mapNowhere: 'ни в одном месте из файла мира', mapHere: 'сейчас здесь', mapNobody: 'сейчас здесь никого', mapFigures: 'люди места, которых никто не играет', mapWays: 'отсюда',
+  mapFilter: 'Щелчок добавляет место в фильтр ленты по месту или убирает его.', mapFiltered: 'в фильтре ленты',
+  keyRoof: 'под крышей', keyOpen: 'под открытым небом', keyDoor: 'по соседству: дверь или тонкая стена', keyLink: 'путь между группами, не в масштабе', keyAsleep: 'спит',
+  keyScale: 'У каждой серой группы свой масштаб: линейка в её углу.',
   rightStretch: 'Отрезок справа', rowSpan: 'Сколько времени истории в одной строке', cmpClose: 'Убрать сравнение (C)', auto: 'авто',
   kinds: { turn: 'ходы жителей', world: 'ответы мира', reply: 'ответы фигур', memory: 'память' },
   fewRequests: 'Мало запросов со счётом токенов, чтобы рисовать.', allRequests: 'все запросы', chartLabel: 'Доля входных токенов, прочитанных из кэша, по ходу прогона', requestN: n => `запрос ${n}`,
@@ -93,8 +106,8 @@ const ru = {
   textOnlyNote: 'От этого прогона не осталось событий: показать можно только его текст.', bytes: 'байт',
   themes: { '': 'как в системе', light: 'светлая', dark: 'тёмная' }, themeTitle: name => `Тема: ${name} (T)`, keys: 'Клавиши', close: 'Закрыть',
   kSearch: 'поиск в тексте; Enter и Shift+Enter — следующее и предыдущее', kWho: 'включить или снять героя по номеру', kClear: 'сбросить все фильтры и поиск',
-  kFollow: 'следить за новым', kStep: 'следующее и предыдущее событие', kEnds: 'в начало и в конец', kNumbers: 'лента или числа', kStory: 'лента или история: главы рассказчика',
-  kText: 'лента или текст прогона', kCompare: 'сравнение: включить с соседним экспериментом или убрать', kExperiments: 'предыдущий и следующий эксперимент', kList: 'список экспериментов',
+  kFollow: 'следить за новым', kStep: 'следующее и предыдущее событие; на карте следующее и предыдущее перемещение', kEnds: 'в начало и в конец', kNumbers: 'лента или числа', kStory: 'лента или история: главы рассказчика',
+  kText: 'лента или текст прогона', kMap: 'лента или карта: места и кто где', kCompare: 'сравнение: включить с соседним экспериментом или убрать', kExperiments: 'предыдущий и следующий эксперимент', kList: 'список экспериментов',
   kSwitches: 'мысли; списки мира', kTheme: 'тема', kHelp: 'эта подсказка; Esc закрывает',
   focusNote: 'Фокус на героях оставляет то, что они сказали, сделали и записали, что вышло из их дел, что чувствовало их тело, что обращено к ним и что они слышали. Чужие мысли и чужие ощущения при этом скрыты.',
 };

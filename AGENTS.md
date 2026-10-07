@@ -19,9 +19,9 @@ file and its environment from `environments/`. Beside the live mode, `src/kept.t
 `live --run`: it only makes files where there are none and adds lines to them. `lab/` is `sagents lab`: `data.ts`
 reads the experiments under the directories it is given and writes nothing, `server.ts` serves them on `127.0.0.1`
 under a token, `open.ts` writes the one temporary file that takes the browser there, and the page is the plain
-`page.html`, `app.css`, `app.js`, `strings.js` and `core.js`, which `npm run check` does not check. Nothing in `src/`
-but the command line and the test of `kept.ts` imports from `lab/`, and `lab/` asks no model. What may leave the lab is listed in
-[README.md](README.md#the-lab); keep that list true.
+`page.html`, `app.css`, `app.js`, `strings.js`, `map.js` and `core.js`, which `npm run check` does not check.
+Nothing in `src/` but the command line and the test of `kept.ts` imports from `lab/`, and `lab/` asks no model. What
+may leave the lab is listed in [README.md](README.md#the-lab); keep that list true.
 
 ## The code
 

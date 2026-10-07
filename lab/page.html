@@ -34,6 +34,7 @@
           <button type="button" id="v-feed" role="tab" data-t="feed" data-t-title="feedTitle">Feed</button>
           <button type="button" id="v-story" role="tab" data-t="story" data-t-title="storyTitle" hidden>Story</button>
           <button type="button" id="v-text" role="tab" data-t="text" data-t-title="textTitle" hidden>Transcript</button>
+          <button type="button" id="v-map" role="tab" data-t="map" data-t-title="mapTitle" hidden>Map</button>
           <button type="button" id="v-numbers" role="tab" data-t="numbers" data-t-title="numbersTitle">Numbers</button>
         </span>
         <label class="switch" data-t-title="followTitle"><input type="checkbox" id="follow"> <span data-t="follow">follow</span></label>
@@ -67,13 +68,35 @@
       <div id="feed"></div>
       <div id="empty" class="quiet pad" data-t="emptyNone">No events yet.</div>
     </div>
-    <div id="map-box" data-t-title="mapTitle">
-      <canvas id="map"></canvas>
-      <div id="map-tip" hidden></div>
+    <div id="strip-box" data-t-title="stripTitle">
+      <canvas id="strip"></canvas>
+      <div id="strip-tip" hidden></div>
     </div>
     <button type="button" id="fresh" hidden></button>
   </section>
   <section id="numbers" hidden></section>
+  <section id="map" hidden>
+    <div class="map-bar">
+      <button type="button" id="map-prev" class="icon small" data-t-title="mapPrev">◀</button>
+      <button type="button" id="map-next" class="icon small" data-t-title="mapNext">▶</button>
+      <input type="range" id="map-t" min="0" max="1" step="1" data-t-title="mapMoment" data-t-label="mapMoment" aria-label="The moment of the story that the map shows">
+      <span id="map-clock">—</span>
+      <span id="map-note" class="quiet"></span>
+    </div>
+    <div id="map-who"></div>
+    <div id="map-view">
+      <div id="map-scroll" tabindex="-1"><svg id="map-svg" class="mp" xmlns="http://www.w3.org/2000/svg"></svg></div>
+      <div id="map-card" hidden></div>
+      <div id="map-key" class="quiet">
+        <span><i></i><span data-t="keyRoof">under a roof</span></span>
+        <span><i class="open"></i><span data-t="keyOpen">under the open sky</span></span>
+        <span><i class="door"></i><span data-t="keyDoor">next door: a door or a thin wall</span></span>
+        <span><i class="link"></i><span data-t="keyLink">a way between groups, not to scale</span></span>
+        <span><i class="asleep"></i><span data-t="keyAsleep">asleep</span></span>
+        <span data-t="keyScale">Each grey group is drawn to a scale of its own: the rule in its corner.</span>
+      </div>
+    </div>
+  </section>
   <section id="story" tabindex="-1" hidden></section>
   <section id="text" tabindex="-1" hidden></section>
 </main>
@@ -84,11 +107,12 @@
     <tr><td><kbd>1</kbd>…<kbd>9</kbd></td><td data-t="kWho">put a character in the focus, or take it out, by number</td></tr>
     <tr><td><kbd>0</kbd></td><td data-t="kClear">take off every filter and the search</td></tr>
     <tr><td><kbd>F</kbd></td><td data-t="kFollow">follow the newest</td></tr>
-    <tr><td><kbd>J</kbd> <kbd>K</kbd></td><td data-t="kStep">the next and the previous event</td></tr>
+    <tr><td><kbd>J</kbd> <kbd>K</kbd></td><td data-t="kStep">the next and the previous event; on the map, the next and the previous move</td></tr>
     <tr><td><kbd>G</kbd>, <kbd>Shift</kbd>+<kbd>G</kbd></td><td data-t="kEnds">to the top and to the bottom</td></tr>
     <tr><td><kbd>N</kbd></td><td data-t="kNumbers">the feed or the numbers</td></tr>
     <tr><td><kbd>S</kbd></td><td data-t="kStory">the feed or the story: the narrator’s chapters</td></tr>
     <tr><td><kbd>X</kbd></td><td data-t="kText">the feed or the transcript</td></tr>
+    <tr><td><kbd>P</kbd></td><td data-t="kMap">the feed or the map: the places and who is where</td></tr>
     <tr><td><kbd>C</kbd></td><td data-t="kCompare">the comparison: with the next experiment, or off</td></tr>
     <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td data-t="kExperiments">the previous and the next experiment</td></tr>
     <tr><td><kbd>E</kbd></td><td data-t="kList">the list of experiments</td></tr>

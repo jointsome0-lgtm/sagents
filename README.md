@@ -702,6 +702,28 @@ opened in Chrome over synthetic runs, in English: the list with its groups, the 
 feed, the transcript and the numbers. The Russian page was opened in the review of the command too, over synthetic
 runs: the list, the feed and the numbers.
 
+An experiment that has a world file also has a map (the key `P`). It draws every place of the file with its name: a
+room as a box, a place under the open sky with a rounded dashed edge, the people of a place whom nobody plays named
+under it, and a thick line between two places that are `nextDoor`. Places that are near each other form a group
+that is drawn to a scale of its own, written under it, and groups stand apart with the time of the way written on
+the link between them, which is not to scale: the places are joined into one tree by the shortest ways, and a way of
+that tree that takes five minutes or more, and three times the middle one of the other ways of its part or more,
+parts two groups. Inside a group a place with `at` stands where its metres put it and one with minutes alone where
+its minutes do, as well as a plane allows; places that name one point, and boxes that would lie on each other, are
+set beside each other, so a distance of a few steps is not to be measured on the drawing. Everyone is a mark of its
+own colour in the place where it is at the moment that the control above the map names, a ring when asleep, and on
+the way a mark on a dashed line between the two places with where it goes and when it is due. Each direction has
+its own side of the line; beyond six travellers in one direction the rest share one mark with their count. When
+only a continuation is available, someone with no event yet is listed as not yet known and has no mark, and so is
+someone whose first event finds it elsewhere than where the world file starts it, until that event. The moment
+is `t` of the address, as in the feed, `J` and `K` step to the next and the previous moment at which someone moved, fell
+asleep or woke, and with the newest followed it is the newest. Pointing at a place shows its description, who is
+there and the time to every other place; a click puts it into the feed's filter by place. Beside a second
+experiment the map is of the left one alone and says so. The same world file gives the same drawing at every load.
+The map was checked without a browser: its positions as tables and its drawings as SVG files made by the layout
+code that the page uses, over the three example worlds and a synthetic one played by a stand-in for the model, and
+the page's script was run through over a stand-in for the document.
+
 What the lab may do with the files, and `lab/lab.test.ts` holds it to that:
 
 - It listens on `127.0.0.1` alone and has no option for another address. Its address holds a token made at start,
@@ -710,13 +732,20 @@ What the lab may do with the files, and `lab/lab.test.ts` holds it to that:
   directory that only you can open, which leads on to the address, as Jupyter does it; the file is removed when the
   lab stops.
 - No name from a request builds a path: an experiment is looked up among those the walk found.
-- Of a world file only the ids and names of characters and places leave the lab, never a sheet or a description; of
-  a chapter everything but its `carry`; of a usage row the counted fields; of a failure its code.
+- Of a world file there leave the lab the ids and names of characters and places and what the map is drawn from: of
+  the world `travelMinutes` and `walkMetresPerMinute`; of every place `at`, `minutesTo`, `nextDoor`, `open`, `about`
+  and the ids and names of its `figures`; of every character the `place` it starts in. Nothing else of it: never a
+  sheet, a memory, looks, facts or things of anyone or anything, never `crowd`, never the description or the facts
+  of the world. Of a chapter everything but its `carry`; of a usage row the counted fields; of a failure its code.
+- The list gives `mapKey`, the world file's modified time and size as one value, so that an edit refreshes the map.
+- For the map the lab reads the events itself and gives the page where each one put someone (who, the place, where
+  a way leads and how long it or a sleep takes), so a long world does not have to be loaded into the browser for it.
 - The page loads its script and its style sheet from the lab and nothing from anywhere else.
 
 The server and the reading of files are TypeScript as the rest (`lab/server.ts`, `lab/data.ts`, `lab/open.ts`). The
 page is plain files that the browser loads as they are: `lab/page.html`, `lab/app.css`, `lab/app.js`,
-`lab/strings.js` with the page's two languages, and `lab/core.js`, which the server's reading shares with the page.
+`lab/strings.js` with the page's two languages, `lab/map.js`, which lays out and draws the map, and `lab/core.js`,
+which the server's reading shares with the page.
 `npm run check` reads `lab/core.js` for the types of what `lab/data.ts` imports from it and reports nothing in a
 `.js` file: the page's scripts are not type-checked.
 

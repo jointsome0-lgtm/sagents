@@ -2,9 +2,10 @@
 //   const lab = await startLab({ dirs, port });   // -> { url, port, stop }
 // The server listens on 127.0.0.1 alone and has no option for another address. The URL holds a token made at start;
 // every other path, and every method but GET, is answered 404. With no `port` (or 0) the system picks one.
-// What leaves this process: the five files of the page, and what the data module gives (the lines of events files,
+// What leaves this process: the six files of the page, and what the data module gives (the lines of events files,
 // the counted fields of usage rows, the first line of `about.txt`, of a world file the ids and names of characters
-// and places, the chapters of `story/` without their `carry`, a transcript's text). Nothing is written, and no text
+// and places and what its `mapOf` names for the map, the chapters of `story/` without their `carry`, a transcript's
+// text). Nothing is written, and no text
 // of a file is logged.
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -15,10 +16,10 @@ import type { AddressInfo } from 'node:net';
 import { openLab } from './data.ts';
 
 const HOST = '127.0.0.1', POLL = 400, BATCH = 500, PIECE = 2000;
-// The whole of what is served as a file: these five, beside this one. Each is read when asked for, so that an edit
+// The whole of what is served as a file: these six, beside this one. Each is read when asked for, so that an edit
 // of the page shows at the next reload.
 const ASSETS: { [name: string]: [string, string] } = { '': ['page.html', 'text/html; charset=utf-8'], 'app.js': ['app.js', 'text/javascript; charset=utf-8'], 'core.js': ['core.js', 'text/javascript; charset=utf-8'],
-  'strings.js': ['strings.js', 'text/javascript; charset=utf-8'], 'app.css': ['app.css', 'text/css; charset=utf-8'] };
+  'strings.js': ['strings.js', 'text/javascript; charset=utf-8'], 'map.js': ['map.js', 'text/javascript; charset=utf-8'], 'app.css': ['app.css', 'text/css; charset=utf-8'] };
 const asset = (file: string) => readFileSync(new URL(file, import.meta.url));
 const HEADERS = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
 // The page loads its own script and style sheet from this server and nothing from anywhere else.
@@ -86,13 +87,15 @@ export async function startLab({ dirs, port = 0, log = () => {} }: { dirs: strin
       try { body = Buffer.from(JSON.stringify(lab.list())); } catch (error) { log(`list: ${codeOf(error)}`); body = Buffer.from('{"experiments":[]}'); }
       response.writeHead(200, { ...HEADERS, 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length });
       response.end(body);
-    } else if (name === 'stretch' || name === 'story' || name === 'text') {
+    } else if (name === 'stretch' || name === 'story' || name === 'text' || name === 'map') {
       // A piece of one stretch (`x`, `s`, and `from`, a byte that an earlier answer gave as `at`), the chapters of an
-      // experiment's story (`x`), or a piece of one of its transcripts (`x`, `n`, `from`). 404 when there is none.
+      // experiment's story (`x`), a piece of one of its transcripts (`x`, `n`, `from`), or its map (`x`). 404 when
+      // there is none.
       let body = null;
       try {
         const from = /^\d+$/.test(asked('from')) ? Number(asked('from')) : 0;
         if (name === 'story') { const story = lab.story(asked('x')); if (story) body = JSON.stringify(story); }
+        else if (name === 'map') { const map = lab.map(asked('x')); if (map) body = JSON.stringify(map); }
         else if (name === 'text') { const piece = lab.text(asked('x'), asked('n'), from); if (piece) body = JSON.stringify(piece); }
         else {
           const piece = lab.part(asked('x'), asked('s'), from, PIECE);

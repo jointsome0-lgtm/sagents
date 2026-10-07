@@ -204,10 +204,53 @@ button.link:hover { text-decoration: underline; }
 .row .k-result .x, .row .k-reply .x { font-size: 14px; }
 
 /* The whole run at the side: time runs down, a lane a character. */
-#map-box { flex: none; width: 84px; border-left: 1px solid var(--line); background: var(--panel); position: relative; cursor: pointer; touch-action: none; }
-#map { display: block; width: 100%; height: 100%; }
-#map-tip { position: absolute; right: 100%; margin-right: 6px; background: var(--ink); color: var(--bg); border-radius: 4px; padding: 1px 7px; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; transform: translateY(-50%); z-index: 3; }
+#strip-box { flex: none; width: 84px; border-left: 1px solid var(--line); background: var(--panel); position: relative; cursor: pointer; touch-action: none; }
+#strip { display: block; width: 100%; height: 100%; }
+#strip-tip { position: absolute; right: 100%; margin-right: 6px; background: var(--ink); color: var(--bg); border-radius: 4px; padding: 1px 7px; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; transform: translateY(-50%); z-index: 3; }
 #fresh { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; border-radius: 999px; padding: 5px 14px; box-shadow: 0 2px 8px rgb(0 0 0 / .25); z-index: 3; }
+
+/* The map: the places of a world, each group of near places to its own scale, and everyone where it is at the
+   moment that the bar above it names. The classes `mp-…` are those of `map.js`. */
+#map { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.map-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+#map-t { flex: 1 1 200px; min-width: 120px; margin: 0; accent-color: var(--accent); }
+#map-clock { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#map-who { flex: none; display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 5px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; max-height: 30vh; overflow-y: auto; }
+#map-who span { display: inline-flex; align-items: center; gap: 5px; }
+#map-who b { font-weight: 600; }
+#map-view { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+#map-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 8px; }
+#map-svg { display: block; margin: 0 auto; }
+#map-card { position: absolute; top: 10px; right: 22px; width: min(300px, 72%); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 10px rgb(0 0 0 / .2); font-size: 12.5px; pointer-events: none; z-index: 2; overflow-wrap: anywhere; }
+#map-card.left { right: auto; left: 10px; }
+#map-card h3 { margin: 0 0 2px; font-size: 13.5px; }
+#map-card p { margin: 4px 0 0; }
+#map-key { flex: none; display: flex; flex-wrap: wrap; gap: 2px 16px; padding: 4px 12px; border-top: 1px solid var(--line); font-size: 12px; }
+#map-key i { display: inline-block; width: 16px; height: 10px; margin-right: 5px; vertical-align: -1px; border: 1.2px solid var(--soft); border-radius: 2px; background: var(--panel); }
+#map-key i.open { border-style: dashed; border-radius: 6px; background: none; }
+#map-key i.door { height: 0; border: 0; border-top: 3px solid var(--ink); border-radius: 0; vertical-align: 3px; }
+#map-key i.link { height: 0; border: 0; border-top: 1.5px solid var(--faint); border-radius: 0; vertical-align: 3px; }
+#map-key i.asleep { width: 10px; border: 2.5px solid var(--soft); border-radius: 50%; }
+.mp text { font: 13px var(--ui); fill: var(--ink); }
+.mp-group { fill: var(--sunk); }
+.mp-link line { stroke: var(--faint); stroke-width: 1.5; }
+.mp-link.usual line { stroke-dasharray: 2 5; }
+.mp-link rect { fill: var(--bg); stroke: var(--line); }
+.mp-link text, .mp-rule text, .mp-trip text, .mp text.mp-figure { font-size: 11px; fill: var(--soft); }
+.mp-rule path { fill: none; stroke: var(--soft); }
+.mp-door { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
+.mp-place { cursor: pointer; }
+.mp-place rect { fill: var(--panel); stroke: var(--soft); stroke-width: 1.2; pointer-events: all; }
+.mp-place.open rect { fill: none; stroke-dasharray: 5 4; }
+.mp-place.hot rect { stroke: var(--ink); stroke-width: 2; }
+.mp-place.on rect { stroke: var(--accent); stroke-width: 2.5; }
+.mp text.mp-name { font-weight: 600; }
+.mp text.mp-way { font-size: 11px; font-weight: 600; fill: var(--accent); }
+.mp-mark { fill: var(--c, var(--faint)); stroke: var(--panel); stroke-width: 1; }
+.mp-mark.asleep { fill: var(--panel); stroke: var(--c, var(--faint)); stroke-width: 2.5; }
+.mp-trip line { stroke: var(--c, var(--faint)); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: .75; }
+/* What a traveller's line says may lie over a place or a link: it is edged with the ground's colour. */
+.mp-trip text, .mp text.mp-way { paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
 
 /* The numbers. */
 #numbers { flex: 1; min-height: 0; overflow: auto; padding: 16px; }
@@ -246,7 +289,7 @@ dialog td { padding: 3px 12px 3px 0; vertical-align: top; }
 dialog td:first-child { white-space: nowrap; }
 #shade { display: none; }
 
-/* A narrow window: the list slides over the page, the time stands above each event, the map is a thin strip. */
+/* A narrow window: the list slides over the page, the time stands above each event, the strip of the time is thinner. */
 @media (max-width: 900px) {
   #side { position: fixed; z-index: 10; top: 0; bottom: 0; left: 0; width: min(292px, 88vw); box-shadow: 4px 0 24px rgb(0 0 0 / .3); }
   body:not(.noside) #shade { display: block; position: fixed; inset: 0; z-index: 9; background: rgb(0 0 0 / .35); }
@@ -260,7 +303,7 @@ dialog td:first-child { white-space: nowrap; }
   #feed { padding: 6px 10px 96px; }
   .ev { display: block; }
   .ev .t { float: left; margin-right: 8px; padding-top: 1px; text-align: left; }
-  #map-box { width: 26px; }
+  #strip-box { width: 26px; }
   .cmp-head, .row { grid-template-columns: minmax(0, 1fr) 3.3rem minmax(0, 1fr); gap: 0 6px; }
   .row .axis { font-size: 11px; }
   .row .ev .t { float: none; display: block; margin: 0; }

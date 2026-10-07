@@ -1,4 +1,5 @@
 import { secondsOf, clockAt as clockIn, timeOf, focusOf, numbersOf as numbersIn, median, ACTORS, linkOf, hashOf as hashIn, sidesOf, planOf, stretchAt, firstAt, narrowed, grouped } from './core.js';
+import { layoutOf, fitOf, sceneOf, peopleOf, roomFor, whereAt, momentsOf, waysFrom } from './map.js';
 import { STRINGS, languageOf } from './strings.js';
 // Every text of an event, of a world file, of `about.txt`, of a transcript and every name of a file comes from
 // outside: it goes into the page as a text node alone, through `textContent`, and never as markup.
@@ -264,7 +265,7 @@ const relayout = () => {
       feed.append(part.box);
     }
   }
-  itemsStale = mapStale = true;
+  itemsStale = stripStale = true;
   settle();
 };
 // What is in the page from top to bottom, without what a filter hides: the events of the feed, or the rows.
@@ -308,7 +309,13 @@ const stand = (name, t) => {
   }
   scheduleFrame();
 };
-const setFollow = on => { follow = on; $('follow').checked = on; if (on) { fresh = 0; state.t = null; bottom(); writeHash(); } showFresh(); };
+// On the map the moment that was followed stays the chosen one when the following ends.
+const setFollow = on => {
+  if (!on && follow && state.v === 'm' && state.t === null) { state.t = worldSpan().to; writeHash(); }
+  follow = on; $('follow').checked = on;
+  if (on) { fresh = 0; state.t = null; bottom(); writeHash(); }
+  showFresh(); showMoment();
+};
 const showFresh = () => { const pill = $('fresh'); pill.hidden = follow || fresh === 0 || state.v !== 'f'; if (!pill.hidden) pill.textContent = TXT.fresh(number(fresh)); };
 
 let shownCount = 0, totalCount = 0;
@@ -324,7 +331,7 @@ const applyFilters = keep => {
   shownCount = totalCount = 0;
   for (const one of sides) for (const rec of one.recs) { judge(rec); totalCount += 1; if (rec.shown) { shownCount += 1; if (rec.row) rec.row.n += 1; } }
   for (const row of rows.values()) row.el.hidden = row.n === 0;
-  itemsStale = mapStale = true;
+  itemsStale = stripStale = true;
   const on = chosen.size > 0 || places.size > 0 || query !== '';
   $('filters').classList.toggle('on', on);
   $('active').hidden = !on;
@@ -386,7 +393,7 @@ const toHit = by => {
 
 // ---- Opening a side on an experiment. Its last stretch comes as a stream, which goes on while the run grows it;
 // every other stretch is asked for whole (`stretch?x=&s=&from=`), one at a time, the one the page stands in first.
-let numbersStale = false, mapStale = true, countsStale = false;
+let numbersStale = false, stripStale = true, countsStale = false;
 const addEvents = (part, events) => {
   const one = part.side, inFeed = one === A && !comparing(), batch = inFeed ? document.createDocumentFragment() : null, live = part.ready && part === one.tail;
   // What is read stays where it is while a stretch above it arrives.
@@ -408,7 +415,7 @@ const addEvents = (part, events) => {
   gather(one);
   shownCount += added;
   showShown();
-  itemsStale = mapStale = numbersStale = countsStale = true;
+  itemsStale = stripStale = numbersStale = countsStale = true;
   // By the offset within the window, not by a height added: right whether or not the browser kept the place itself.
   if (anchor) { const top = anchor.el.offsetTop - was; if (Math.abs(top - scroller.scrollTop) >= 1) { scroller.scrollTop = top; settle(); } }
   if (chipsStale) renderChips();
@@ -494,8 +501,8 @@ const listen = (one, part) => {
   source.addEventListener('open', () => { if (one.source === source) { one.live = true; showLive(); } });
   source.addEventListener('error', () => { if (one.source === source) { one.live = false; showLive(); } });
   on('world', world => {
-    const map = entries => new Map(list(entries).map(item => [str(item?.id), str(item?.name)]));
-    one.names = { characters: map(world?.characters), places: map(world?.places) };
+    const named = entries => new Map(list(entries).map(item => [str(item?.id), str(item?.name)]));
+    one.names = { characters: named(world?.characters), places: named(world?.places) };
     if (one === A || !A.names.characters.size) { for (const id of one.names.characters.keys()) person(id); for (const id of one.names.places.keys()) spot(id); }
     renderChips();
     // The names are here: the stretches may be asked for and drawn, and the side beside this one may open.
@@ -546,7 +553,7 @@ const syncParts = one => {
     gather(one);
     if (dropped.some(part => part.recs.length) && (one === A || comparing())) { relayout(); applyFilters(false); }
     else if (one === A && !comparing()) { for (const part of dropped) part.box.remove(); next.forEach((part, at) => { if (feed.children[at] !== part.box) feed.insertBefore(part.box, feed.children[at] ?? null); }); }
-    itemsStale = mapStale = true;
+    itemsStale = stripStale = true;
   }
   for (const part of next) showMark(part);
   const last = next.at(-1) ?? null;
@@ -653,7 +660,7 @@ const refreshList = async () => {
     listing = await response.json();
     if (!listed) { listed = true; if (listing.single || matchMedia('(max-width: 900px)').matches) document.body.classList.add('noside'); sync(true); }
     else for (const one of sides) syncParts(one);
-    renderList(); showTop(); showLive(); loadStory(); loadTexts();
+    renderList(); showTop(); showLive(); loadStory(); loadTexts(); loadMap();
   } catch { showLive(true); }
 };
 
@@ -684,6 +691,9 @@ const showTop = () => {
   // An experiment that is a transcript alone has no feed to go to.
   $('v-feed').hidden = textOnly(A.x);
   $('v-numbers').hidden = textOnly(A.x);
+  // The map is of a world file: an experiment that has none has no such view.
+  $('v-map').setAttribute('aria-selected', String(state.v === 'm'));
+  $('v-map').hidden = state.v !== 'm' && !found(A.x)?.map;
   $('v-numbers').setAttribute('aria-selected', String(state.v === 'n'));
 };
 let lost = false;
@@ -726,11 +736,11 @@ const renderChips = () => {
 
 // ---- The whole run at the side: time runs down, a lane a character, a mark as long as the speech or the deed
 // lasted. The frame is what the window shows. With two experiments each has its half, on one axis.
-const mapBox = $('map-box'), canvas = $('map'), lanes = document.createElement('canvas');
-let mapFrom = 0, mapTo = 1;
+const stripBox = $('strip-box'), canvas = $('strip'), lanes = document.createElement('canvas');
+let stripFrom = 0, stripTo = 1;
 const cssColour = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const drawLanes = () => {
-  const ratio = devicePixelRatio || 1, width = mapBox.clientWidth, height = mapBox.clientHeight;
+  const ratio = devicePixelRatio || 1, width = stripBox.clientWidth, height = stripBox.clientHeight;
   for (const one of [canvas, lanes]) { one.width = Math.max(1, Math.round(width * ratio)); one.height = Math.max(1, Math.round(height * ratio)); }
   const pen = lanes.getContext('2d');
   pen.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -738,10 +748,10 @@ const drawLanes = () => {
   let from = Infinity, to = -Infinity;
   const used = comparing() ? sides : [A];
   for (const one of used) if (one.recs.length) { from = Math.min(from, one.recs[0].T); const last = one.recs.at(-1); to = Math.max(to, last.T + (last.e.seconds > 0 ? last.e.seconds : 0)); }
-  // The stretches that are not loaded yet have their span from the list: the map is of the whole world at once.
+  // The stretches that are not loaded yet have their span from the list: the strip is of the whole world at once.
   for (const one of used) for (const part of one.parts) if (part.from !== null && part.to !== null) { from = Math.min(from, part.from); to = Math.max(to, part.to); }
-  if (!(to > from)) { mapFrom = 0; mapTo = 1; return; }
-  mapFrom = from; mapTo = to;
+  if (!(to > from)) { stripFrom = 0; stripTo = 1; return; }
+  stripFrom = from; stripTo = to;
   const labels = width >= 60 ? 36 : 0, pad = 6, scale = (height - pad * 2) / (to - from), y = T => pad + (T - from) * scale;
   // The marks of the hours, or of what fits.
   const tick = [60, 300, 600, 1800, 3600, 10800, 21600, 86400, 172800, 604800].find(value => value * scale >= 44) ?? 2592000;
@@ -771,37 +781,37 @@ const drawLanes = () => {
     pen.globalAlpha = 1;
   });
 };
-const drawMap = () => {
-  if (mapStale) { drawLanes(); mapStale = false; }
-  const ratio = devicePixelRatio || 1, width = mapBox.clientWidth, height = mapBox.clientHeight, pen = canvas.getContext('2d');
+const drawStrip = () => {
+  if (stripStale) { drawLanes(); stripStale = false; }
+  const ratio = devicePixelRatio || 1, width = stripBox.clientWidth, height = stripBox.clientHeight, pen = canvas.getContext('2d');
   pen.setTransform(1, 0, 0, 1, 0, 0);
   pen.clearRect(0, 0, canvas.width, canvas.height);
   pen.drawImage(lanes, 0, 0);
   const all = shownItems();
-  if (!all.length || !(mapTo > mapFrom)) return;
+  if (!all.length || !(stripTo > stripFrom)) return;
   const first = all[itemAt(scroller.scrollTop + headRoom())], last = all[itemAt(scroller.scrollTop + scroller.clientHeight - 1)];
-  const scale = (height - 12) / (mapTo - mapFrom), top = 6 + (first.T - mapFrom) * scale, end = 6 + ((last.T ?? first.T) + (comparing() ? step : last.e?.seconds > 0 ? last.e.seconds : 0) - mapFrom) * scale;
+  const scale = (height - 12) / (stripTo - stripFrom), top = 6 + (first.T - stripFrom) * scale, end = 6 + ((last.T ?? first.T) + (comparing() ? step : last.e?.seconds > 0 ? last.e.seconds : 0) - stripFrom) * scale;
   pen.setTransform(ratio, 0, 0, ratio, 0, 0);
   pen.fillStyle = cssColour('--ink'); pen.globalAlpha = 0.1;
   pen.fillRect(0, top - 2, width, Math.max(6, end - top + 4));
   pen.globalAlpha = 1; pen.strokeStyle = cssColour('--accent'); pen.lineWidth = 1.5;
   pen.strokeRect(0.75, top - 2, width - 1.5, Math.max(6, end - top + 4));
 };
-const mapTime = event => { const box = mapBox.getBoundingClientRect(), y = Math.min(box.height - 6, Math.max(6, event.clientY - box.top)); return { y, T: mapFrom + (y - 6) / Math.max(1, box.height - 12) * (mapTo - mapFrom) }; };
+const stripTime = event => { const box = stripBox.getBoundingClientRect(), y = Math.min(box.height - 6, Math.max(6, event.clientY - box.top)); return { y, T: stripFrom + (y - 6) / Math.max(1, box.height - 12) * (stripTo - stripFrom) }; };
 let dragging = false;
-const mapMove = event => {
-  if (!(mapTo > mapFrom)) return;
-  const { y, T } = mapTime(event), tip = $('map-tip');
-  tip.hidden = false; tip.style.top = `${y}px`; tip.textContent = clockAt(T, mapTo - mapFrom < 7200);
+const stripMove = event => {
+  if (!(stripTo > stripFrom)) return;
+  const { y, T } = stripTime(event), tip = $('strip-tip');
+  tip.hidden = false; tip.style.top = `${y}px`; tip.textContent = clockAt(T, stripTo - stripFrom < 7200);
   if (dragging) { if (follow) setFollow(false); jumpTo(T); noteTop(); scheduleFrame(); }
 };
-mapBox.addEventListener('pointerdown', event => { dragging = true; mapBox.setPointerCapture(event.pointerId); mapMove(event); });
-mapBox.addEventListener('pointermove', mapMove);
-mapBox.addEventListener('pointerup', () => { dragging = false; });
-mapBox.addEventListener('pointercancel', () => { dragging = false; });
-mapBox.addEventListener('pointerleave', () => { if (!dragging) $('map-tip').hidden = true; });
+stripBox.addEventListener('pointerdown', event => { dragging = true; stripBox.setPointerCapture(event.pointerId); stripMove(event); });
+stripBox.addEventListener('pointermove', stripMove);
+stripBox.addEventListener('pointerup', () => { dragging = false; });
+stripBox.addEventListener('pointercancel', () => { dragging = false; });
+stripBox.addEventListener('pointerleave', () => { if (!dragging) $('strip-tip').hidden = true; });
 
-// ---- One frame of upkeep after anything changed: the clock, the map, the counts, the numbers.
+// ---- One frame of upkeep after anything changed: the clock, the strip of the time, the counts, the numbers.
 let framed = false, hashTimer = null;
 const frame = () => {
   framed = false;
@@ -813,7 +823,7 @@ const frame = () => {
       // The picker names the stretch the window stands in.
       if (A.s === null && !comparing() && document.activeElement !== picker) { const name = topItem().part.name; if (picker.value !== name) picker.value = name; }
     } else $('clock').textContent = '—';
-    drawMap();
+    drawStrip();
   }
   if (countsStale) { countsStale = false; showCounts(); showLive(); }
   if (numbersStale && state.v === 'n') { numbersStale = false; renderNumbers(); }
@@ -851,7 +861,7 @@ scroller.addEventListener('touchmove', () => { unpin(); reading(); }, { passive:
 scroller.addEventListener('pointerdown', event => { if (event.target === scroller) unpin(); if (event.target === scroller && event.offsetX >= scroller.clientWidth) reading(); });
 scroller.addEventListener('keydown', event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) reading(); });
 addEventListener('keydown', unpin, true);
-new ResizeObserver(() => { mapStale = true; scheduleFrame(); }).observe(mapBox);
+new ResizeObserver(() => { stripStale = true; scheduleFrame(); }).observe(stripBox);
 
 // ---- The head of a comparison: the two names, the span of a row, a way out.
 const headOfCompare = () => {
@@ -1065,6 +1075,132 @@ const loadTexts = () => {
   }
 };
 
+// ---- The map: the places of the world file, each group of near places to a scale of its own, and everyone where
+// it is at a moment (`map.js` lays it out and draws it). What it is drawn from is asked for when the view is opened
+// and again when the list says that the experiment grew or its world file changed (`map?x=`): the map's part of
+// the world file and the moves of every stretch, which the server reads from the events, so that no event has to
+// be in the page for it. The moment is `t` of the link, the newest one while the newest is followed, and with
+// neither the first of the world.
+// `land` is what was loaded for the open experiment and what was drawn of it; `hot` is the place pointed at.
+const mapScroll = $('map-scroll'), mapSvg = $('map-svg');
+const noLand = x => ({ x, key: null, loading: false, world: null, text: '', moves: [], moments: [], both: null, layout: null, places: new Map(), marks: null, hot: null });
+let land = noLand(null), momentTimer = null;
+const svgOf = ([tag, attributes, ...children]) => { const node = svg(tag, attributes); for (const child of children) node.append(typeof child === 'string' ? child : svgOf(child)); return node; };
+const mapWords = { span: seconds => duration(seconds), due: (to, until) => TXT.mapDue(to, clockAt(until, false).replace(DAY_HEAD, '')), many: count => TXT.mapMany(count) };
+const landPerson = id => land.world?.characters.find(one => one.id === id)?.name ?? personName(id);
+const landPlace = id => land.world?.places.find(one => one.id === id)?.name ?? placeName(id);
+const landWhere = T => whereAt(land.world.characters, land.moves, T, (found(A.x)?.stretches.find(stretch => stretch.first != null)?.first.at ?? 0) === 0);
+// The span of the whole world, as the list gives it for the stretches.
+const worldSpan = () => {
+  let from = Infinity, to = -Infinity;
+  for (const stretch of found(A.x)?.stretches ?? []) if (stretch.from != null && stretch.to != null) { from = Math.min(from, stretch.from); to = Math.max(to, stretch.to); }
+  return to >= from ? { from, to } : { from: 0, to: 0 };
+};
+const momentNow = () => { const { from, to } = worldSpan(); return follow ? to : Math.min(to, Math.max(from, state.t ?? from)); };
+const loadMap = () => {
+  const x = A.x, experiment = found(x);
+  if (state.v !== 'm' || x === null || !experiment?.map) return;
+  if (land.x !== x) { land = noLand(x); mapSvg.replaceChildren(); }
+  const mine = land, key = `${experiment.mapKey}:${experiment.stretches.reduce((sum, stretch) => sum + stretch.events, 0)}`;
+  if (mine.loading || mine.key === key) return;
+  mine.loading = true;
+  fetch(`map?x=${encodeURIComponent(x)}`, { cache: 'no-store' }).then(response => response.ok ? response.json() : null).then(got => {
+    mine.loading = false;
+    if (land !== mine || got === null || got.world === null || typeof got.world !== 'object') return;
+    // The places are laid out anew only when the world file is another one than the one that is drawn.
+    const text = JSON.stringify(got.world);
+    if (text !== mine.text) Object.assign(mine, { world: got.world, text, both: null, layout: null });
+    mine.moves = list(got.stretches).flatMap(stretch => list(stretch?.moves));
+    mine.moments = momentsOf(mine.moves);
+    mine.key = key;
+    showMap();
+  }).catch(() => { mine.loading = false; });
+};
+// The places. A world is laid out both ways once, wide and tall, and the pane shows the one that `fitOf` takes for
+// its size, as large as the pane takes it whole, down to four fifths: a larger map is scrolled. They are drawn anew
+// when the world file is another one or the pane's size asks for the other layout.
+const drawPlaces = () => {
+  if (!land.world) return;
+  land.both ??= [layoutOf(land.world, { tall: false }), layoutOf(land.world, { tall: true })];
+  // The pane's size without its scroll bars' say in it (the style sheet keeps the room of the upright one), so that
+  // a bar that comes or goes with a choice does not ask for the other one.
+  const { layout } = fitOf(land.both[0], land.both[1], mapScroll.clientWidth - 16, mapScroll.offsetHeight - 16);
+  if (land.layout !== layout) {
+    land.layout = layout;
+    const scene = svgOf(sceneOf(layout, mapWords));
+    land.marks = svg('g');
+    land.places = new Map([...scene.querySelectorAll('.mp-place')].map(node => [node.dataset.id, node]));
+    mapSvg.replaceChildren(scene, land.marks);
+  }
+};
+// Everyone at the moment: the marks on the map, and above it each by name with where it is in words.
+const showMoment = () => {
+  if (state.v !== 'm') return;
+  const { from, to } = worldSpan(), T = momentNow(), range = $('map-t');
+  range.min = String(from); range.max = String(to > from ? to : from + 1); range.value = String(T); range.disabled = !(to > from);
+  $('map-clock').textContent = $('clock').textContent = clockAt(T);
+  $('map-note').textContent = [comparing() ? TXT.mapLeft : '', land.world ? '' : TXT.mapLoading].filter(Boolean).join(' · ');
+  if (!land.world || !land.layout) { $('map-who').replaceChildren(); return; }
+  const where = landWhere(T), room = roomFor(land.layout, where, mapWords), size = { width: room.w, height: room.h };
+  const { by } = fitOf(size, size, mapScroll.clientWidth - 16, mapScroll.offsetHeight - 16);
+  mapSvg.setAttribute('viewBox', `${room.x} ${room.y} ${room.w} ${room.h}`);
+  mapSvg.setAttribute('width', Math.ceil(room.w * by)); mapSvg.setAttribute('height', Math.ceil(room.h * by));
+  for (const id of where.keys()) person(id);
+  if (chipsStale) renderChips();
+  const marks = svgOf(peopleOf(land.layout, where, { tones: id => tone(id) || 'p0', names: landPerson, words: mapWords }));
+  land.marks.replaceWith(marks); land.marks = marks;
+  $('map-who').replaceChildren(...[...where].map(([id, is]) => {
+    const row = el('span');
+    row.append(el('span', `dot ${tone(id) || 'p0'}`), el('b', '', landPerson(id)), is.unknown ? TXT.mapUnknown : is.place === null ? TXT.mapNowhere : is.to !== null ? TXT.mapOnWay(landPlace(is.place), landPlace(is.to), clockAt(is.until, false))
+      : `${landPlace(is.place)}${is.asleep ? ` · ${TXT.mapAsleep}` : ''}`);
+    return row;
+  }));
+  for (const [id, node] of land.places) node.classList.toggle('on', state.place.includes(id));
+  showCard(where);
+};
+// The place pointed at: its name, its description, its people whom nobody plays, who is there at the moment and the
+// way to every other place, which is written on the map over each of them too.
+const showCard = (where = land.world ? landWhere(momentNow()) : new Map()) => {
+  const card = $('map-card'), place = land.hot === null ? null : land.world?.places.find(one => one.id === land.hot) ?? null;
+  card.hidden = place === null;
+  for (const [id, node] of land.places) { node.classList.toggle('hot', id === land.hot); node.querySelector('.mp-way').textContent = ''; }
+  if (place === null) return;
+  const ways = waysFrom(land.world, place.id), here = [...where].filter(([, is]) => is.place === place.id && is.to === null).map(([id, is]) => `${landPerson(id)}${is.asleep ? ` (${TXT.mapAsleep})` : ''}`);
+  for (const way of ways) land.places.get(way.id).querySelector('.mp-way').textContent = duration(way.seconds);
+  card.replaceChildren(el('h3', '', str(place.name)), ...(place.about ? [el('p', '', str(place.about))] : []), ...(list(place.figures).length ? [el('p', 'quiet', `${TXT.mapFigures}: ${place.figures.map(figure => str(figure.name)).join(', ')}`)] : []),
+    el('p', '', here.length ? `${TXT.mapHere}: ${here.join(', ')}` : TXT.mapNobody), ...(ways.length ? [el('p', 'quiet', `${TXT.mapWays}: ${ways.map(way => `${landPlace(way.id)} ${duration(way.seconds)}`).join(' · ')}`)] : []),
+    el('p', 'quiet', state.place.includes(place.id) ? `${TXT.mapFiltered}. ${TXT.mapFilter}` : TXT.mapFilter));
+};
+const showMap = () => { if (state.v !== 'm') return; drawPlaces(); showMoment(); };
+// The moment is chosen: the newest is no longer followed, and the link is written a moment after the hand stopped.
+// In the feed of a whole world the link then stands by `t` alone, so that the feed opens at the same moment.
+const setMoment = T => {
+  if (follow) { follow = false; $('follow').checked = false; }
+  state.t = Math.round(T);
+  if (A.s === null && !comparing()) state.s = null;
+  clearTimeout(momentTimer); momentTimer = setTimeout(() => writeHash(), 250);
+  showMoment();
+};
+// To the next or the previous moment at which someone moved, fell asleep or woke; past the last one, to the end.
+const stepMoment = by => { const T = momentNow(), { from, to } = worldSpan(); setMoment((by > 0 ? land.moments.find(at => at > T) : land.moments.findLast(at => at < T)) ?? (by > 0 ? to : from)); };
+const placeUnder = event => event.target instanceof Element ? event.target.closest('.mp-place')?.dataset.id ?? null : null;
+$('map-t').addEventListener('input', () => setMoment(Number($('map-t').value)));
+$('map-prev').addEventListener('click', () => stepMoment(-1));
+$('map-next').addEventListener('click', () => stepMoment(1));
+mapSvg.addEventListener('pointermove', event => {
+  const id = placeUnder(event);
+  if (id === land.hot) return;
+  land.hot = id;
+  // The card stands at the side of the map that the pointer is not on.
+  const box = mapScroll.getBoundingClientRect();
+  $('map-card').classList.toggle('left', event.clientX > box.left + box.width / 2);
+  showCard();
+});
+mapSvg.addEventListener('pointerleave', () => { land.hot = null; showCard(); });
+// A place chosen goes into the feed's filter by place, or out of it, as by its chip.
+mapSvg.addEventListener('click', event => { const id = placeUnder(event); if (id === null) return; toggle('place', id); unpin(); showMoment(); });
+new ResizeObserver(() => showMap()).observe(mapScroll);
+
 // ---- Bringing the page to the state: after the hash changed, by a link, a click or a key. `moved` says that the
 // place to stand may have changed too: the page goes where `s` and `t` say.
 let viewWas = 'f';
@@ -1074,7 +1210,8 @@ const sync = moved => {
   const x = state.x ?? (listing.experiments.find(experiment => !experiment.rehearsal) ?? listing.experiments[0])?.id ?? null;
   if (state.x === null && x !== null) { state.x = x; writeHash(); }
   // An experiment that is a transcript alone opens as that text, and one without a transcript never does.
-  const view = textOnly(x) ? 't' : state.v === 't' && found(x) !== null && !found(x).texts.length ? 'f' : state.v;
+  // And one without a world file to draw from has no map.
+  const view = textOnly(x) ? 't' : found(x) !== null && ((state.v === 't' && !found(x).texts.length) || (state.v === 'm' && !found(x).map)) ? 'f' : state.v;
   if (view !== state.v) { state.v = view; writeHash(); }
   // A stretch is shown by itself when the link says so and the experiment has it; else the side is its whole world.
   const alone = sidesOf(state), sA = alone.a !== null && stretchNames(x).includes(alone.a) ? alone.a : null, sB = alone.b !== null && stretchNames(state.cmp).includes(alone.b) ? alone.b : null;
@@ -1100,14 +1237,17 @@ const sync = moved => {
   $('numbers').hidden = state.v !== 'n';
   storyBox.hidden = state.v !== 's';
   textBox.hidden = state.v !== 't';
+  $('map').hidden = state.v !== 'm';
   $('filters').hidden = state.v !== 'f';
-  $('follow').parentElement.hidden = state.v !== 'f';
+  $('follow').parentElement.hidden = state.v !== 'f' && state.v !== 'm';
   renderChips(); renderList(); showTop(); showFresh();
   for (const one of sides) for (const part of one.parts) showMark(part);
-  numbersStale = true; countsStale = true; mapStale = true;
+  numbersStale = true; countsStale = true; stripStale = true;
   runSearch();
   loadStory();
   loadTexts();
+  loadMap();
+  showMap();
   if (state.v === 's' && (viewWas !== 's' || moved)) { if (viewWas !== 's') renderStory(); scrollStory(); }
   // Back in the feed, or sent to another place of the same feed: the window goes where the link says.
   if (state.v === 'f' && !opened && (moved || viewWas !== 'f')) { if (follow) bottom(); else stand(state.s, state.t); }
@@ -1130,10 +1270,10 @@ const flip = key => { state[key] = !state[key]; writeHash(); sync(); };
 
 // ---- Theme and face: the system's theme until the switch is used; the choice stays in this browser.
 const THEMES = Object.entries(TXT.themes);
-const setTheme = name => { if (name) document.documentElement.dataset.theme = name; else delete document.documentElement.dataset.theme; $('b-theme').title = TXT.themeTitle(THEMES.find(([key]) => key === name)?.[1] ?? ''); stored('sagents-lab-theme', name); mapStale = true; scheduleFrame(); };
+const setTheme = name => { if (name) document.documentElement.dataset.theme = name; else delete document.documentElement.dataset.theme; $('b-theme').title = TXT.themeTitle(THEMES.find(([key]) => key === name)?.[1] ?? ''); stored('sagents-lab-theme', name); stripStale = true; scheduleFrame(); };
 const nextTheme = () => { const at = THEMES.findIndex(([key]) => key === (document.documentElement.dataset.theme ?? '')); setTheme(THEMES[(at + 1) % THEMES.length][0]); };
 const setFace = name => { if (name === 'sans') document.documentElement.dataset.face = 'sans'; else delete document.documentElement.dataset.face; stored('sagents-lab-face', name); };
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { mapStale = true; scheduleFrame(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { stripStale = true; scheduleFrame(); });
 
 // ---- The controls.
 $('b-side').addEventListener('click', () => document.body.classList.toggle('noside'));
@@ -1148,6 +1288,7 @@ $('v-story').addEventListener('click', () => setView('s'));
 $('v-text').addEventListener('click', () => setView('t'));
 $('narrow').addEventListener('input', () => { narrowBy = $('narrow').value.trim(); renderList(); });
 $('v-numbers').addEventListener('click', () => setView('n'));
+$('v-map').addEventListener('click', () => setView('m'));
 $('follow').addEventListener('change', () => setFollow($('follow').checked));
 $('fresh').addEventListener('click', () => setFollow(true));
 $('notes').addEventListener('change', () => flip('notes'));
@@ -1188,13 +1329,14 @@ addEventListener('keydown', event => {
   else if (/^Digit[1-9]$/.test(code) && !event.shiftKey) { const id = [...people.keys()][Number(code.slice(5)) - 1]; if (id === undefined) return; toggle('who', id); }
   else if (code === 'Digit0' && !event.shiftKey) clearFilters();
   else if (code === 'KeyF') setFollow(!follow);
-  else if (code === 'KeyJ') stepBy(1);
-  else if (code === 'KeyK') stepBy(-1);
+  else if (code === 'KeyJ' || code === 'KeyK') { if (state.v === 'm') stepMoment(code === 'KeyJ' ? 1 : -1); else stepBy(code === 'KeyJ' ? 1 : -1); }
+  else if (code === 'KeyG' && state.v === 'm') setMoment(event.shiftKey ? worldSpan().to : worldSpan().from);
   else if (code === 'KeyG' && !event.shiftKey) { if (follow) setFollow(false); toTop(); noteTop(); }
   else if (code === 'KeyG') bottom();
   else if (code === 'KeyN') setView(state.v === 'n' ? 'f' : 'n');
   else if (code === 'KeyS') setView(state.v === 's' ? 'f' : 's');
   else if (code === 'KeyX') { if (found(A.x)?.texts.length) setView(state.v === 't' ? 'f' : 't'); }
+  else if (code === 'KeyP') { if (found(A.x)?.map) setView(state.v === 'm' ? 'f' : 'm'); }
   else if (code === 'KeyC') { if (comparing()) compareWith(null); else if (found(A.x)?.stretches.length) { const feeds = ordered.filter(experiment => experiment.stretches.length), at = feeds.findIndex(experiment => experiment.id === A.x), other = feeds[at + 1] ?? feeds[at - 1]; if (other) compareWith(other.id); else if (found(A.x).stretches.length > 1) compareWith(A.x); } }
   else if (code === 'BracketLeft') experimentBy(-1);
   else if (code === 'BracketRight') experimentBy(1);

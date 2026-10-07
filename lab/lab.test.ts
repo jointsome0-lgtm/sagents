@@ -2,7 +2,8 @@
 // These are here because the lab serves the text of private stories on a local port: a mistake in the token or in
 // the paths shows it to another local user or reads a file outside the roots, a mistake in what is taken of a world
 // file or a chapter sends a sheet or a narrator's own thread to the page, and a token in the arguments of a process
-// can be read by anyone on the computer.
+// can be read by anyone on the computer. The world file here holds `NOT-FOR-THE-PAGE` in every field that the lab
+// does not give out, and where a field that it does give out is of another shape than the engine writes.
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,11 +14,21 @@ import { openLab } from './data.ts';
 import { openInBrowser } from './open.ts';
 import { startLab } from './server.ts';
 
-const SECRETS = ['SHEET-NINA', 'FACT-OF-THE-WORLD', 'CARRY-OF-THE-NARRATOR', 'WORDS-OF-THE-SERVICE', 'OUTSIDE-THE-ROOT', 'STATE-FILE'];
+const NO = 'NOT-FOR-THE-PAGE';
+const SECRETS = [NO, 'SHEET-NINA', 'FACT-OF-THE-WORLD', 'CARRY-OF-THE-NARRATOR', 'WORDS-OF-THE-SERVICE', 'OUTSIDE-THE-ROOT', 'STATE-FILE'];
 const line = (value: object) => `${JSON.stringify(value)}\n`;
 const event = (at: number, who: string, text: string, more: object = {}) => line({ at, clock: `13:00:${String(at).padStart(2, '0')}`, kind: 'say', who, place: 'cafe', to: null, text, seconds: 2, cut: false, heard: [], note: null, ...more });
 const row = (n: number, more: object = {}) => line({ n, at: '13:00:00', kind: 'turn', who: 'nina', model: 'stand-in', ms: 10, input: 100, cached: 40, output: 10, reasoning: 0, ...more });
-const WORLD = JSON.stringify({ title: 'The café', about: 'A café.', facts: 'FACT-OF-THE-WORLD', characters: [{ id: 'nina', name: 'Nina', sheet: 'SHEET-NINA' }, { id: 'oleg', name: 'Oleg', sheet: 'A sheet.' }], places: [{ id: 'cafe', name: 'Café' }] });
+const WORLD = JSON.stringify({ title: 'The café', about: 'A café.', facts: 'FACT-OF-THE-WORLD', clock: '13:00', travelMinutes: 7, walkMetresPerMinute: 70, crowd: NO, looks: NO, things: [{ id: 'cup', name: NO, about: NO, place: 'cafe' }],
+  characters: [{ id: 'nina', name: 'Nina', place: 'cafe', sheet: 'SHEET-NINA', memory: NO, looks: NO, facts: [NO], things: [{ id: 'key', name: NO }], at: NO }, { id: 'oleg', name: 'Oleg', place: NO, sheet: 'A sheet.' }],
+  places: [{ id: 'cafe', name: 'Café', about: 'Tables.', at: [0, 0], open: false, minutesTo: { beach: 3, [NO]: 4, cafe: NO }, nextDoor: ['beach', NO], figures: [{ id: 'raya', name: 'Raya', looks: NO, sheet: NO, facts: [NO] }],
+    looks: NO, facts: [NO], things: [{ id: 'jar', name: NO }], crowd: NO, sounds: NO },
+  { id: 'beach', name: 'Beach', about: 'Sand.', at: [NO, 0], open: true, minutesTo: NO, nextDoor: NO, figures: NO }] });
+// What the lab gives of that file for the map, whole.
+const MAP = { travelMinutes: 7, walkMetresPerMinute: 70,
+  places: [{ id: 'cafe', name: 'Café', about: 'Tables.', at: [0, 0], minutesTo: { beach: 3 }, nextDoor: ['beach'], open: false, figures: [{ id: 'raya', name: 'Raya' }] },
+    { id: 'beach', name: 'Beach', about: 'Sand.', at: null, minutesTo: {}, nextDoor: [], open: true, figures: [] }],
+  characters: [{ id: 'nina', name: 'Nina', place: 'cafe' }, { id: 'oleg', name: 'Oleg', place: null }] };
 
 // A root with the three shapes among files that are no run, and beside it a directory that no path may reach.
 function folders() {
@@ -26,7 +37,9 @@ function folders() {
   // One world in two stretches, with a chapter.
   writeFileSync(join(root, 'day/kept/world.json'), WORLD);
   writeFileSync(join(root, 'day/kept/part1.events.jsonl'), event(1, 'nina', 'One.') + event(2, 'oleg', 'Two.'));
-  writeFileSync(join(root, 'day/kept/part2.events.jsonl'), event(3, 'nina', 'Three.', { touches: [{ of: 'oleg', text: 'a hand' }] }));
+  writeFileSync(join(root, 'day/kept/part2.events.jsonl'), event(3, 'nina', 'Three.', { touches: [{ of: 'oleg', text: 'a hand' }] })
+    + event(4, 'nina', 'Going.', { kind: 'go', to: 'beach', seconds: 1, note: 'Private move note.', extra: 'Private move field.' })
+    + event(5, 'nina', 'Sleeping.', { kind: 'sleep', place: 'beach', seconds: 60, note: 'Private sleep note.', extra: 'Private sleep field.' }));
   writeFileSync(join(root, 'day/kept/usage-part1.jsonl'), row(1) + row(2, { error: 'WORDS-OF-THE-SERVICE said this', text: 'WORDS-OF-THE-SERVICE' }));
   writeFileSync(join(root, 'day/kept/usage-part2.jsonl'), row(1, { error: 'timeout' }));
   writeFileSync(join(root, 'day/kept/state.sqlite'), 'STATE-FILE');
@@ -88,9 +101,16 @@ test('the list holds the three shapes, each run of a directory by itself, and no
   assert.deepEqual(said('day/scenes/dry-a'), ['run', 'day/scenes', true, ['dry-a'], ['dry-a'], 1]);
   assert.deepEqual(said('day/old/first'), ['text', 'day/old', false, [], ['first-1', 'first-2'], 0]);
   // A run takes its names from the world file of its directory, and its events are its own alone.
-  assert.deepEqual(lab.names('day/scenes/b'), { characters: [{ id: 'nina', name: 'Nina' }, { id: 'oleg', name: 'Oleg' }], places: [{ id: 'cafe', name: 'Café' }] });
+  assert.deepEqual(lab.names('day/scenes/b'), { characters: [{ id: 'nina', name: 'Nina' }, { id: 'oleg', name: 'Oleg' }], places: [{ id: 'cafe', name: 'Café' }, { id: 'beach', name: 'Beach' }] });
+  // For the map there leave of a world file the fields that README lists and no other, and with them where the
+  // events put everyone; an experiment without a world file has no map.
+  assert.deepEqual(lab.map('day/kept')!.world, MAP);
+  assert.deepEqual(lab.map('day/kept')!.stretches.map(stretch => [stretch.name, stretch.moves.map(move => Object.entries(move).join(' '))]),
+    [['part1', ['T,46801 who,nina kind,at place,cafe', 'T,46802 who,oleg kind,at place,cafe']],
+      ['part2', ['T,46803 who,nina kind,at place,cafe', 'T,46804 who,nina kind,go place,cafe to,beach seconds,1', 'T,46805 who,nina kind,sleep place,beach seconds,60']]]);
+  assert.deepEqual([listed.find(one => one.id === 'day/kept')!.map, listed.find(one => one.id === 'day/old/first')!.map, lab.map('day/old/first'), lab.map('day/kept/world.json'), lab.map('../outside')], [true, false, null, null, null]);
   assert.deepEqual(lab.world('day/scenes/b').events.map(one => one.text), ['Run b.']);
-  assert.deepEqual(lab.world('day/kept').events.map(one => one.text), ['One.', 'Two.', 'Three.']);
+  assert.deepEqual(lab.world('day/kept').events.map(one => one.text), ['One.', 'Two.', 'Three.', 'Going.', 'Sleeping.']);
   // A field of another version of the engine stays in the line as it was written.
   assert.match(lab.part('day/kept', 'part2')!.lines[0], /"touches":\[\{"of":"oleg","text":"a hand"\}\]/);
   assert.equal(lab.text('day/old/first', 'first-2')!.text, '13:10:01 [Café] Nina: "Old two."\n');
@@ -107,18 +127,20 @@ test('the server answers only GET under its token, builds no path from a request
     for (const path of ['/', '/list', `/${'0'.repeat(32)}/`, `/${'0'.repeat(32)}/list`, `/${token}`, `/${token}/data.ts`, `/${token}/server.ts`, `/${token}/open.ts`, `/${token}/page.html`, `/${token}/list/`, `/${token}//list`,
       `/${token}/%2e%2e/${token}/list.json`, `/${token.toUpperCase()}/list`]) assert.equal(await status(path), 404, path);
     for (const method of ['POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH']) assert.equal(await status(`/${token}/list`, { method }), 404, method);
-    for (const path of ['', 'app.js', 'core.js', 'strings.js', 'app.css', 'list']) assert.equal(await status(`/${token}/${path}`), 200, path);
+    for (const path of ['', 'app.js', 'core.js', 'map.js', 'strings.js', 'app.css', 'list']) assert.equal(await status(`/${token}/${path}`), 200, path);
     // A request names an experiment, a stretch and a transcript, and each is looked up among what the walk found:
     // a name that is a path finds nothing, inside the root or outside it.
     const q = (name: string, values: { [key: string]: string }) => `/${token}/${name}?${new URLSearchParams(values)}`;
     for (const path of [q('stretch', { x: 'day/kept', s: '../scenes/a' }), q('stretch', { x: '../outside', s: 'secret' }), q('stretch', { x: 'day/linked/secret', s: 'secret' }), q('stretch', { x: 'day/scenes/c', s: 'c' }),
       q('stretch', { x: 'day/kept', s: 'usage-part1' }), q('text', { x: 'day/old/first', n: '../second' }), q('text', { x: 'day/old/second', n: 'second' }), q('text', { x: 'day/old/first', n: 'readme' }),
-      q('text', { x: 'day/kept', n: 'world.json' }), q('text', { x: 'day/kept', n: 'state.sqlite' }), q('story', { x: 'day/kept/story' }), q('story', { x: '..' })]) assert.equal(await status(path), 404, path);
+      q('text', { x: 'day/kept', n: 'world.json' }), q('text', { x: 'day/kept', n: 'state.sqlite' }), q('story', { x: 'day/kept/story' }), q('story', { x: '..' }),
+      q('map', { x: 'day/old/first' }), q('map', { x: 'day/kept/world.json' }), q('map', { x: '../outside' }), q('map', {})]) assert.equal(await status(path), 404, path);
     // Everything the server gives of the root, in one text: no sheet, no fact, no carry, no words of a failure,
     // nothing of a state file and nothing from outside the root.
     const texts = [await (await fetch(new URL(q('list', {}), base.origin))).text(), await (await fetch(new URL(q('story', { x: 'day/kept' }), base.origin))).text(),
       await (await fetch(new URL(q('story', { x: 'day/links' }), base.origin))).text()];
     for (const one of JSON.parse(texts[0]).experiments) {
+      if (one.map) texts.push(await (await fetch(new URL(q('map', { x: one.id }), base.origin))).text());
       texts.push(await streamed(new URL(q('stream', { x: one.id }), base.origin).href));
       for (const stretch of one.stretches) texts.push(await (await fetch(new URL(q('stretch', { x: one.id, s: stretch.name }), base.origin))).text());
       for (const text of one.texts) texts.push(await (await fetch(new URL(q('text', { x: one.id, n: text.name }), base.origin))).text());
@@ -126,7 +148,7 @@ test('the server answers only GET under its token, builds no path from a request
     const all = texts.join('\n');
     assert.deepEqual(SECRETS.filter(secret => all.includes(secret)), []);
     // And what should be there is: the names of the world, the chapter, the events, a failure's code that is one.
-    for (const wanted of ['"name":"Nina"', '"title":"Noon"', 'They met.', '"text":"Three."', 'Old two.', '"failed":true,"code":"timeout"', '"failed":true,"code":null']) assert.ok(all.includes(wanted), wanted);
+    for (const wanted of ['"name":"Nina"', '"about":"Tables."', '"minutesTo":{"beach":3}', '"kind":"at","place":"cafe"', '"title":"Noon"', 'They met.', '"text":"Three."', 'Old two.', '"failed":true,"code":"timeout"', '"failed":true,"code":null']) assert.ok(all.includes(wanted), wanted);
     assert.deepEqual(failures, []);
   } finally { await lab.stop(); }
 });

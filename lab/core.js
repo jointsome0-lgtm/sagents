@@ -128,13 +128,30 @@ export const grouped = experiments => {
   return [...groups.values()];
 };
 
+// ---- Where everyone is. Of an event, what it says of where its `who` is from then on, or null when it says nothing
+// new: a `go` that someone leaves `place` by, for `to` and for so many seconds; a `sleep` in a place; and `at`, for
+// anything else a character does in a place, an arrival and a waking among them, which is given once and not again
+// while the character stays there awake. `T` is the event's story second, and `known` the place each character was
+// last given as awake in, a map that the caller keeps for one file of events and that is written to here. A figure's answer and a
+// rewritten memory move nobody. `MOVES` are the kinds of event that are read.
+const MOVES = ['say', 'call', 'do', 'wait', 'arrive', 'wake', 'result', 'sleep', 'go'];
+export const moveOf = (event, T, known) => {
+  const { who, place, kind } = event, spent = Number.isFinite(event.seconds) && event.seconds > 0 ? event.seconds : 0;
+  if (typeof who !== 'string' || who === '' || typeof place !== 'string' || place === '' || !MOVES.includes(kind)) return null;
+  if (kind === 'go' && (typeof event.to !== 'string' || event.to === '')) return null;
+  if (kind === 'go' || kind === 'sleep') { known.delete(who); return kind === 'go' ? { T, who, kind, place, to: event.to, seconds: spent } : { T, who, kind, place, seconds: spent }; }
+  if (known.get(who) === place) return null;
+  known.set(who, place);
+  return { T, who, kind: 'at', place };
+};
+
 // ---- The link: the view's state as it stands after `#` in the page's address, so that a link opens the same view.
 // x: the experiment. s: a stretch of it; t: a story second. In the feed of a whole world they say where to stand
 // (`s` alone: where that stretch begins; `t` with `s`: that moment within the stretch; `t` alone: that moment of the
 // world), and `solo=1` shows the stretch `s` by itself. cmp, cs: the experiment beside it and its stretch; in a
 // comparison a named stretch is shown by itself (`s` on the left, `cs` on the right) and a side without one is its
 // whole world. who, place: the filters; q, only: the search and whether it filters; v: `n` for the numbers, `s` for
-// the story, `t` for the transcript; ch: the chapter at the top of the story; step: seconds of a compare row (0: chosen by the page); notes,
+// the story, `t` for the transcript, `m` for the map, where `t` is the moment it shows; ch: the chapter at the top of the story; step: seconds of a compare row (0: chosen by the page); notes,
 // lists: the two switches. A link of the time when a stretch was all there was to open (`x`, `s`, `t` and the rest)
 // reads by the same rule and stands on the same moment, now within the whole world.
 export const linkOf = hash => {
@@ -144,7 +161,7 @@ export const linkOf = hash => {
   const ids = key => (got[key] ?? '').split(',').map(id => { try { return decodeURIComponent(id); } catch { return ''; } }).filter(Boolean);
   const t = one('t'), ch = Number(one('ch')), step = Number(one('step')), v = one('v');
   return { x: one('x'), s: one('s'), solo: one('solo') === '1' && one('s') !== null, cmp: one('cmp'), cs: one('cs'), who: ids('who'), place: ids('place'), q: one('q') ?? '', only: one('only') === '1',
-    v: v === 'n' || v === 's' || v === 't' ? v : 'f', ch: Number.isInteger(ch) && ch > 0 ? ch : null, step: step > 0 ? step : 0, notes: one('notes') !== '0', lists: one('lists') !== '0',
+    v: v === 'n' || v === 's' || v === 't' || v === 'm' ? v : 'f', ch: Number.isInteger(ch) && ch > 0 ? ch : null, step: step > 0 ? step : 0, notes: one('notes') !== '0', lists: one('lists') !== '0',
     t: t !== null && t !== '' && Number.isFinite(Number(t)) ? Number(t) : null };
 };
 export const hashOf = state => {

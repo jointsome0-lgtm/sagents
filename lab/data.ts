@@ -15,11 +15,11 @@
 //   file of its name lies beside it; `<name>-1.txt` and `<name>-2.txt` beside `<name>.sqlite` are one experiment.
 //   Only its text can be shown, and it is not opened before it is asked for.
 // A `*.sqlite` is never opened: only its name is looked at. Of a world file only the ids and names of characters and
-// places are ever given out, and of a chapter everything but its `carry`.
+// places are given out, and for the map what `mapOf` names and nothing else; of a chapter everything but its `carry`.
 import { closeSync, constants, fstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { basename, join, resolve, sep } from 'node:path';
 
-import { natural, played, secondsOf } from './core.js';
+import { moveOf, natural, played, secondsOf, timeOf } from './core.js';
 
 const CHUNK = 1 << 18, EVENTS = '.events.jsonl', CHAPTER = /^chapter-(\d+)\.json$/, JSON_MOST = 1 << 22, TEXT_PIECE = 1 << 18;
 // How deep under a root a directory is still looked into, and how many directories one walk looks into at most.
@@ -30,6 +30,13 @@ export class LabError extends Error {}
 type Fields = { readonly [field: string]: unknown };
 type Named = { id: string; name: string };
 export type Names = { characters: Named[]; places: Named[] };
+// What the map is drawn from. `at` is metres east and north, `minutesTo` the minutes to other places of the list,
+// `nextDoor` those that share a door or a wall with the place, `open` whether it lies under the open sky, `figures`
+// its people whom nobody plays; a character's `place` is where it starts. null stands for what the file does not say.
+export type MapPlace = Named & { about: string; at: [number, number] | null; minutesTo: { [place: string]: number }; nextDoor: string[]; open: boolean; figures: Named[] };
+export type WorldMap = { travelMinutes: number | null; walkMetresPerMinute: number | null; places: MapPlace[]; characters: (Named & { place: string | null })[] };
+// Where a character is from the story second `T` on, as `moveOf` of the core module reads it from an event.
+export type Move = { T: number; who: string; kind: 'at' | 'go' | 'sleep'; place: string; to?: string; seconds?: number };
 export type Chapter = { n: number | null; stretches: string[]; title: string; span: string; text: string; model: string | null };
 export type UsageRow = { n: number; at: string | null; kind: string; who: string | null; model: string | null; ms: number | null;
   input: number; cached: number; output: number; reasoning: number; failed: boolean; code: string | null };
@@ -60,6 +67,27 @@ export const namesOf = (value: unknown): Names | null => {
   if (!isObject(value) || !Array.isArray(value.characters) || !Array.isArray(value.places)) return null;
   const named = (list: unknown[]) => list.filter(isObject).filter(item => typeof item.id === 'string').map(item => ({ id: item.id as string, name: text(item.name) ?? item.id as string }));
   return { characters: named(value.characters), places: named(value.places) };
+};
+// Of a world file, what the map is drawn from: of the world `travelMinutes` and `walkMetresPerMinute`; of every place
+// its id and name, `about`, `at`, `minutesTo`, `nextDoor`, `open` and the ids and names of its `figures`; of every
+// character its id, its name and the `place` it starts in. Nothing else of the file, and of those nothing that is
+// of another shape than the engine writes: such a field is passed over, and a place named that is not of the list
+// is dropped. null for a value that does not read as a world file.
+export const mapOf = (value: unknown): WorldMap | null => {
+  const names = namesOf(value);
+  if (names === null || !isObject(value)) return null;
+  const ids = new Set(names.places.map(place => place.id)), amount = (given: unknown) => typeof given === 'number' && Number.isFinite(given) && given >= 0 ? given : null;
+  const named = (list: unknown) => (Array.isArray(list) ? list : []).filter(isObject).filter(item => typeof item.id === 'string').map(item => ({ id: item.id as string, name: text(item.name) ?? item.id as string }));
+  const places = (value.places as unknown[]).filter(isObject).filter(place => typeof place.id === 'string').map((place): MapPlace => {
+    const id = place.id as string, other = (to: unknown): to is string => typeof to === 'string' && to !== id && ids.has(to), at = place.at;
+    return { id, name: text(place.name) ?? id, about: text(place.about) ?? '',
+      at: Array.isArray(at) && at.length === 2 && at.every(part => typeof part === 'number' && Number.isFinite(part)) ? [at[0], at[1]] : null,
+      minutesTo: Object.fromEntries(Object.entries(isObject(place.minutesTo) ? place.minutesTo : {}).filter(([to, minutes]) => other(to) && amount(minutes) !== null)) as { [place: string]: number },
+      nextDoor: [...new Set((Array.isArray(place.nextDoor) ? place.nextDoor : []).filter(other))], open: place.open === true, figures: named(place.figures) };
+  });
+  const characters = (value.characters as unknown[]).filter(isObject).filter(character => typeof character.id === 'string')
+    .map(character => ({ id: character.id as string, name: text(character.name) ?? character.id as string, place: typeof character.place === 'string' && ids.has(character.place) ? character.place : null }));
+  return { travelMinutes: amount(value.travelMinutes), walkMetresPerMinute: amount(value.walkMetresPerMinute), places, characters };
 };
 
 // Read through the opened file, not through a pathname checked by an earlier walk. With /proc the descriptor's
@@ -271,26 +299,50 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   // ---- The names of an experiment. A world's are those of its `world.json`. A run's are those of the first world
   // file of its directory whose characters cover everyone its events name: one that names nobody is covered only by
   // the file of its own name.
-  const worlds = new Map<string, { key: string; names: Names | null }>();
-  const namesIn = (path: string) => {
+  type Read = { names: Names; map: WorldMap; key: string };
+  const worlds = new Map<string, { key: string; read: Read | null }>();
+  const worldIn = (path: string) => {
     const stat = statSync(path, { throwIfNoEntry: false });
     if (!stat || stat.size > JSON_MOST) return null;
     const key = `${stat.mtimeMs}:${stat.size}`, known = worlds.get(path);
-    if (known?.key === key) return known.names;
-    let names: Names | null = null;
-    try { names = namesOf(JSON.parse(readFile(path))); } catch (error) { if (!(error instanceof SyntaxError) && !missing(error)) throw error; /* a file that cannot be read gives no names: the ids are shown */ }
-    worlds.set(path, { key, names });
-    return names;
+    if (known?.key === key) return known.read;
+    let read: Read | null = null;
+    try { const value: unknown = JSON.parse(readFile(path)), names = namesOf(value), map = mapOf(value); if (names && map) read = { names, map, key }; }
+    catch (error) { if (!(error instanceof SyntaxError) && !missing(error)) throw error; /* a file that cannot be read gives no names: the ids are shown */ }
+    worlds.set(path, { key, read });
+    return read;
   };
-  const namesFor = (found: Found): Names => {
-    if (!found.covered) return (found.worlds.length ? namesIn(found.worlds[0]) : null) ?? NO_NAMES;
+  // What was read of the world file of an experiment, or null when it has none.
+  const worldFor = (found: Found): Read | null => {
+    if (!found.covered) return found.worlds.length ? worldIn(found.worlds[0]) : null;
     const who = found.stretches.flatMap(stretch => [...eventsCount(stretch.path).who]);
     for (const path of found.worlds) {
-      const names = namesIn(path);
-      if (!names?.characters.length) continue;
-      if (who.length ? who.every(id => names.characters.some(character => character.id === id)) : basename(path) === `${found.name}.json`) return names;
+      const read = worldIn(path);
+      if (!read?.names.characters.length) continue;
+      if (who.length ? who.every(id => read.names.characters.some(character => character.id === id)) : basename(path) === `${found.name}.json`) return read;
     }
-    return NO_NAMES;
+    return null;
+  };
+  const namesFor = (found: Found): Names => worldFor(found)?.names ?? NO_NAMES;
+  // ---- The moves of a stretch: where its events say everyone is, kept for each file whose map was asked for and
+  // brought up to date by what the file grew by, as the counts are.
+  const moved = new Map<string, { reader: ReturnType<typeof tail>; moves: Move[]; known: Map<string, string>; last: number }>();
+  const movesIn = (path: string) => {
+    let kept = moved.get(path);
+    if (!kept) moved.set(path, kept = { reader: tail(path), moves: [], known: new Map(), last: 0 });
+    for (let more = true; more;) {
+      const got = kept.reader.read(5000);
+      if (got.anew) Object.assign(kept, { moves: [], known: new Map(), last: 0 });
+      more = got.more && got.lines.length > 0;
+      for (const line of got.lines) {
+        const event = parsed(line);
+        if (!event) continue;
+        kept.last = timeOf(event, kept.last);
+        const move = moveOf(event, kept.last, kept.known);
+        if (move) kept.moves.push(move as Move);
+      }
+    }
+    return kept.moves;
   };
   // The first line of a world's `about.txt`, 300 signs of it at most. The path is the walk's: a link that leads out
   // of the root gave none.
@@ -331,7 +383,9 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   // (`world`, `reply`), most used first, its `usage` counted once, its stretches in the played order with their
   // counts, the first and the last moment of the story clock (`first`, `last`; `from`, `to` as story seconds),
   // whether a file of theirs was written just now, and `chapter`: the number of the first chapter that retells the
-  // stretch, or null. `texts` are its transcripts with their sizes, and `story` counts the chapters.
+  // stretch, or null. `texts` are its transcripts with their sizes, `story` counts the chapters, and `map` says
+  // whether its world file names a place, so that a map of it can be drawn; `mapKey` is the file's modified time
+  // and size, so that the page knows when to ask for it again.
   const list = () => {
     const now = Date.now(), { single, found } = walk();
     const all = [...found.values()].map(one => {
@@ -353,9 +407,9 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
       }
       const texts = one.texts.map(({ name, path }) => { const stat = statSync(path, { throwIfNoEntry: false }); if (!stretches.length) latest = Math.max(latest, stat?.mtimeMs ?? 0); return { name, size: stat?.size ?? 0 }; });
       if (!latest) latest = modified(one.dir);
-      const most = (side: Map<string, number>) => [...side].sort((first, second) => second[1] - first[1]).map(([model]) => model);
+      const most = (side: Map<string, number>) => [...side].sort((first, second) => second[1] - first[1]).map(([model]) => model), world = worldFor(one);
       return { id: one.id, group: one.group, name: one.name, shape: one.shape, rehearsal: REHEARSAL.test(one.name) || (usage.requests > 0 && usage.input + usage.output === 0), about: aboutIn(one),
-        residents: most(models.residents), world: most(models.world), usage, stretches, texts, story: { chapters: story.chapters.length, modified: story.modified }, modified: Math.round(latest), growing: stretches.some(stretch => stretch.growing) };
+        residents: most(models.residents), world: most(models.world), usage, stretches, texts, story: { chapters: story.chapters.length, modified: story.modified }, map: (world?.map.places.length ?? 0) > 0, mapKey: world?.key ?? null, modified: Math.round(latest), growing: stretches.some(stretch => stretch.growing) };
     });
     return { single, root: roots.map(root => root.label).join(', '), experiments: all.sort((one, other) => other.modified - one.modified || (one.id < other.id ? -1 : 1)) };
   };
@@ -455,6 +509,12 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
     }
     return got;
   };
+  // The map of an experiment: `world`, what `mapOf` gives of its world file, and `stretches`, the moves of each
+  // stretch in the played order. null without the experiment, and for one whose world file names no place.
+  const map = (id: string) => {
+    const found = get(id), world = found === null ? null : worldFor(found)?.map ?? null;
+    return found === null || !world?.places.length ? null : { world, stretches: stretchesOf(found).map(({ name, path }) => ({ name, moves: movesIn(path) })) };
+  };
   // The chapters of an experiment's story, in order, and when the latest was written; null without the experiment.
   const story = (id: string) => { const found = get(id); return found === null ? null : storyOf(found); };
   // A piece of one transcript of an experiment as text, from the byte `from`: `{ name, from, at, size, more, text }`.
@@ -463,5 +523,5 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
     const known = get(id)?.texts.find(one => one.name === name);
     return known ? { name, ...readPiece(known.path, from, TEXT_PIECE) } : null;
   };
-  return { list, names: (id: string) => { const found = get(id); return found === null ? null : namesFor(found); }, follow, part, world, story, text: transcriptOf };
+  return { list, names: (id: string) => { const found = get(id); return found === null ? null : namesFor(found); }, follow, part, world, story, map, text: transcriptOf };
 }
