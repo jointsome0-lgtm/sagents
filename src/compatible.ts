@@ -5,13 +5,14 @@ import type { Controls, Request, Result } from './chatgpt.ts';
 // address, the key and the output limit come from the environment. A request goes to the server the address names and
 // nowhere else, and holds what the caller gave, the output limit and the fields of SAGENTS_API_EXTRA. The caller's
 // name for a player, `cache`, goes out only under the field that SAGENTS_API_CACHE_FIELD names: servers call it by
-// different names, and one that checks its fields refuses a name it does not know. Every call can
-// cost money, so nothing is sent a second time: a failure is a code, and the caller decides what to do next.
+// different names, and one that checks its fields refuses a name it does not know. With SAGENTS_API_STREAM the answer
+// is asked for as a stream, for a server that gives no other, and is an answer only when the stream came whole. Every
+// call can cost money, so nothing is sent a second time: a failure is a code, and the caller decides what to do next.
 const DEFAULT_MAX_TOKENS = 2048;
 const MAX_ANSWER = 4_000_000;
 const MAX_TEXT = 100_000;
 // What this module sets itself, and what would change the shape or the number of the answers it reads.
-const FIXED = ['model', 'messages', 'max_tokens', 'max_completion_tokens', 'response_format', 'stream', 'n'];
+const FIXED = ['model', 'messages', 'max_tokens', 'max_completion_tokens', 'response_format', 'stream', 'stream_options', 'n'];
 // A key is one header value; anything else in it would be a second header or a failure that quotes it.
 const KEY = /^[\x21-\x7e]+$/;
 const FIELD = /^[a-z][a-z0-9_]{0,39}$/;
@@ -53,12 +54,13 @@ function settingsOf(env: Env) {
   // The field a player's name goes under is one of its own: not one this module sets, and not one of the extra fields.
   const cacheField = env.SAGENTS_API_CACHE_FIELD || undefined;
   if (cacheField && (!FIELD.test(cacheField) || FIXED.includes(cacheField) || Object.hasOwn(extra, cacheField))) throw refused('SAGENTS_API_CACHE_FIELD');
-  return { url: `${base.origin}${base.pathname.replace(/\/+$/, '')}/chat/completions`, key, maxTokens, extra, cacheField };
+  if (env.SAGENTS_API_STREAM && env.SAGENTS_API_STREAM !== '1') throw refused('SAGENTS_API_STREAM');
+  return { url: `${base.origin}${base.pathname.replace(/\/+$/, '')}/chat/completions`, key, maxTokens, extra, cacheField, stream: !!env.SAGENTS_API_STREAM };
 }
 
 // The body of one request, whole: a caller that stores its hash can say exactly what the model saw.
 export function completionsBody(request: Request, env: Env = process.env) {
-  const { maxTokens, extra, cacheField } = settingsOf(env);
+  const { maxTokens, extra, cacheField, stream } = settingsOf(env);
   // A reasoning effort after `@` belongs to the ChatGPT connection; here the server's own switch goes in SAGENTS_API_EXTRA.
   if (!request.model || request.model.includes('@')) throw refused('model');
   if (request.cache !== undefined && !CACHE.test(request.cache)) throw refused('cache');
@@ -68,6 +70,8 @@ export function completionsBody(request: Request, env: Env = process.env) {
     max_tokens: maxTokens,
     ...(request.schema ? { response_format: { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema: request.schema } } } : {}),
     ...(request.cache && cacheField ? { [cacheField]: request.cache } : {}),
+    // The usage of a stream comes only when it is asked for, in a chunk of its own before the end.
+    ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
   };
 }
 
@@ -106,24 +110,80 @@ function failure(httpStatus: number | undefined, error: unknown) {
     status, code, named.param);
 }
 
+// A streamed answer in the shape of one that came whole, so that one set of checks reads both. Events are lines
+// `data: <json>`; a comment and any other line are skipped, and reasoning in a delta is never read. Only `[DONE]`
+// makes an answer: a stream that ends without it, or that holds an error at any point, is a failure, whatever text
+// came by then. The caller is handed each piece as it arrives, before any of that is known.
+async function streamOf(body: Response['body'], onText: (delta: string) => unknown): Promise<unknown> {
+  if (!body) throw new ModelError('invalid_stream');
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let buffer = '', bytes = 0, text = '', finish: unknown, usage: unknown, provider: unknown;
+  for await (const part of body) {
+    bytes += part.byteLength;
+    if (bytes > MAX_ANSWER) throw new ModelError('output_limit');
+    try { buffer += decoder.decode(part, { stream: true }); } catch (error) {
+      // A TypeError is how the decoder says that the bytes are not UTF-8.
+      if (error instanceof TypeError) throw new ModelError('invalid_stream');
+      throw error;
+    }
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      // Leaving the loop cancels the body: a connection left open after the end is not waited for.
+      if (data === '[DONE]') return { choices: [{ finish_reason: finish, message: { content: text } }], usage, provider };
+      let chunk: unknown;
+      try { chunk = JSON.parse(data); } catch (error) {
+        if (error instanceof SyntaxError) throw new ModelError('invalid_stream');
+        throw error;
+      }
+      if (!isObject(chunk)) throw new ModelError('invalid_stream');
+      if (chunk.error) throw failure(undefined, chunk.error);
+      if (isObject(chunk.usage)) usage = chunk.usage;
+      if (typeof chunk.provider === 'string') provider = chunk.provider;
+      // The chunk of the usage has no choice; no chunk has two.
+      const choices = chunk.choices ?? [];
+      if (!Array.isArray(choices) || choices.length > 1) throw new ModelError('invalid_stream');
+      const choice: unknown = choices[0];
+      if (!choices.length) continue;
+      if (!isObject(choice)) throw new ModelError('invalid_stream');
+      if (choice.error) throw failure(undefined, choice.error);
+      const delta = isObject(choice.delta) ? choice.delta : {};
+      if ((Array.isArray(delta.tool_calls) && delta.tool_calls.length) || delta.function_call) throw new ModelError('unexpected_tools');
+      if (typeof delta.refusal === 'string' && delta.refusal.trim()) throw new ModelError('declined');
+      if (typeof delta.content === 'string') {
+        text += delta.content;
+        if (text.length > MAX_TEXT) throw new ModelError('output_limit');
+        if (delta.content) await onText(delta.content);
+      } else if (delta.content != null) throw new ModelError('invalid_stream');
+      if (choice.finish_reason != null) finish = choice.finish_reason;
+    }
+  }
+  throw new ModelError('incomplete_stream');
+}
+
 type Options = { fetch?: Fetch; env?: Env };
 
 export function createCompatible({ fetch: fetcher = globalThis.fetch, env = process.env }: Options = {}) {
   return {
     async respond(request: Request, { onText = async () => {}, signal, timeoutMs = 180_000 }: Controls = {}): Promise<Result> {
-      const { url, key } = settingsOf(env);
+      const { url, key, stream } = settingsOf(env);
       const body = JSON.stringify(completionsBody(request, env));
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
       const current = signal ? AbortSignal.any([signal, timer]) : timer;
       const stopped = () => signal?.aborted ? new ModelError('cancelled') : timer.aborted ? new ModelError('timeout') : null;
       if (signal?.aborted) throw new ModelError('cancelled');
-      let response: Response | undefined, answer: unknown;
+      let response: Response | undefined, answer: unknown, streamed = false;
       try {
         // One request and no other. A redirect is a failure: it would carry the key and the text to another server.
         response = await fetcher(url, { method: 'POST', redirect: 'error', signal: current, body,
-          headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', accept: 'application/json' } });
-        answer = await jsonOf(response);
+          headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json' } });
+        // A refusal by the status is one JSON body also when a stream was asked for, and so is the answer of a server
+        // that gave it whole all the same.
+        streamed = stream && response.ok && !response.headers.get('content-type')?.includes('application/json');
+        answer = streamed ? await streamOf(response.body, onText) : await jsonOf(response);
       } catch (error) {
         const reason = stopped();
         if (reason) throw reason;
@@ -153,7 +213,7 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       if (typeof text !== 'string') throw new ModelError('invalid_response');
       if (text.length > MAX_TEXT) throw new ModelError('output_limit');
       if (!text.trim()) throw new ModelError('empty_response');
-      await onText(text);
+      if (!streamed) await onText(text);
       // prompt_tokens includes the cached part, completion_tokens the reasoning.
       const usage = isObject(answer.usage) ? answer.usage : {};
       const input = isObject(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};

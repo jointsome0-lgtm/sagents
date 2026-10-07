@@ -85,9 +85,10 @@ test('settings that cannot be used are refused by name before anything is sent',
   assert.equal(await refusedBy({ ...env, SAGENTS_API_KEY: 'two\nlines' }), 'SAGENTS_API_KEY');
   assert.equal(await refusedBy({ ...env, SAGENTS_API_URL: `https://user:${KEY}@openrouter.ai/api/v1` }), 'SAGENTS_API_URL');
   // An extra field does not replace one that this module sets, the output limit above all.
-  for (const extra of ['{"max_tokens":100000}', '{"model":"another"}', '{"messages":[]}', '{"stream":true}', '{"response_format":{}}', '[1]', '{'])
+  for (const extra of ['{"max_tokens":100000}', '{"model":"another"}', '{"messages":[]}', '{"stream":true}', '{"stream_options":{"include_usage":false}}', '{"response_format":{}}', '[1]', '{'])
     assert.equal(await refusedBy({ ...env, SAGENTS_API_EXTRA: extra }), 'SAGENTS_API_EXTRA');
   assert.equal(await refusedBy({ ...env, SAGENTS_API_MAX_TOKENS: '2k' }), 'SAGENTS_API_MAX_TOKENS');
+  for (const stream of ['true', '0', ' 1']) assert.equal(await refusedBy({ ...env, SAGENTS_API_STREAM: stream }), 'SAGENTS_API_STREAM');
   assert.equal(await refusedBy(env, { ...request, model: 'google/gemma-4-31b-it@high' }), 'model');
   // The field for a player's name replaces no field of this module and none of the extra ones, and a name is plain.
   for (const field of ['max_tokens', 'reasoning', 'Session Id']) assert.equal(await refusedBy({ ...env, SAGENTS_API_CACHE_FIELD: field }), 'SAGENTS_API_CACHE_FIELD');
@@ -141,6 +142,59 @@ test('an answer cut by the output limit, or without text, is a failure and its t
     assert.deepEqual(leaks(error), []);
     assert.equal(server.calls.length, 1);
   }
+});
+
+test('a stream is an answer only when it came whole: its text and usage, and a failure without the text when it broke off, held an error or was cut', async () => {
+  const chunk = (delta: object, finish: string | null = null) => `data: ${JSON.stringify({ object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+  const usage = `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 120, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 100 } } })}\n\n`;
+  // The events arrive cut at every third byte, so a line and a character are split between two readings.
+  const stream = (events: string) => () => {
+    const bytes = new TextEncoder().encode(events);
+    return new Response(new ReadableStream({ start(controller) {
+      for (let at = 0; at < bytes.length; at += 3) controller.enqueue(bytes.slice(at, at + 3));
+      controller.close();
+    } }), { status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8' } });
+  };
+  const streaming = { ...env, SAGENTS_API_STREAM: '1' };
+  const calls: { url: string; init: RequestInit }[] = [];
+  const whole = `: a comment\r\n\r\n${chunk({ role: 'assistant', content: '' })}${chunk({ reasoning_content: WORDS })}${chunk({ reasoning: WORDS })}${chunk({ content: '{"ok":' }).replaceAll('\n', '\r\n')}${chunk({ content: 'true}  \u2014' })}${chunk({}, 'stop')}${usage}data: [DONE]\n\n`;
+  const { respond } = createCompatible({ env: streaming, fetch: async (url: string, init: RequestInit) => { calls.push({ url, init }); return stream(whole)(); } });
+  const parts: string[] = [];
+  assert.deepEqual(await respond(request, { onText: (part: string) => { parts.push(part); } }),
+    { text: '{"ok":true}  \u2014', usage: { inputTokens: 120, cachedInputTokens: 100, outputTokens: 30, reasoningTokens: null } });
+  assert.deepEqual(parts, ['{"ok":', 'true}  \u2014']);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].init.headers, { authorization: `Bearer ${KEY}`, 'content-type': 'application/json', accept: 'text/event-stream' });
+  // The body is the one of a request without the setting, and the two fields of a stream after it.
+  const unset = createCompatible({ env: { ...env, SAGENTS_API_STREAM: '' }, fetch: async (url: string, init: RequestInit) => { calls.push({ url, init }); return answer('{"ok":true}'); } });
+  await unset.respond(request);
+  assert.equal(calls[1].init.body, JSON.stringify({ reasoning: { enabled: false }, model: request.model,
+    messages: [{ role: 'system', content: 'Judge the story.' }, { role: 'user', content: STORY }], max_tokens: 512,
+    response_format: { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema: request.schema } } }));
+  assert.equal(calls[0].init.body, `${(calls[1].init.body as string).slice(0, -1)},"stream":true,"stream_options":{"include_usage":true}}`);
+
+  const said = chunk({ content: STORY });
+  for (const [events, expected] of [
+    // No `[DONE]`: the server or the connection gave up, also after a finish and the usage.
+    [`${said}${chunk({}, 'stop')}${usage}`, { code: 'incomplete_stream' }],
+    [`${said}data: {"error":{"code":"engine_unavailable","message":${JSON.stringify(`${WORDS}: ${KEY} ${STORY}`)}}}\n\n`, { code: 'provider_failed', providerCode: 'engine_unavailable' }],
+    [`${said}data: {"error":{"code":402,"message":"${WORDS}"}}\n\ndata: [DONE]\n\n`, { code: 'budget_exceeded', httpStatus: 402 }],
+    [`${said}${chunk({}, 'length')}${usage}data: [DONE]\n\n`, { code: 'output_limit' }],
+    [`${said}${chunk({}, 'content_filter')}data: [DONE]\n\n`, { code: 'declined' }],
+    [`${said}${chunk({ tool_calls: [{ index: 0, function: { name: 'look', arguments: WORDS } }] })}`, { code: 'unexpected_tools' }],
+    [`${said}data: ${WORDS} ${KEY}\n\ndata: [DONE]\n\n`, { code: 'invalid_stream' }],
+    [`${chunk({ content: ' ' }, 'stop')}data: [DONE]\n\n`, { code: 'empty_response' }],
+  ] as [string, Thrown][]) {
+    const server = standIn(stream(events), streaming);
+    const error = await server.failed();
+    assert.deepEqual({ code: error.code, httpStatus: error.httpStatus, providerCode: error.providerCode, param: error.param },
+      { httpStatus: undefined, providerCode: undefined, param: undefined, ...expected });
+    assert.deepEqual(leaks(error), []);
+    assert.equal(server.calls.length, 1);
+  }
+  // A refusal by the status is read as without the setting.
+  const refused = await standIn(() => refusal(400, { code: 'limit_exceeded' }), streaming).failed();
+  assert.deepEqual([refused.code, refused.httpStatus, refused.providerCode, leaks(refused)], ['invalid_request', 400, 'limit_exceeded', []]);
 });
 
 test('ask prints one line with codes for a refusal that quotes the key and the request', () => {

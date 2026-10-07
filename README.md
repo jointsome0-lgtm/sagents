@@ -83,7 +83,8 @@ The numbers and the failure above only show the shape. An answer is whole or it 
 limit cut short comes back as `output_limit`, without the text written by then. This holds for what a call returns,
 and `ask` and `live` take nothing else. A program that calls `src/chatgpt.ts` itself and gives it `onText` is handed
 the text as the stream brings it, before the answer is known to be whole or to come from the model asked for, so a
-call that ends in a failure, `wrong_model` included, may have handed over a part by then.
+call that ends in a failure, `wrong_model` included, may have handed over a part by then. The same holds for
+`src/compatible.ts` with `SAGENTS_API_STREAM`; without it an `api:` server's text is handed over once, whole and checked.
 
 | `reason` | What happened |
 | --- | --- |
@@ -612,6 +613,7 @@ A model written as `api:<id>` goes to any server that speaks the OpenAI chat com
 | `SAGENTS_API_MAX_TOKENS` | The output limit of one call, 2048 by default. |
 | `SAGENTS_API_EXTRA` | One JSON object of further body fields, such as `{"reasoning":{"enabled":false}}`, which keeps a model's reasoning off on OpenRouter. |
 | `SAGENTS_API_CACHE_FIELD` | The name of the body field that a request's `cache` name is sent under, such as `session_id` or `prompt_cache_key`. Not set, the name is not sent. |
+| `SAGENTS_API_STREAM` | `1` asks for the answer as a stream, for a server that gives no other. Not set, the answer is one JSON body. Any other value is refused. |
 
 ```sh
 export SAGENTS_API_URL=https://openrouter.ai/api/v1 SAGENTS_API_EXTRA='{"reasoning":{"enabled":false}}'
@@ -625,8 +627,13 @@ What sagents sends and to whom:
   redirect is a failure and is not followed.
 - The body holds the model id, the messages (the instructions first, as a `system` message), `max_tokens`, the schema
   as a strict `json_schema` `response_format`, and the fields of `SAGENTS_API_EXTRA`. sagents adds no text of its own.
-  An extra field cannot replace `model`, `messages`, `max_tokens`, `max_completion_tokens`, `response_format`, `stream`
-  or `n`: a setting that names one is refused.
+  An extra field cannot replace `model`, `messages`, `max_tokens`, `max_completion_tokens`, `response_format`, `stream`,
+  `stream_options` or `n`: a setting that names one is refused.
+- With `SAGENTS_API_STREAM=1` the body also holds `"stream": true` and `"stream_options": {"include_usage": true}`,
+  and the request asks for `text/event-stream`. The text is the `delta.content` of the chunks, and reasoning in a
+  delta is never read. Only a stream that ends with `data: [DONE]` is an answer: one that breaks off before it is
+  `incomplete_stream`, one that holds an `error` event is a failure by that event's code, and neither returns the text
+  that came by then. The limits on the answer's size, the time limit and the `finish_reason` are read as without it.
 - The `cache` name of a request goes out only when `SAGENTS_API_CACHE_FIELD` names the field for it, and then in the
   body under that field and nowhere else: servers call such a field by different names, and one that checks its
   fields refuses a name it does not know. The field cannot be one of those above or one of `SAGENTS_API_EXTRA`.
