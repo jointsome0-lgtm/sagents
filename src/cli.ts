@@ -1,5 +1,7 @@
+#!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { delimiter } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createChatgpt, ModelError, signIn, SignInError } from './chatgpt.ts';
 import type { Message, Request } from './chatgpt.ts';
@@ -10,14 +12,25 @@ import { modelFor } from './model.ts';
 import { environmentOf, isEnvironmentName, readWorld } from './laws.ts';
 import { WorldError } from './world.ts';
 
-const USAGE = `node src/cli.ts login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
-node src/cli.ts status [<model>]       whether this computer is signed in, and whether the plan's list of models has the model
-node src/cli.ts ask [--timeout <s>]    one request as JSON on stdin, one JSON line on stdout
-node src/cli.ts live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>] [--state <file>]
-                          [--environment <name>] [--json]
-                                       the characters of a world file, each played by the model, under the story's clock;
-                                       --cast gives one character a model of its own; --world-model answers what comes of a deed;
-                                       with --state the world is kept in that file and continues from it
+// The command is `sagents` once the package is linked, and `node src/cli.ts` from a checkout: the same arguments.
+const USAGE = `sagents login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
+sagents status [<model>]       whether this computer is signed in, and whether the plan's list of models has the model
+sagents ask [--timeout <s>]    one request as JSON on stdin, one JSON line on stdout
+sagents live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>]
+                  [--state <file> | --run <dir>] [--environment <name>] [--json]
+                               the characters of a world file, each played by the model, under the story's clock;
+                               --cast gives one character a model of its own; --world-model answers what comes of a deed;
+                               with --state the world is kept in that file and continues from it;
+                               with --run it is kept in that directory as an experiment the lab reads: the world file,
+                               the state, and for every start a stretch of events and of rows that count its requests
+sagents lab [<dir>...] [--port <n>] [--lang <en|ru>] [--no-open]
+                               the lab in the browser: the experiments under the directories, or under those that
+                               SAGENTS_LAB names (separated as in PATH), or under the current one; it prints its address
+                               on this computer and opens it unless --no-open is given; Ctrl+C stops it; the page is
+                               in the language of --lang, or of SAGENTS_LAB_LANG, or else of the browser
+sagents help                   this text
+
+Without the command installed, \`node src/cli.ts\` takes the same arguments.
 
 A request: {"model": "<id>", "<id>@<effort>" or "api:<id>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}, "cache": "<name>"}
 An answer: {"status": "done", "text": "...", "usage": {...}}, with "endpoint" when a router named who answered, or {"status": "failed", "reason": "<code>"}
@@ -85,8 +98,40 @@ function argumentsOf(options: { [name: string]: { type: 'boolean' | 'string'; mu
   } catch { return null; }
 }
 
-const chatgpt = createChatgpt();
-if (command === 'ask') {
+if (command === 'help' || command === '--help' || command === '-h') console.log(USAGE);
+else if (command === 'lab') {
+  // The lab reads files and asks no model. Its modules are loaded only for this command.
+  const given = argumentsOf({ port: { type: 'string' }, lang: { type: 'string' }, 'no-open': { type: 'boolean' } }, Infinity);
+  const port = Number(given?.values.port ?? 0);
+  // The page's language when it is not to be the browser's: the flag, or without it what the environment names.
+  const lang = given?.values.lang ?? (process.env.SAGENTS_LAB_LANG || undefined);
+  if (!given || !(Number.isInteger(port) && port >= 0 && port < 65536)) {
+    console.error(USAGE);
+    process.exitCode = 1;
+  } else if (lang !== undefined && lang !== 'en' && lang !== 'ru') {
+    console.error('failed: The lab\'s language is `en` or `ru`, by `--lang` or by SAGENTS_LAB_LANG; without either it is the browser\'s.');
+    process.exitCode = 1;
+  } else {
+    const { LabError } = await import('../lab/data.ts');
+    // The roots: the directories given, or those the environment names, or the current one.
+    const named = given.positionals.length ? given.positionals : (process.env.SAGENTS_LAB ?? '').split(delimiter).filter(Boolean);
+    try {
+      const lab = await (await import('../lab/server.ts')).startLab({ dirs: named.length ? named : ['.'], port, log: line => console.error(line) });
+      // A language that was chosen goes with the address, for the page to read: the server looks at the path alone.
+      const url = lang === undefined ? lab.url : `${lab.url}?lang=${lang}`;
+      console.log(url);
+      // The address holds the lab's token and so goes to the browser in a file, never as an argument of a process.
+      // A computer with no browser to open is no failure: the address is on the screen.
+      const opened = given.values['no-open'] === true ? null : (await import('../lab/open.ts')).openInBrowser(url);
+      process.on('exit', () => opened?.remove());
+      for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { void lab.stop().then(() => process.exit(0)); });
+    } catch (error) {
+      // A root that is no directory is said in this tool's own sentence, a port that cannot be had by its code.
+      console.error(`failed: ${error instanceof LabError ? error.message : error instanceof Error && 'code' in error && typeof error.code === 'string' ? `cannot listen (${error.code})` : 'unexpected'}`);
+      process.exitCode = 1;
+    }
+  }
+} else if (command === 'ask') {
   // The caller is a program: one JSON line whatever happens, with codes and nothing of the service's own words.
   try {
     const given = argumentsOf({ timeout: { type: 'string' } }, 0);
@@ -105,7 +150,7 @@ if (command === 'ask') {
 } else if (command === 'live') {
   try {
     const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, 'world-model': { type: 'string' }, minutes: { type: 'string' }, calls: { type: 'string' },
-      state: { type: 'string' }, environment: { type: 'string' }, json: { type: 'boolean' } }, 1);
+      state: { type: 'string' }, run: { type: 'string' }, environment: { type: 'string' }, json: { type: 'boolean' } }, 1);
     const minutes = Number(given?.values.minutes ?? 30);
     const calls = Number(given?.values.calls ?? 60);
     if (!given || given.positionals.length !== 1 || !(minutes > 0 && minutes <= 1440) || !(Number.isInteger(calls) && calls >= 1)) {
@@ -147,16 +192,19 @@ if (command === 'ask') {
         if (names.has(id)) throw new OptionError(`Two \`--cast\` name \`${id}\`: a character is played by one model.`);
         names.set(id, name);
       }
+      if (typeof given.values.state === 'string' && typeof given.values.run === 'string') throw new OptionError('`--state` and `--run` cannot be given together: a run directory keeps its own state file.');
       // The state file's module is loaded only for a run that keeps one. Such a run is a pause in the world's story.
-      const state = typeof given.values.state === 'string' ? (await import('./state.ts')).openState(given.values.state, source, environmentSource) : undefined;
+      // A run directory keeps the state too, and beside it what the lab reads: the events and a row for every request.
+      const kept = typeof given.values.run === 'string' ? (await import('./kept.ts')).keepRun(given.values.run, source, environmentSource) : undefined;
+      const state = kept?.state ?? (typeof given.values.state === 'string' ? (await import('./state.ts')).openState(given.values.state, source, environmentSource) : undefined);
       try {
         // The model's name picks the connection, as it does for `ask`.
         // One connection for each name, however many characters it plays.
         const players = new Map<string, Player>();
         const playerOf = (name: string) => {
           if (!players.has(name)) {
-            const { respond, model } = modelFor(name);
-            players.set(name, { respond: request => respond(request), model, name });
+            const { respond, model } = modelFor(name), asks: Player['respond'] = request => respond(request);
+            players.set(name, { respond: kept ? kept.count(asks) : asks, model, name });
           }
           return players.get(name)!;
         };
@@ -164,8 +212,9 @@ if (command === 'ask') {
           cast: Object.fromEntries([...names].map(([id, name]) => [id, playerOf(name)])),
           worldPlayer: typeof given.values['world-model'] === 'string' ? playerOf(given.values['world-model']) : undefined, minutes, calls, journal: state, pause: state !== undefined,
           // The players' names for a service's cache are made of the state file's own, and of one made here for a run that keeps no file.
-          cache: state?.cache ?? randomUUID(),
-          onEvent: (event, by) => { for (const line of json ? [JSON.stringify({ ...event, by })] : linesOf(world, event)) console.log(line); } });
+          cache: state?.cache ?? randomUUID(), onAsk: kept?.onAsk,
+          // A kept run has the event in its file before anyone is shown it.
+          onEvent: (event, by) => { kept?.onEvent(event); for (const line of json ? [JSON.stringify({ ...event, by })] : linesOf(world, event)) console.log(line); } });
         const played = Math.round(seconds / 6) / 10;
         // Tokens are a sum over the answers that reported them, and the line says when some did not.
         const unreported = (count: number) => count ? `, without ${count} answers that reported no usage` : '';
@@ -191,7 +240,8 @@ if (command === 'ask') {
       } finally { state?.close(); }
     }
   } catch (error) {
-    // These sentences are this tool's own: about the world file, the state file, the journal in it and the options.
+    // These sentences are this tool's own: about the world file, the state file or the run directory that keeps one,
+    // the journal in it and the options.
     const own = error instanceof WorldError || error instanceof JournalError || error instanceof StateError || error instanceof OptionError;
     console.error(`failed: ${own ? error.message : 'unexpected'}`);
     process.exitCode = 1;
@@ -205,8 +255,8 @@ if (command === 'ask') {
     } else if (command === 'login') {
       const { planUse } = await signIn({ register: given.values.new === true });
       if (!planUse) console.log('Signed in, but without the permission to use the ChatGPT plan: run the command again and allow it.');
-      await report(chatgpt, DEFAULT_MODEL);
-    } else await report(chatgpt, given.positionals[0] ?? DEFAULT_MODEL);
+      await report(createChatgpt(), DEFAULT_MODEL);
+    } else await report(createChatgpt(), given.positionals[0] ?? DEFAULT_MODEL);
   } catch (error) {
     // Codes or one of this tool's own sentences; never an answer of the service.
     const { reason, ...more } = detailsOf(error);

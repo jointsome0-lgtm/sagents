@@ -370,8 +370,11 @@ export type Player = { respond: (request: Request) => Promise<Result>; model: st
 // answer end a run, wherever in it they came: 3 when it is not given. `cache` is a name of this world's journal that
 // its keeper made up, the same for every run that continues it: each resident's requests and the world's then carry a
 // name of their own made of it, as `cache` of a request, which says nothing of who that is. With none, no request has one.
+// `onAsk` is told of every request just before it is sent: what it is for, where a figure's answer is told from the
+// world's answer to a deed, whose it is, a resident's id or null for the world's, and the name of the model asked.
 export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number;
-  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number; declinedRun?: number; cache?: string };
+  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number; declinedRun?: number; cache?: string;
+  onAsk?: (kind: Asked | 'reply', who: string | null, name: string) => unknown };
 export type Tally = { calls: number; invalid: number; overlong: number; declined: number; unreported: number; inputTokens: number; cachedInputTokens: number; outputTokens: number };
 // What a request was for: a resident's turn, a memory written anew, or an answer of the world, to a deed or for a figure.
 export type Asked = 'turn' | 'memory' | 'world';
@@ -401,7 +404,7 @@ const spent = (): Spent => ({ calls: 0, inputTokens: 0, cachedInputTokens: 0, ou
 // `calls` counts the answers that arrived or were cut short at the model's limit, a memory's as well as a turn's. Any
 // other failure ends the run at once: nothing is tried again, and the journal holds everything up to it.
 export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
-  pause = false, cutRun = 3, declinedRun = 3, cache }: Live): Promise<Outcome> {
+  pause = false, cutRun = 3, declinedRun = 3, cache, onAsk = () => {} }: Live): Promise<Outcome> {
   const state = replay(world, journal.entries());
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
@@ -439,11 +442,12 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   // sent again, and what was asked for is let go as after answers that could not be used, until `declinedRun` of them
   // in the run: a service that keeps declining is not asked on. Every other failure of the connection ends the run.
   const cuts = new Map<string, number>();
-  const ask = async (player: Required<Player>, kind: Asked, content: Omit<Request, 'model'>): Promise<string | typeof CUT | typeof DECLINED | null> => {
+  const ask = async (player: Required<Player>, kind: Asked, content: Omit<Request, 'model'>, who: string | null = null, asked: Asked | 'reply' = kind): Promise<string | typeof CUT | typeof DECLINED | null> => {
     if (outcome.calls >= most) {
       outcome.reason = 'calls';
       return null;
     }
+    onAsk(asked, who, player.name);
     let answer: Result;
     try { answer = await player.respond({ model: player.model, ...content }); } catch (error) {
       if (!(error instanceof ModelError)) throw error;
@@ -497,7 +501,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null) => {
     let came: Came | null = null, again = '';
     for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
-      const answer = await ask(judge, 'world', { system, schema, ...owned('world'), messages: [{ role: 'user', content: `${content}${again}` }] });
+      const answer = await ask(judge, 'world', { system, schema, ...owned('world'), messages: [{ role: 'user', content: `${content}${again}` }] }, null, system === figureSystem ? 'reply' : 'world');
       if (answer === null) return null;
       // The world is not asked again for what it declined to answer: nothing came of the deed.
       if (answer === DECLINED) break;
@@ -565,7 +569,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       // An answer that cannot be used gets one more try. After that the old text stays and the lines are lost.
       let memory = null;
       for (let attempt = 0; attempt < 2 && !memory; attempt += 1) {
-        const answer = await ask(player, 'memory', request);
+        const answer = await ask(player, 'memory', request, who);
         if (answer === null) return outcome;
         if (answer === DECLINED) break;
         memory = answer === CUT ? null : readMemory(answer, world.longWords);
@@ -603,7 +607,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       `Minutes from here: ${world.places.filter(item => item.id !== place).map(item => `${tagged(item)} ${travelSeconds(world, place, item.id) / 60}`).join(', ') || 'there is no other place'}.`,
       `This turn the \`text\` of a say or a call may hold ${limit} words at most.${
         pause ? '' : ` ${Math.floor((horizon - now) / 60)} min ${(horizon - now) % 60} s of the story are left.`}`,
-    ].join('\n') }] });
+    ].join('\n') }] }, who);
     if (answer === null) return outcome;
     const action = answer === CUT ? 'long' : answer === DECLINED ? 'declined' : readAction(world, actor, answer);
     if (typeof action === 'string' && answer !== DECLINED) unusable(player);

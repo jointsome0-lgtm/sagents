@@ -43,13 +43,15 @@ memory.
 ## What works today
 
 sagents needs Node 24.9 or newer and nothing else. It has no dependencies, and Node runs its TypeScript as it is.
-It is run from a checkout of this repository, as the lines below show: it is not on npm and has no installed command
-or entry point of a package, and `"private": true` in `package.json` guards against publishing it there by mistake.
+It is run from a checkout of this repository: it is not on npm, and `"private": true` in `package.json` guards against
+publishing it there by mistake. `npm link`, run once in the checkout, makes `sagents` a command of this computer: a
+link to `src/cli.ts`, so the command is always the checkout as it stands. Without it `node src/cli.ts` takes the same
+arguments, and `sagents help` lists them.
 
 ```sh
-node src/cli.ts login
-node src/cli.ts status
-echo '{"model":"gpt-6.1-sol@low","messages":[{"role":"user","content":"Say hi"}]}' | node src/cli.ts ask
+sagents login
+sagents status
+echo '{"model":"gpt-6.1-sol@low","messages":[{"role":"user","content":"Say hi"}]}' | sagents ask
 ```
 
 `login` prints an address. Open it in a browser on the same computer, sign in with ChatGPT and approve. sagents listens
@@ -105,8 +107,8 @@ differently is not known.
 ### A live world
 
 ```sh
-node src/cli.ts live examples/night-station.json [--model <id>] [--cast <character>=<id>]... [--world-model <id>] \
-  [--minutes <n>] [--calls <n>] [--state <file>] [--environment <name>] [--json]
+sagents live examples/night-station.json [--model <id>] [--cast <character>=<id>]... [--world-model <id>] \
+  [--minutes <n>] [--calls <n>] [--state <file> | --run <dir>] [--environment <name>] [--json]
 ```
 
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
@@ -489,6 +491,18 @@ The journal and the state file:
   is continued keeps those names and a journal begun in another file has others. A run with no state file makes one
   for itself. No name is printed, and none is in the journal. A byte copy of a state file has the names of the original. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
   writes nothing to it.
+- With `--run <dir>` the run is kept as an experiment that [the lab](#the-lab) reads: the directory holds the world
+  file as it was given, `world.json`; the state file, `state.sqlite`, with everything the point above says of one;
+  and for every start a stretch of its own, `part1`, `part2` and so on, as two files. `part<N>.events.jsonl` has the
+  events of that start, one a line, as the rules made them. `usage-part<N>.jsonl` has a row for every request: when
+  it was sent, what it was for (`turn`, `memory`, `world` or `reply`), whose it was, the model's name, the
+  milliseconds it took, the input, cached, output and reasoning tokens that the service reported, and the code of a
+  failure. No text of a request, an answer or a failure is in a row. A second start with the same directory goes on
+  in the same world as the next stretch. Nothing that is there is overwritten or shortened: a file is made only where
+  there is none, and lines are only added. A directory that keeps another world file is refused, and `--state` is not
+  given together with `--run`. An event is in the state file before it is in the events file, so a run that is killed
+  between the two has the event in its world and not in its stretch. A file `about.txt` that you put into the
+  directory is shown by the lab as what the experiment was for.
 
 The laws of the world. Whatever the model answers, these hold in every journal. `npm test` plays thirty characters
 for thousands of steps with answers of every kind, checks each law from the journal alone, and a failure names the
@@ -575,6 +589,64 @@ What it lacks:
    in the world file; injury and illness; a person's own reactions to kinds of food.
 5. Ordinary days that cost no model calls.
 6. After that: training, learning a skill in the story, a farm, ecology.
+
+### The lab
+
+```sh
+sagents lab [<dir>...] [--port <n>] [--lang <en|ru>] [--no-open]
+export SAGENTS_LAB=~/runs:~/more-runs    # the folders `sagents lab` reads when it is given none
+export SAGENTS_LAB_LANG=ru               # the page's language when `--lang` is not given
+```
+
+`lab` shows in a browser the experiments that lie under the directories it is given: under those that `SAGENTS_LAB`
+names, separated as in `PATH`, when it is given none, and under the current directory when that is not set either.
+It asks no model and writes nothing into those directories. It prints its address, which is on this computer only,
+and opens it in the default browser unless `--no-open` is given; `--port` asks for a port, and without it the system
+picks one. Ctrl+C stops it. A computer with no browser to open is no failure: the address is on the screen.
+
+A directory is looked into six levels deep. Names that begin with a dot and `node_modules` are passed over, a link is
+followed only where it stays inside the directory given, and a `*.sqlite` is never opened: only its name is looked at.
+What is found is listed newest first, in groups by the folder it lies in, and typing a part of a name narrows the
+list. An experiment has one of three shapes:
+
+- A world: a directory with `world.json`, as `live --run` keeps one. Every `<name>.events.jsonl` in it is a stretch
+  of that one world, with `usage-<name>.jsonl` or `<name>.usage.jsonl` beside it, and it may have `about.txt` and the
+  chapters of a story, `story/chapter-NN.json`. The lab shows the stretches joined, as one story.
+- A run: in a directory with no `world.json`, every `<name>.events.jsonl` is an experiment of its own, with the usage
+  file and the transcript `<name>.txt` of its name. Names of residents and places come from a `*.json` of the same
+  directory that reads as a world file and has the characters of the run's events, `<name>.json` first; with none,
+  the ids are shown.
+- A text: a transcript `<name>.txt` with no events file, taken for one when a state file or a usage file of its
+  name lies beside it; `<name>-1.txt` and `<name>-2.txt` beside `<name>.sqlite` are one experiment. Only its text is
+  shown. Any other `.txt` is passed over.
+
+A rehearsal, a run whose name begins with `dry-` or in which no request reported a token, is listed apart, folded.
+The page has the feed of events with filters by resident and a search, the numbers of the requests, a comparison of
+two experiments side by side, the story's chapters and the transcript; `?` lists its keys. A field or a kind of
+event that the page does not know is shown as a plain line, so a journal of a newer engine still reads. The page is
+in English or in Russian: in the language that `--lang` names, or `SAGENTS_LAB_LANG` when the flag is not given, and
+with neither in Russian for a browser set to Russian and in English for any other. Any other value is refused. The
+language goes to the page in the address that the command prints and opens, as `?lang=ru`. In its review the page was
+opened in Chrome over synthetic runs, in English: the list with its groups, the folded rehearsals, the narrowing, the
+feed, the transcript and the numbers. The Russian page and the choice of the language were opened in no browser yet.
+
+What the lab may do with the files, and `lab/lab.test.ts` holds it to that:
+
+- It listens on `127.0.0.1` alone and has no option for another address. Its address holds a token made at start,
+  and every path without it, and every method but GET, is answered 404.
+- The token is in no process's arguments. The browser is handed a file that only you can read, in a temporary
+  directory that only you can open, which leads on to the address, as Jupyter does it; the file is removed when the
+  lab stops.
+- No name from a request builds a path: an experiment is looked up among those the walk found.
+- Of a world file only the ids and names of characters and places leave the lab, never a sheet or a description; of
+  a chapter everything but its `carry`; of a usage row the counted fields; of a failure its code.
+- The page loads its script and its style sheet from the lab and nothing from anywhere else.
+
+The server and the reading of files are TypeScript as the rest (`lab/server.ts`, `lab/data.ts`, `lab/open.ts`). The
+page is plain files that the browser loads as they are: `lab/page.html`, `lab/app.css`, `lab/app.js`,
+`lab/strings.js` with the page's two languages, and `lab/core.js`, which the server's reading shares with the page.
+`npm run check` reads `lab/core.js` for the types of what `lab/data.ts` imports from it and reports nothing in a
+`.js` file: the page's scripts are not type-checked.
 
 ## The model connection
 

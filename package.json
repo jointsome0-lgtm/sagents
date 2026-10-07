@@ -8,8 +8,11 @@
   "engines": {
     "node": ">=24.9.0"
   },
+  "bin": {
+    "sagents": "src/cli.ts"
+  },
   "scripts": {
-    "test": "node --test src/*.test.ts",
+    "test": "node --test src/*.test.ts lab/*.test.ts",
     "check": "tsc -p tsconfig.json",
     "bench": "node src/bench.ts",
     "size": "python3 scripts/size.py"

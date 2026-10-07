@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>sagents lab</title>
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<aside id="side" data-t-label="sideLabel" aria-label="Experiments of the lab">
+  <div class="side-head">
+    <h2 data-t="title">sagents lab</h2>
+    <span id="root" class="quiet"></span>
+  </div>
+  <div class="side-find"><input type="search" id="narrow" data-t-placeholder="narrow" placeholder="Narrow by a part of a name" autocomplete="off" spellcheck="false"></div>
+  <div id="list"></div>
+  <div id="list-empty" class="quiet pad" hidden></div>
+</aside>
+<div id="shade"></div>
+<main>
+  <header id="top">
+    <div class="bar">
+      <button type="button" id="b-side" class="icon" data-t-title="bSide" data-t-label="bSide" title="List of experiments (E)">☰</button>
+      <h1 id="name">—</h1>
+      <select id="stretch" data-t-title="stretchTitle" hidden></select>
+      <label class="switch" id="solo-box" data-t-title="soloTitle" hidden><input type="checkbox" id="solo"> <span data-t="solo">only the stretch</span></label>
+      <span id="live" class="quiet"></span>
+      <span id="clock" data-t-title="clockTitle">—</span>
+      <span id="counts" class="quiet"></span>
+      <span class="tools">
+        <span class="seg" role="tablist">
+          <button type="button" id="v-feed" role="tab" data-t="feed" data-t-title="feedTitle">Feed</button>
+          <button type="button" id="v-story" role="tab" data-t="story" data-t-title="storyTitle" hidden>Story</button>
+          <button type="button" id="v-text" role="tab" data-t="text" data-t-title="textTitle" hidden>Transcript</button>
+          <button type="button" id="v-numbers" role="tab" data-t="numbers" data-t-title="numbersTitle">Numbers</button>
+        </span>
+        <label class="switch" data-t-title="followTitle"><input type="checkbox" id="follow"> <span data-t="follow">follow</span></label>
+        <button type="button" id="b-face" class="icon" data-t-title="faceTitle">Aa</button>
+        <button type="button" id="b-theme" class="icon">◐</button>
+        <button type="button" id="b-help" class="icon" data-t-title="helpTitle">?</button>
+      </span>
+    </div>
+    <div class="bar" id="filters">
+      <span class="group"><span class="label" data-t="who">Who</span><span id="who" class="chips"></span></span>
+      <span class="group"><span class="label" data-t="where">Where</span><span id="where" class="chips"></span></span>
+      <span class="group grow">
+        <input type="search" id="q" data-t-placeholder="searchHint" placeholder="Search in the text ( / )" autocomplete="off" spellcheck="false">
+        <span id="q-count" class="quiet"></span>
+        <button type="button" id="q-prev" class="icon small" data-t-title="prevTitle" hidden>↑</button>
+        <button type="button" id="q-next" class="icon small" data-t-title="nextTitle" hidden>↓</button>
+        <label class="switch" id="q-only-box" hidden><input type="checkbox" id="q-only"> <span data-t="onlyFound">only what was found</span></label>
+      </span>
+      <span class="group">
+        <label class="switch" data-t-title="thoughtsTitle"><input type="checkbox" id="notes" checked> <span data-t="thoughts">thoughts</span></label>
+        <label class="switch" data-t-title="listsTitle"><input type="checkbox" id="lists" checked> <span data-t="lists">lists of the world</span></label>
+      </span>
+      <span class="group" id="active" hidden>
+        <span id="shown"></span>
+        <button type="button" id="b-clear" data-t="clear" data-t-title="clearTitle">Clear ✕</button>
+      </span>
+    </div>
+  </header>
+  <section id="reading">
+    <div id="scroll" tabindex="-1">
+      <div id="feed"></div>
+      <div id="empty" class="quiet pad" data-t="emptyNone">No events yet.</div>
+    </div>
+    <div id="map-box" data-t-title="mapTitle">
+      <canvas id="map"></canvas>
+      <div id="map-tip" hidden></div>
+    </div>
+    <button type="button" id="fresh" hidden></button>
+  </section>
+  <section id="numbers" hidden></section>
+  <section id="story" tabindex="-1" hidden></section>
+  <section id="text" tabindex="-1" hidden></section>
+</main>
+<dialog id="help">
+  <h2 data-t="keys">Keys</h2>
+  <table>
+    <tr><td><kbd>/</kbd></td><td data-t="kSearch">search in the text; Enter and Shift+Enter go to the next and the previous</td></tr>
+    <tr><td><kbd>1</kbd>…<kbd>9</kbd></td><td data-t="kWho">put a character in the focus, or take it out, by number</td></tr>
+    <tr><td><kbd>0</kbd></td><td data-t="kClear">take off every filter and the search</td></tr>
+    <tr><td><kbd>F</kbd></td><td data-t="kFollow">follow the newest</td></tr>
+    <tr><td><kbd>J</kbd> <kbd>K</kbd></td><td data-t="kStep">the next and the previous event</td></tr>
+    <tr><td><kbd>G</kbd>, <kbd>Shift</kbd>+<kbd>G</kbd></td><td data-t="kEnds">to the top and to the bottom</td></tr>
+    <tr><td><kbd>N</kbd></td><td data-t="kNumbers">the feed or the numbers</td></tr>
+    <tr><td><kbd>S</kbd></td><td data-t="kStory">the feed or the story: the narrator’s chapters</td></tr>
+    <tr><td><kbd>X</kbd></td><td data-t="kText">the feed or the transcript</td></tr>
+    <tr><td><kbd>C</kbd></td><td data-t="kCompare">the comparison: with the next experiment, or off</td></tr>
+    <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td data-t="kExperiments">the previous and the next experiment</td></tr>
+    <tr><td><kbd>E</kbd></td><td data-t="kList">the list of experiments</td></tr>
+    <tr><td><kbd>M</kbd>, <kbd>L</kbd></td><td data-t="kSwitches">thoughts; lists of the world</td></tr>
+    <tr><td><kbd>T</kbd></td><td data-t="kTheme">the theme</td></tr>
+    <tr><td><kbd>?</kbd></td><td data-t="kHelp">this help; Esc closes it</td></tr>
+  </table>
+  <p class="quiet" data-t="focusNote">A focus on characters keeps what they said, did and wrote down, what came of their deeds, what their bodies felt, what was addressed to them and what they heard. The thoughts and the feelings of others are hidden then.</p>
+  <button type="button" id="help-close" data-t="close">Close</button>
+</dialog>
+</body>
+</html>

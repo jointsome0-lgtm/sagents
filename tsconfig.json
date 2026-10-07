@@ -14,9 +14,12 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
+    "allowJs": true,
+    "checkJs": false,
     "skipLibCheck": true
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "lab/**/*.ts"
   ]
 }

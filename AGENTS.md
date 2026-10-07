@@ -14,8 +14,14 @@ that the rules count and move, `src/reading.ts` for the checks a world file is r
 with, `src/laws.ts` for the form of a law that the clock drives, with `src/sleep.ts` and `src/weather.ts` in that
 form, `src/memory.ts` for what a character remembers, `src/journal.ts` for the records that are its only state,
 `src/state.ts` for the file that keeps them and `src/live.ts` for the run and the prompts. All but the last two hold
-no model call and no disk access, and only `state.ts` touches the disk; `src/cli.ts` reads the world file and its
-environment from `environments/`.
+no model call and no disk access, and of the live mode only `state.ts` touches the disk; `src/cli.ts` reads the world
+file and its environment from `environments/`. Beside the live mode, `src/kept.ts` writes the directory of
+`live --run`: it only makes files where there are none and adds lines to them. `lab/` is `sagents lab`: `data.ts`
+reads the experiments under the directories it is given and writes nothing, `server.ts` serves them on `127.0.0.1`
+under a token, `open.ts` writes the one temporary file that takes the browser there, and the page is the plain
+`page.html`, `app.css`, `app.js`, `strings.js` and `core.js`, which `npm run check` does not check. Nothing in `src/`
+but the command line and the test of `kept.ts` imports from `lab/`, and `lab/` asks no model. What may leave the lab is listed in
+[README.md](README.md#the-lab); keep that list true.
 
 ## The code
 
