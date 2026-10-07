@@ -112,7 +112,7 @@ node src/cli.ts live examples/night-station.json [--model <id>] [--cast <charact
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
 each with a place and a sheet. Every character is played by the model, `gpt-6.1-sol@low` unless `--model` says
 otherwise; `--model api:<id>` plays them on [a server of your own](#a-server-of-your-own). One turn is one request
-and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note. A `say` may come with a `gesture`, what the speaker's face, hands or body do meanwhile, which those in the place are told in the line of the speech and which never reaches the world; a `do` may come with `says`, words said aloud while doing it, which everyone in the place hears as a speech of that moment before the deed goes to the world as any deed does. Both are a candidate that has been run on no real model. The note is the first field of an answer, so that it is written before the action is chosen (a candidate too, run on no real model). The rules ask a note to be no plan but what is going on in the character at that moment: what it notices in those with it, what its body feels, what it wants and what holds it back, so that no sheet has to say what a note is for.
+and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note. A `say` may come with a `gesture`, what the speaker's face, hands or body do meanwhile, which those in the place are told in the line of the speech and which never reaches the world; a `do` may come with `says`, words said aloud while doing it, which everyone in the place hears as a speech of that moment before the deed goes to the world as any deed does. Both were measured together with the note's place in a rain scene of two, 160 requests: Gemma 4 31B gave a gesture with 11 speeches of 11 and words with 10 deeds of 13, GPT-6 Luna at low effort a gesture with 18 speeches of 18 and words with none of 7 deeds. The note is the first field of an answer, so that it is written before the action is chosen: in that measurement it was the first field written in 28 answers of 28 on Gemma and in 32 of 32 on Luna, where the action had been first before; whether an action now follows from its note was not counted. The rules ask a note to be no plan but what is going on in the character at that moment: what it notices in those with it, what its body feels, what it wants and what holds it back, so that no sheet has to say what a note is for.
 `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
 what each one remembers after the night decides what happens; `examples/seaside-cafe.json` is a café with a
 crowd and a waitress whom nobody plays, in a town whose places lie on a map. The three examples are written in
@@ -125,7 +125,7 @@ The rules of time and hearing:
 - The clock counts whole seconds of the story, and from the second day on a time names its day. The character who
   is free first plays next. Of those free at one instant, whoever arrives comes first and whoever wakes after them,
   so everyone who comes or wakes at an instant has done so before anyone takes a turn at it: two who walk to a place
-  together are both there when either looks around. This order has been run on no real model yet. A state file
+  together are both there when either looks around. On GPT-6 Luna, in a scene where two leave together, 81 requests, both were in the place before anyone took a turn in 4 leavings of 4, against a turn between the two arrivals in 4 of 4 on the engine before; the rule changes no text that a model reads, so it was played on no second model. A state file
   written under the earlier order, where a turn could come between two arrivals of one instant, is of another
   version and is refused.
 - Speech lasts as long as its words take at the world's `wordsPerMinute`, 130 by default. A `say` or a `call` holds at
@@ -210,8 +210,9 @@ The world answers a deed:
   written as a sentence that names its thing, since the world reads it among the facts of the place with nothing
   that says whose it is, and two like things need wording that tells them apart. A block of these facts under
   labels, after the lists, was tried first: next to the `In the lists:` tails of the earlier lines a weak model then
-  moved things to where no deed had put them. This layout as the engine writes it has not been run on a real
-  model. A part taken off a counted thing or out of a
+  moved things to where no deed had put them. This layout as the engine writes it was then measured on a set of
+  62 deeds, 25 with things, 14 with facts of things, 8 with clothes and 15 after a line gone stale: Gemma 4 31B
+  gave exactly the due entries in 54 answers of the 60 that arrived and GPT-6 Luna at low effort in 49 of 62. A part taken off a counted thing or out of a
   stock has the facts of what it was taken from, and two counts become one record only when their facts are the
   same. In `examples/night-pass.json` what the guest register, the backpack, the map and the notebook say is with
   those things, so it is still known when one of them is carried to another place.
@@ -252,7 +253,7 @@ The world answers a deed:
   the hand or boots pulled on. Nobody touched anybody in those runs, so entries for two bodies have been seen only
   in single requests. The sentence of the field is narrower since those runs: it says that an entry is read right
   after `You feel:`, so that it begins with what is felt and names nobody, that the touch is of another body, and
-  that the ordinary handling of a thing gives no entry. This wording has not been run on a real model. This is the first of three planned layers of sensation. The
+  that the ordinary handling of a thing gives no entry. This wording has stood in the world's requests of every measurement since, but what it changed by itself was not counted. This is the first of three planned layers of sensation. The
   other two are not built: what a body feels from its own state over time, such as an arm tired by an hour of
   carrying, and a body that changes and is kept as a record.
 - `beyond` is a string or null: what of the deed is heard in the places next door, one sentence of 20 words at
@@ -268,8 +269,8 @@ The world answers a deed:
   the world: what a place keeps of its earlier deeds has none of it. The world is told to answer null when it
   is told of no place next door, and a text for a deed in such a place is read as null all the same: the record
   holds none, nobody is told, nothing is printed, and the answer is neither refused nor asked for again. The transcript of `live` shows it as a `heard next door: …` line under
-  the result. The world's text with the facts of things, the places next door and this field has not been run on
-  a real model: what was measured is the text before them.
+  the result. The world's text with the facts of things, the places next door and this field was measured as a
+  whole on the set of 62 deeds named above; what is heard next door was not counted by itself.
 - A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
   each person and place, the seconds of that person's deeds there that the world called a search. A thing is found
   by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «A Night on the
