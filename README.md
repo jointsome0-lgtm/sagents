@@ -353,7 +353,8 @@ The rules of time and hearing:
   sets this limit, with no command flag.
 - A request that the service declined to answer is not sent again: the same words would be declined again. A turn
   goes as the wait above, nothing comes of a deed whose answer the world's model declined, and a memory rewrite is
-  lost as after two answers that could not be used. Each counts as a request and as an unusable answer, with no
+  lost as after two answers that could not be used, unless a readable first answer was set aside by the script
+  check, when that first answer is kept. Each counts as a request and as an unusable answer, with no
   tokens known for it. The third in a run, whoever was asked and for what, ends the run as `failed (declined)`.
   The row of unusable answers can end it before then as `failed (invalid)`; when one decline reaches both limits,
   `declined` wins. A service that keeps declining is not asked on. No refusal of a real service was seen: the shapes
@@ -753,12 +754,26 @@ What a character knows:
   chores, small talk and the prices of trifles. It is asked for sentences and no numbered list, for every sum and
   time of day in figures, for the past tense without where it is at that moment, and to give a deed a result only
   where the lines show one. The order is there so that the cut takes what matters least.
+  A kept memory ends before its first `}`, without the spaces before it, and is marked as cut; an answer with
+  nothing before that `}` cannot be used. In two plays on a hosted model at low effort three rewrites closed the
+  string with `»}` and went on inside it, with the model's own words or with noise in several scripts.
 - A character rewrites its memory when it wakes: everything before the sleep is folded, and the waking and the calls
   that waited begin the new lines. A sleeper who has lived through nothing since its last rewrite but falling
   asleep and waking wakes without one, and no model is asked. A character also rewrites its memory at the start of a turn while the lines hold more than
   `shortWords` words, 2000 by default: the oldest lines are folded until about half of that is left.
-- If the answer to a rewrite cannot be used, it is asked for once more. After that the old text stays, the lines are
-  dropped all the same, and the journal and the totals say that a rewrite was lost.
+- If the answer to a rewrite cannot be read, it is asked for once more. After two such answers the old text stays,
+  the lines are dropped all the same, and the journal and the totals say that a rewrite was lost.
+  A readable first answer to a rewrite is set aside and asked for once more when the sheet has at least 20
+  letters, at least four fifths are of the script with the most, and the text after cutting has at least 10
+  letters with fewer than half of them in that script; it counts as an unusable answer in the totals and in the
+  stop on too many in a row. The second answer is kept as it comes, without judging its script; if it cannot be
+  read, was cut at the output limit or was declined, the first is kept, as it is if the run stops before another
+  answer: the guard can cost one request and never a memory. A readable second answer after an unreadable first
+  is kept whatever its script too.
+  Only letters count: Latin, Cyrillic, Greek, Arabic, Hebrew, Devanagari, Thai, and Han, Hiragana, Katakana and Hangul
+  together. A tie or a sheet with no clear script leaves the check off; names and a few words of another script may
+  stay. A language written in two scripts is held to the script of the sheet.
+  This rule changes no text a model reads and was played on no model.
 - A word counts as at most ten characters for every limit, so a text without spaces cannot get around one. This is
   why a request has a largest size that depends on the world file and not on how long the world has run.
 

@@ -4,7 +4,7 @@ import { ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
 import type { Request, Result } from './chatgpt.ts';
 import { advance, memoryStore, replay, RESULT_WORDS, standingAt, SAID_WORDS, vehicleDue, vehicleView, worldOf } from './journal.ts';
 import type { Record, State, Store } from './journal.ts';
-import { idle, oldest, readMemory } from './memory.ts';
+import { idle, oldest, readMemory, sameScript } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { LAWS } from './laws.ts';
 import { closed } from './reading.ts';
@@ -718,19 +718,26 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     if (folding) {
       const request = { system, schema: MEMORY_SCHEMA, ...owned('resident', who),
         messages: [{ role: 'user' as const, content: [...known(mind, folding), rewriteOf(world, nowOf(world, actor, now), actor.asleep)].join('\n') }] };
-      // An answer that cannot be used gets one more try. After that the old text stays and the lines are lost.
-      let memory = null;
+      // An unreadable answer gets one more try, then the lines are lost. One in another script is set aside:
+      // the second is kept without that check, or the first when the second cannot be used or the run stops.
+      let memory = null, aside = null, stopped = false;
       for (let attempt = 0; attempt < 2 && !memory; attempt += 1) {
         const answer = await ask(player, 'memory', request, who);
-        if (answer === null) return outcome;
+        if (answer === null) { if (!aside) return outcome; stopped = true; break; }
         if (answer === DECLINED) break;
         memory = answer === CUT ? null : readMemory(answer, world.longWords);
-        if (!memory) { if (unusable(player)) return outcome; }
+        if (memory && attempt === 0 && !sameScript(world.characters.find(character => character.id === who)!.sheet, memory.text)) {
+          aside = memory;
+          memory = null;
+        }
+        if (!memory) { if (unusable(player)) { if (!aside) return outcome; stopped = true; break; } }
         else invalids.delete(player.name);
       }
+      memory ??= aside;
       outcome.rewrites += 1;
       if (!memory) outcome.lost += 1;
       await happened({ kind: 'memory', who, at: now, text: memory?.text ?? null, upTo: folding.at(-1)!.seq, cut: memory?.cut ?? false }, player.name);
+      if (stopped) return outcome;
       continue;
     }
     const place = actor.place;

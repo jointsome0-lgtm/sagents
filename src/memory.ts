@@ -41,8 +41,29 @@ export function rewrite(mind: Mind, upTo: number, text: string | null): void {
   Object.assign(mind, { long: text ?? mind.long, lines: kept, size: kept.reduce((sum, line) => sum + line.size, 0), folded: upTo });
 }
 
-// A character's answer to the request to rewrite its memory, as the text that fits `limit` words, or null when it
-// cannot be used. An empty text cannot: forgetting everything is not one of the things a rewrite may do.
+const SCRIPTS = [
+  /\p{Script_Extensions=Latin}/u, /\p{Script_Extensions=Cyrillic}/u, /\p{Script_Extensions=Greek}/u,
+  /\p{Script_Extensions=Arabic}/u, /\p{Script_Extensions=Hebrew}/u, /\p{Script_Extensions=Devanagari}/u,
+  /\p{Script_Extensions=Thai}/u,
+  /[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}]/u,
+];
+
+// A sheet of at least 20 letters with four fifths in its most common script needs at least half the rewrite's
+// letters in it too. Only letters count; a tie, no clear script or a rewrite under 10 letters leaves it alone.
+export function sameScript(sheet: string, text: string): boolean {
+  const letters = sheet.match(/\p{L}/gu) ?? [];
+  if (letters.length < 20) return true;
+  const counts = SCRIPTS.map(script => letters.filter(letter => script.test(letter)).length);
+  const most = Math.max(...counts);
+  if (most * 5 < letters.length * 4 || counts.filter(count => count === most).length !== 1) return true;
+  const script = SCRIPTS[counts.indexOf(most)];
+  const written = text.match(/\p{L}/gu) ?? [];
+  if (written.length < 10) return true;
+  return written.filter(letter => script.test(letter)).length * 2 >= written.length;
+}
+
+// A character's answer to the request to rewrite its memory, before its first `}` and within `limit` words, or null
+// when it cannot be used. An empty text cannot: forgetting everything is not one of the things a rewrite may do.
 export function readMemory(answer: string, limit: number): { text: string; cut: boolean } | null {
   let value: unknown;
   try { value = JSON.parse(answer); } catch (error) {
@@ -50,6 +71,7 @@ export function readMemory(answer: string, limit: number): { text: string; cut: 
     return null;
   }
   const text = value && typeof value === 'object' && 'memory' in value && typeof value.memory === 'string' ? value.memory.trim() : '';
-  const kept = cut(text, limit);
+  const end = text.indexOf('}'), kept = cut(end < 0 ? text : text.slice(0, end).trimEnd(), limit);
+  if (end >= 0) kept.cut = true;
   return kept.text ? kept : null;
 }

@@ -11,6 +11,7 @@ import type { Record } from './journal.ts';
 import { INSTRUCTIONS, runLive, WORLD_INSTRUCTIONS } from './live.ts';
 import { readWorld } from './laws.ts';
 import { readAction } from './action.ts';
+import { readMemory, sameScript } from './memory.ts';
 import { travelSeconds } from './time.ts';
 
 // Sixty words a minute: one word is one second. Both rooms have a clock, so everyone reads the exact time.
@@ -262,6 +263,104 @@ This turn the \`text\` of a say or a call may hold 65 words at most.` }]);
   const lost = journal.all.find(({ record }) => record.kind === 'memory' && record.who === 'dan');
   assert.deepEqual([lost?.event.kind, lost?.event.text, sent.dan.length], ['memory', null, 5]);
   assert.match(sent.dan[4].messages[0].content, /^So far:\n09:01:40 You wake\.\n\nNow 09:01:40\./);
+});
+
+test('a rewrite in another script is asked again, without losing good memories or changing how an unreadable rewrite is lost', async () => {
+  const english = 'I keep the promises I make to my friends.'.repeat(4), russian = 'Я обещала встретиться с друзьями завтра утром.'.repeat(2),
+    mixed = 'I had promised to meet Борис, Юля and Александр before the next morning.', japanese = '友達とカフェで会い、明日の朝も会うと約束した。'.repeat(4),
+    owed = 'I owed Александр Константинович 50 and Екатерина Александровна 70.';
+  const memory = (text: string) => JSON.stringify({ memory: text });
+  const played = async (sheet: string, answers: (string | Error)[], waking: boolean,
+    limits: { calls?: number; tokens?: number; invalidRun?: number; cutRun?: number; declinedRun?: number } = {}) => {
+    const given = readWorld({ title: 'A promise', about: 'A quiet room.', clock: '09:00', shortWords: waking ? 2000 : 1,
+      places: [{ id: 'room', name: 'Room', about: 'A quiet room.' }],
+      characters: [{ id: 'anna', name: 'Anna', place: 'room', sheet, memory: 'An old promise.' }] });
+    const { sent, respond } = standIn({ anna: [act('wait', { seconds: 1, note: 'I remembered a meeting.' }),
+      ...(waking ? [act('sleep', { seconds: 60 })] : []), ...answers] });
+    const journal = memoryStore();
+    const outcome = await runLive({ world: given, respond, model: 'stand-in', minutes: 2, calls: 10, journal, ...limits });
+    return { sent, outcome, entries: journal.all };
+  };
+  // Both waking and a full short-term memory use the same two tries and the same counts. Losing a good rewrite
+  // would drop the folded lines unnoticed, so the accepted scripts and the thresholds are checked here too.
+  for (const waking of [false, true]) {
+    const refused = await played(english, [memory(russian), memory(mixed)], waking);
+    const unreadable = await played(english, ['no memory', memory(mixed)], waking);
+    assert.deepEqual(refused, unreadable);
+    const asks = refused.sent.anna.filter(request => 'memory' in (request.schema as { properties: object }).properties);
+    assert.equal(asks.length, 2);
+    assert.deepEqual(asks[0], asks[1]);
+    assert.deepEqual([refused.outcome.invalid, refused.outcome.rewrites, refused.outcome.lost], [1, 1, 0]);
+    assert.equal(refused.entries.find(({ record }) => record.kind === 'memory')?.event.text, mixed);
+    for (const [sheet, text] of [[english, mixed],
+      ['私は友達との約束を覚えています。'.repeat(10), japanese]]) {
+      const kept = await played(sheet, [memory(text)], waking);
+      assert.deepEqual([kept.outcome.invalid, kept.outcome.rewrites, kept.outcome.lost, kept.outcome.kinds.memory.calls], [0, 1, 0, 1]);
+      assert.equal(kept.entries.find(({ record }) => record.kind === 'memory')?.event.text, text);
+    }
+    for (const [sheet, text] of [[english, owed], [english, russian], ['漢'.repeat(72), mixed], [english, '漢'.repeat(31)]]) {
+      const kept = await played(sheet, [memory(text), memory(text)], waking);
+      const asks = kept.sent.anna.filter(request => 'memory' in (request.schema as { properties: object }).properties);
+      assert.deepEqual([kept.outcome.invalid, kept.outcome.rewrites, kept.outcome.lost, kept.outcome.kinds.memory.calls], [1, 1, 0, 2]);
+      assert.deepEqual([kept.outcome.models['stand-in'].invalid, asks.length], [1, 2]);
+      assert.deepEqual(asks[0], asks[1]);
+      assert.equal(kept.entries.find(({ record }) => record.kind === 'memory')?.event.text, text);
+    }
+    for (const answer of ['no memory', new ModelError('output_limit'), new ModelError('declined')]) {
+      const kept = await played(english, [memory(russian), answer], waking);
+      assert.deepEqual([kept.outcome.invalid, kept.outcome.rewrites, kept.outcome.lost, kept.outcome.kinds.memory.calls], [2, 1, 0, 2]);
+      assert.equal(kept.entries.find(({ record }) => record.kind === 'memory')?.event.text, russian);
+    }
+    const second = await played(english, ['no memory', memory(russian)], waking);
+    assert.deepEqual([second.outcome.invalid, second.outcome.rewrites, second.outcome.lost, second.outcome.kinds.memory.calls], [1, 1, 0, 2]);
+    assert.equal(second.entries.find(({ record }) => record.kind === 'memory')?.event.text, russian);
+    const cut = await played(english, [memory(`${mixed} »  } My answer. ${russian}`)], waking);
+    assert.deepEqual([cut.outcome.invalid, cut.outcome.rewrites, cut.outcome.lost, cut.outcome.kinds.memory.calls], [0, 1, 0, 1]);
+    const entry = cut.entries.find(({ record }) => record.kind === 'memory')!;
+    assert.ok(entry.record.kind === 'memory');
+    assert.deepEqual([entry.record.text, entry.record.cut, entry.event.text, entry.event.cut], [`${mixed} »`, true, `${mixed} »`, true]);
+    const lost = await played(english, ['no memory', 'no memory'], waking);
+    assert.deepEqual([lost.outcome.invalid, lost.outcome.rewrites, lost.outcome.lost, lost.outcome.kinds.memory.calls], [2, 1, 1, 2]);
+    assert.equal(lost.entries.find(({ record }) => record.kind === 'memory')?.event.text, null);
+    const next = lost.sent.anna.at(-1)!.messages[0].content;
+    assert.match(next, /^What you remember:\nAn old promise\.\n/);
+    assert.doesNotMatch(next, /I remembered a meeting\./);
+  }
+  for (const [sheet, text, kept] of [['aaaaб'.repeat(4), 'б'.repeat(10), false], ['aaaб'.repeat(5), 'б'.repeat(10), true],
+    ['a'.repeat(20), 'aб'.repeat(5), true], ['a'.repeat(20), 'aбб'.repeat(4), false],
+    ['a'.repeat(19), 'б'.repeat(10), true], ['a'.repeat(20), 'б'.repeat(9), true],
+    ['a'.repeat(79) + 'б'.repeat(21), 'б'.repeat(40), true], ['a'.repeat(100), 'a'.repeat(19) + 'б'.repeat(21), false],
+    ['123 !', russian, true], ['ա'.repeat(100), russian, true], ['a'.repeat(100), 'aաա'.repeat(14), false],
+    ['a'.repeat(100), '123 !', true], ['aaaa 123 !!! б'.repeat(20), 'aб 123 !!!'.repeat(20), true],
+    ['漢字かなカナ한글'.repeat(20), 'カフェ한글かな漢字'.repeat(10), true],
+    ['ʼ'.repeat(100), 'б'.repeat(40), true], ['ʼ'.repeat(80) + 'б'.repeat(20), 'б'.repeat(40), true],
+    ['ʼ'.repeat(80) + 'б'.repeat(20), 'a'.repeat(40), false]] as const) {
+    assert.equal(sameScript(sheet, readMemory(memory(text), 400)!.text), kept);
+  }
+  for (const letters of ['Latin', 'Кириллица', 'Ελληνικά', 'العربية', 'עברית', 'देवनागरी', 'ไทย', '漢字かなカナ한글']) {
+    const sheet = letters.repeat(100);
+    assert.deepEqual(readMemory(memory(sheet), 400), { text: sheet, cut: false });
+    assert.equal(sameScript(sheet, sheet), true);
+    assert.equal(sameScript(sheet, letters === 'Latin' ? russian : 'Latin'.repeat(8)), false);
+  }
+  const cut = readMemory(memory(`${mixed} ${russian}`), 13)!;
+  assert.deepEqual(cut, { text: mixed, cut: true });
+  assert.equal(sameScript(english, cut.text), true);
+  assert.deepEqual(readMemory(memory(`${mixed} »} ${russian}`), 400), { text: `${mixed} »`, cut: true });
+  assert.equal(readMemory(memory('  } nothing to keep'), 400), null);
+  for (const [answers, limits, reason, invalid] of [
+    [[memory(russian)], { invalidRun: 1 }, 'invalid', 1],
+    [[memory(russian), 'no memory'], { invalidRun: 2 }, 'invalid', 2],
+    [[memory(russian), new ModelError('output_limit')], { cutRun: 1 }, 'output_limit', 2],
+    [[memory(russian), new ModelError('declined')], { declinedRun: 1 }, 'declined', 2],
+    [[memory(russian)], { calls: 2 }, 'calls', 1],
+    [[memory(russian)], { tokens: 220 }, 'tokens', 1],
+    [[memory(russian), new ModelError('provider_failed')], {}, 'provider_failed', 1],
+  ] as const) {
+    const kept = await played(english, [...answers], false, limits);
+    assert.deepEqual([kept.outcome.reason, kept.outcome.invalid, kept.outcome.rewrites, kept.outcome.lost], [reason, invalid, 1, 0]);
+    assert.equal(kept.entries.find(({ record }) => record.kind === 'memory')?.event.text, russian);
+  }
 });
 
 test('a time of day is the next moment the clock shows it, within the span the action allows, and the journal takes nothing else; without a clock it is missed within bounds and no clock is told', async () => {
