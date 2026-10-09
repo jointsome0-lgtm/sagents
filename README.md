@@ -4,41 +4,41 @@ Story agents. A coding agent gets a shell and a patch tool and works in a reposi
 story: its scenes, the moves that continue it, its checkpoints and its memory. sagents is the program that runs them.
 
 It is early. Today sagents sends one request to a model, to a server that speaks the OpenAI chat completions protocol
-or through a ChatGPT plan, and runs a first prototype of the live mode. The agent loop and the story tools come next;
-for the live world, [what comes next](#what-comes-next-for-the-live-world) is listed below. This page keeps what works
+or through a ChatGPT plan, runs a first prototype of the live mode, and has a judge read a finished live journal.
+For the live world, [what comes next](#what-comes-next-for-the-live-world) is listed below. This page keeps what works
 and what is planned apart.
 
 ## Two modes
 
-Eval is not written yet. Live has a first prototype with a small world of its own in place of a story engine; it is
-described under [What works today](#a-live-world). Both will run on the same model connection and the same loop, with
-a cap on steps. They differ in what the agent sees and which tools it gets.
+Eval reads the journal of a finished live world with `log`, `show`, `diff` and `report`. `checkout` and `act` are not
+written: the journal cannot branch yet. Live has a first prototype with a small world of its own in place of a story
+engine, described under [What works today](#a-live-world). Both use the same model connections and a cap on calls.
+They differ in what the agent sees and which tools it gets.
 
 **live.** The agent lives in the story's world as one of its characters. It sees what that character sees, which is the
 scenes as they arrive and its own notes. It acts by making a move. It cannot go back in time or read the story's
 memory.
 
 **eval**, or seval, short for story eval. The agent looks at a story from outside and sees all of it. It travels through
-the story's checkpoints the way git travels through commits.
+the live journal's numbered records. Travel through branches and checkpoints is to come.
 
 | Tool | What it does |
 | --- | --- |
-| `log` | Lists the checkpoints of a branch, newest first. |
-| `show` | Shows one checkpoint: the scene, the move that led to it and the memory at that point. |
-| `diff` | Shows what the memory gained and lost between two checkpoints. |
-| `checkout` | Starts a branch from a checkpoint, to try something there. |
-| `act` | Makes a move on that branch. The story under evaluation stays as it was. |
-| `report` | Ends the run with findings, each with checkpoint ids and quotes. |
+| `log` | Lists numbered records in journal order, with memory rewrites marked. |
+| `show` | Shows records with their saved events, or a person, place or thing from the world file. |
+| `diff` | Shows a person's memory before and after two records, or the whole run, and what each rewrite folded. |
+| `checkout` | Not written. Will start a branch from a checkpoint, to try something there. |
+| `act` | Not written. Will make a move on that branch, leaving the story under evaluation as it was. |
+| `report` | Ends the run with findings, each with record numbers and checked quotes; the first report with unread records asks once whether to go on, unless it is the last request. |
 
 Code checks every quote of a report against the story and drops a finding whose quote is not there.
 
 The two fit together. One agent plays a story and another checks it, so a measurement does not need its moves written
 in advance.
 
-The first story engine behind these tools will be the agent interface of
+The first story behind these tools is the journal of this program's own live world. The agent interface of
 [simple-story-chat](https://github.com/jointsome0-lgtm/simple-story-chat), a Telegram bot for branching interactive
-stories. It can create a seed, start a story, make a move, fork from a checkpoint, and read scenes, checkpoints and
-memory.
+stories, is to come.
 
 ## What works today
 
@@ -679,6 +679,223 @@ What it lacks:
 5. Ordinary days that cost no model calls.
 6. After that: training, learning a skill in the story, a farm, ecology.
 
+### A judge of a live run
+
+```sh
+sagents eval <dir> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
+sagents eval --state <file> --world <world.json> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
+```
+
+`eval` reads one finished live journal: `world.json` and `state.sqlite` from a directory that `live --run` made,
+or an explicit state file and world file. It opens SQLite for reading only, including the committed records in a
+killed run's write-ahead file, and refuses a file another run holds. It makes no table, changes no row and asks
+for no checkpoint. SQLite may make its own `-shm` and `-wal` beside the file. SQLite's codes 8 and 14, for a file
+or directory it cannot write or a file it cannot open, give a sentence naming a missing file and an unclosed run
+whose directory cannot be written for its side files. The stored events are read as they are, without replay and
+whatever the format mark: an unknown kind or field is shown by the same rule as a known one. The world file is read
+leniently for its title, about, facts and every top-level list of objects with string ids, characters first. The head gives about and facts when they are
+nonempty texts, each cut at 150 words, then each list under its own name with a line `id: name` for every item.
+Its hash, with the text of the environment it names when this checkout has it, is compared with the saved hash.
+A difference refuses nothing: the report says `world: "matches"` or `"unverified"`.
+
+The model name chooses the connection as in `live`. The questions file holds `{ "task": "what to look for",
+"kinds": { "id": "what this kind of finding is" } }`, with 1 to 12 kinds whose ids are lower-case letters,
+digits and `-`. [examples/eval-questions.json](examples/eval-questions.json) asks about lost or invented
+memories, contradictions, knowledge, repetition and character. The judge receives the task and these kinds with
+its instructions, then the run's head and the first 30 memory rewrites, or `Memory rewrites: none.`, ending with
+`You have <n> answers.` for the call cap, then `No record is in this message: ask for them with show.`
+It answers one strict schema with its notes, findings, `drop`, a required list of integers empty when nothing is
+taken back, and one tool.
+The instructions say that the world answers deeds and speaks for people whom no model plays, such as a waiter;
+going somewhere, waiting, sleeping, waking and speech between the played people are settled by the rules. They
+say that memory is folded when recent lines grow past a limit and when a person wakes from sleep with something
+lived through since the last rewrite; a waking with nothing new brings no rewrite. A person holds their first
+memory, or the latest rewrite, and the later perceived lines word for word. A failed rewrite leaves the old text
+and drops only the folded lines. A rewrite is asked to begin with what the person wants and what has changed in
+them, then to keep what will be needed later: what is owed and to whom, what was promised and by when, sums agreed,
+times set, where a thing was put and what the person knows about people, and to leave out passing chores and small
+talk. A loss of what was to be kept is a fault. A person knows what every turn tells them: the world's title and
+the names of its places, the world and each place as their `about` gives them, not their `facts`, which places
+are next door to which, where they are and how far the other places are, the names of the people whom models
+play, the means of remote contact, their own sheet, looks, pose and tiredness, the things they carry with what
+those hold and what that holds, the time, exact with a clock at hand and a guess without one, in some runs how
+much of the story is left, the weather as it
+reaches their place, and who is in the place with them: the others whom models play, with how they look, their
+pose and what they are seen to carry, the people of that place whom no model plays, with their names and looks,
+and the crowd around. They do not know what another carries out of sight, thinks or notes, the people whom no
+model plays in a place where they have not been, or what happened where they were not, unless they perceived it.
+How much of the story is left is said only in a run that is no pause: the `live` command plays every run that
+keeps a state file as a pause and says it to nobody, while `runLive()` given a journal and no `pause` says it at
+every turn, and the judge can read that journal too.
+The two texts of a rewrite and the records it folded are compared before anything
+in it is called invented or lost; a field the instructions do not explain is no ground for a finding.
+The judge writes `notes`, `says` and `summary` in the task's language, whatever language the run is in and wherever
+its story is set. Each person is
+busy for as long as what they do lasts, and whoever is free first acts next. A deed and a wait end early when
+someone speaks, comes or leaves nearby or calls the person from elsewhere, when something is heard from next door
+and at every record of the weather that reaches their place, changed or not: the person is free then, or once
+what they are saying and what they are hearing is over. A sleep ends early only when the world says that a deed
+wakes the sleeper: then at the moment that deed was to end, even if the deed itself is cut short, or sooner if
+the sleep was already due to end sooner, by its own span or by an earlier deed that wakes. A walk never ends
+early. So a next record that comes before the seconds of a deed or a wait have passed is no fault. The
+judge is
+told to read the whole run in order
+with `show` unless the task says otherwise, to use `log` to find a place by, and not to hand in a finding already
+kept.
+
+- `log` lists up to 80 records in order, with the clock, place, who, kind and first ten words, and says where to go
+  on. A memory rewrite is marked `[memory rewrite; folds #<a> to #<b>]`, or with the unknown range or beginning
+  as below. An empty text with a destination ends in `to <value>`.
+  For every tool, a rewrite's text is the record's `text` when it is a string, else the event's `text` when it is
+  a string, else none. Memory history, shown coverage and quote checks use that same text.
+- `show` gives saved records, including private notes and the world's answers, up to 1,500 words. An oversized record
+  is parted at white space when there is any before the cut, so a part does not cut through a word there. It
+  continues in parts with `from` null, each part after the first beginning with `#<seq> goes on:` on its own line,
+  including after a jump to a numbered record; after a whole record it continues with the next one in the journal.
+  A record counts as shown only after answered requests carried all its text, including every part of an
+  oversized one. The continuation line counts toward the answer's words, not toward the place within the record.
+  A memory rewrite follows its head with `Folds <who>'s lines of #<a> to #<b>; later lines stay as they are.`, or
+  `Folds <who>'s lines up to #<b>; later lines stay as they are.`, or `Folds an unknown range of <who>'s lines.`.
+  It then gives `Memory before (<n> words):` and the whole text replaced, the world's first memory for a first
+  rewrite, or `Memory before: none.` for an empty or missing first memory of a person in the world file.
+  For a person absent from that file with no earlier rewrite that gave text, it says `Memory before: unknown.`.
+  Then come `Memory after (<n> words):` and the new text, then the other saved
+  fields. A rewrite that gave no text instead gives
+  `The rewrite gave no text: the memory stayed as it was, and the folded lines are gone.`, then
+  `Memory (<n> words):` and the text that stayed, or `Memory: unknown.` when that text is unknown.
+  All of this is the record's text for parts, coverage and
+  quotes. Nothing of `by` or `at` is listed; the head uses `+<at> s` when the event
+  has no clock. Empty fields and `false` are left out; strings print as they are, other values as JSON.
+  With `who` and no numbers, `show` searches every top-level list of objects with string ids, characters first.
+  A character gives name, looks, sheet and first memory in that order, then every other field; another object gives
+  name and then every other field. The id is not repeated, empty fields are omitted by the same rule as records,
+  and the whole is cut at 1,500 words. A cut ends with `Cut at 1500 words of <n>. Not shown in full: <fields>.`,
+  naming the fields cut or left out, with commas.
+- `diff` takes only a character of the world file. It gives the latest rewrite text just before `from` and after
+  `to`, or the first memory when none has been written. A null `from` means the first record, a null `to` the last:
+  no numbers compares the whole run. Each text is counted in words and cut at 1,500, with a cut marked.
+  Each intervening rewrite
+  lists the range it folded, beginning at the journal's first record for the first rewrite, including a lost rewrite
+  that left the old text but dropped the lines. A bound counts only when `upTo` is a whole number, at least the
+  first record's number, below the rewrite's number and above the preceding rewrite's bound for that person
+  when that bound counts. `log`, `show` and `diff` share this reading: `folds #<a> to #<b>` for a first rewrite
+  or one whose preceding bound is known, `folds up to #<b>` when the preceding bound is unknown, and
+  `folds an unknown range` when its own bound is unknown. A line in `diff` begins `#<seq> folds #<a> to #<b>.`,
+  or uses the other range wording, with the lost-rewrite detail when no text was given.
+- `report` ends the judge's run with its summary of the task. If records have not been shown in full to answered
+  requests, the first report before the last request is answered once with the findings' receipts, then
+  `<n> of <m> records have not been shown; the first of them is #<seq>. Read them with show, or answer report again to end with them unread.`
+  Its findings and `drop` are checked, and its notes and summary kept, as with any answer. Any later report ends
+  the run, even with records unread; the last request ends it without a question. A report that ends the run gets no
+  answer telling the judge which findings were kept or taken back.
+
+`who` is trimmed; an empty or whitespace-only value means null. `log`, `report` and `show` with numbers ignore
+it. Where it matters, the lookup first tries an exact id, then an id or name without regard to case. `log` with `from` null
+continues where it stopped; `show` with `from` and `who` null continues after the last record it showed, or within an
+unfinished one.
+
+The schema lets `at` hold any number of integers. An empty list refuses the finding with reason `record`; only the
+first four numbers of a longer list are taken, then repeats are removed and the numbers sorted. Each finding
+has its whole quote compared before cutting; only the quote kept in findings and `unkept` is put into Unicode NFC
+and cut at 40 words. Code keeps it only when all the records exist and its whole quote is in the full text `show`
+gives for at least one of them, including the memory a rewrite replaced, now part of that rewrite's shown text.
+The record and quote are normalized with Unicode
+NFKC, lowercased, and compared as words separated by single spaces. A comma or point between digits
+and an apostrophe between letters stay in the word, with a typographic apostrophe folded to the plain one:
+`1,000`, `1.25` and `I'll` each stay one word. Every other sign separates words. Words are the stretches of letters
+and digits, with those internal signs kept, so a quote from text written without spaces between words has to run
+from one separating sign to the next. The quote must begin and end at a word boundary, an edge or a space in the
+folded text:
+`can` does not match `cannot`, nor `1` match `100`, `1,000` or `1.25`, nor `ll` match `I'll`.
+Case does not change the comparison. A quote with no letters or digits is refused. A repeated kind, set of records
+and cut quote is kept once by the same folding rule. At most 50 findings are kept, each numbered, and the next
+tool answer says which were kept and why the others were refused, except that a `report` ending the run gets no
+next answer. `drop` is read before `found`: a kept finding of each given number leaves `findings` and enters
+`dropped` with the request's number as `call`. Its receipt is `Finding #<n> taken back.`; another number gives
+`There is no kept finding #<n>.`. These receipts come before the findings' receipts. A taken-back finding leaves
+the list that stays in the judge's view, which is made anew then and whenever older answers leave it, and no
+longer counts as a duplicate. A new finding takes the next number no
+finding has had, and the limit of 50 counts only those kept at that moment. The instructions put doubts and
+checks that found nothing wrong in notes. What the judge concludes from a quote is not checked. Notes replace
+the old notes when not empty and are cut at 150 words; a finding's explanation at 40, and the summary at 300.
+Words are counted as in live, with a word at most ten characters for limits.
+
+Each assistant message holds a usable answer's own text in full. Only an unusable answer is cut at 60 words,
+or replaced by `{}` when there is no text. When the judge's answers and the tool answers together pass
+`--window`, 6,000 words by default, the oldest pairs an answered request has carried leave together until at most
+half is left, or no more can leave. The newest pair and every pair whose tool answer no answered request has
+carried stay, whatever their size or place among the pairs. A request is answered whenever text came back, even
+if it could not be used. A failed request, including one cut at the output limit or declined, carries nothing
+and counts no records as shown. The head keeps its own beginning byte for byte; after an empty line it takes the
+older pairs' place with the notes and kept findings without quotes. Every new message to the judge after the
+first ends with where `show` goes on, before any count of answers left, unless `show` gave records or part of one
+in that message and said where to go on itself, or the message asks about an early report. The line is
+`Show goes on within #<n>.` for a part,
+`Show starts at the first record.` before any record is shown, `Show has reached the last record.` at the end,
+and `Show goes on after #<n>.` otherwise. It follows `log`, `diff`, a person's, place's or thing's view, an empty or
+refused tool answer, and the message after an unusable answer alike.
+Every request alternates `user, assistant, user, …, user`. Requests carry one cache name made as in live. The cap
+is `--calls`, 60 by default: every request counts, including an unusable
+answer, one cut at the output limit or a request the service declined to answer. Three unusable answers in a
+row end the run as `failed`, with the third answer's reason: `output_limit`, `declined` or `invalid` for text
+that is not the schema's object. A usable answer resets this count. Every other request failure ends the run
+at once. A declined request counts as a call and is not sent again. The judge is told when five or fewer answers
+remain, with `1 answer left.` for one. The last request allows only `report`; its warning is in the newest tool answer, or at the end
+of the head when the cap is one call. A failed request is not tried again. A cap reached without `report` gives
+`failed` with reason `calls`, keeping the findings so far. A journal with no records ends at once as `failed`
+with reason `empty_journal`, before any request.
+
+One JSON report goes to stdout, or to `--out`, which must name a file that does not exist. One line of counts,
+including findings and how many were taken back, goes to stderr. When the command ends in the ordinary way before
+a report is written, it tries to remove an empty file made for `--out`; a failure of that cleanup is let go, so
+the empty file may remain. The
+report holds the status and failure code, and `httpStatus`, `providerCode` and `param` when the failure that
+ended the run had them, never the service's words. It holds the model, world hash check, records and records shown
+in full, findings with their clocks and checked quotes, refusal counts, last notes and summary, calls and invalid
+answers, `dropped`, the first 50 findings taken back with their request numbers, and
+`unkept`, the first 50 refused items as `{ call, kind, at, quote, says, why }`. Its texts have the same limits
+as kept findings; `why` is `quote`, `record`, `duplicate` or `full`, and `refused` counts all refusals beyond
+those 50. It holds one usage row per request. A row has the tool, `from` and `to` as given, `who` as the id
+found or null, `kept` for the findings that answer added whatever it took back, `words` for the tool answer's size,
+zero for a report that ends the work since none is sent, milliseconds and
+input, cached, output and reasoning tokens, null when not reported, and a failure's code when it failed. No
+request or answer text is in usage. A failed run exits with code 1, as in live.
+
+There is no branch to try a move on, and only one run is judged at a time. Earlier wordings of the instructions
+went through two small measurements on a real model, GPT-6 Luna at low effort, 11 and 40 requests over two synthetic
+journals with planted faults. In the second no answer was unusable, and three of six runs ended before the records
+had been read: one reported at once, one read only the index, and one stopped at 61 of 88 records, which is what
+the question about an early report is for; the checks use stand-ins. A third measurement, 52 requests over
+twelve readings, read every record in each. A first reading of the journals of seven played runs of invented
+scenes, twice each by a small model at medium effort, led to showing what a rewrite folded and the memory it
+replaced, and to `drop`.
+A fourth measurement, 63 requests after the eighth pass, saw findings about memory in the six readings of the
+three journals with rewrites fall from about 18 to 3, all three still false.
+The planted loss of a time set was found in none of three readings where it had been found in all three.
+Of the planted faults at medium effort, 16 of 33 were found where 24 of 33 had been.
+The sentences on what a rewrite is asked to keep and on what a person does not know come from this measurement.
+A fifth, 77 requests after the ninth pass on the same model at medium effort, found 27 of 55 planted faults and
+the planted loss of a time set in 2 of 5 readings, and kept 5 findings about memory in the six readings of the
+three journals with rewrites, all five false: those sentences changed little. The eighth pass on a larger model,
+gpt-6.1-sol at high effort, 36 requests over five readings, found 27 of 28 planted faults and handed in nothing
+but faults those two journals are known to have: the small model, more than the wording, is what holds the judge
+back. After the fifth, the sentence on what a person knows was narrowed, and the one on a rewrite names what it
+is asked to begin with: a sixth measurement, 28 requests on the small model, found 17 of 33 planted faults, the
+same half. The larger model at high effort then read with the tenth pass the journals of five played runs and the
+two with planted faults, 56 requests, one of which failed and left a reading without its summary. Of the 16
+findings it handed in on the played runs, 11 held when checked by hand against the records, one of them about
+memory, and 5 did not. Three of the five called it a fault that a person acted before the seconds of their deed
+had passed: the instructions said that speech nearby ends a wait early and nothing of a deed, which ends early in
+the same way. The other two came of a record this judge does not know, written by a candidate that makes places
+on demand. In the two journals with planted faults it found 10 of 11, the two faults one of them is known to have
+besides, and one more that held when checked. The sentence on being busy now says when a deed, a wait and a
+sleep end early, and the sentence on what a person knows was made longer twice more by reviews, which found the
+world's title, the neighbours of the places and the people whom no model plays missing from it: in these forms
+neither has been measured on any model yet. The review of the fifteenth pass, which read only what that pass
+changed, was the first to ask for no change. A checked quote
+is evidence that its folded words occur together as whole words in a named record's printed text or the memory
+a named rewrite replaced. It does not establish that the finding is right.
+
 ### The lab
 
 ```sh
@@ -856,6 +1073,12 @@ What sagents keeps and what it sends:
 - The tokens are in `~/.config/sagents/chatgpt.json`, a file only your user can read. sagents does not keep the ID token
   or your email.
 - A request holds the instructions, the messages and the schema you gave it. sagents adds no text of its own.
+- A message the service marks as interim (`commentary`) is left out where the service gives the pieces of text
+  with the place of their message in the answer; a piece without that place is kept as text of the answer.
+  One marked as interim from its start is not passed on to `onText` when the piece has that place;
+  without it the piece still reaches `onText`.
+  Text counts toward the limit of 100,000 characters as it arrives: a draft that grows past it before the
+  service marks it as interim ends the request as `output_limit`. This limit ends a runaway answer early.
 - A request that has a `cache` name carries it three times: as `prompt_cache_key` in the body and as the headers
   `session-id` and `x-client-request-id`. The plan's route reads far more of a request from its cache with them:
   8 or 9 requests of 20 against 1 to 3 without. A request with no name has none of the three.

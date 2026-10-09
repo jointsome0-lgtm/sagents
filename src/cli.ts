@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { delimiter } from 'node:path';
+import { closeSync, fstatSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createChatgpt, ModelError, signIn, SignInError } from './chatgpt.ts';
 import type { Message, Request } from './chatgpt.ts';
@@ -11,6 +11,7 @@ import type { Player } from './live.ts';
 import { modelFor } from './model.ts';
 import { environmentOf, isEnvironmentName, readWorld } from './laws.ts';
 import { WorldError } from './world.ts';
+import { EvalError, readQuestions, runEval } from './eval.ts';
 
 // The command is `sagents` once the package is linked, and `node src/cli.ts` from a checkout: the same arguments.
 const USAGE = `sagents login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
@@ -23,6 +24,9 @@ sagents live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-m
                                with --state the world is kept in that file and continues from it;
                                with --run it is kept in that directory as an experiment the lab reads: the world file,
                                the state, and for every start a stretch of events and of rows that count its requests
+sagents eval <dir> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
+sagents eval --state <file> --world <world.json> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
+                               a judge reads a finished live journal with log, show and diff, and gives a report
 sagents lab [<dir>...] [--port <n>] [--lang <en|ru>] [--no-open]
                                the lab in the browser: the experiments under the directories, or under those that
                                SAGENTS_LAB names (separated as in PATH), or under the current one; it prints its address
@@ -146,6 +150,66 @@ else if (command === 'lab') {
   } catch (error) {
     console.log(JSON.stringify({ status: 'failed', ...detailsOf(error) }));
     process.exitCode = 1;
+  }
+} else if (command === 'eval') {
+  let output: number | undefined, outputPath = '', written = false;
+  try {
+    const given = argumentsOf({ state: { type: 'string' }, world: { type: 'string' }, model: { type: 'string' }, ask: { type: 'string' },
+      calls: { type: 'string' }, window: { type: 'string' }, out: { type: 'string' } }, 1);
+    const calls = Number(given?.values.calls ?? 60), window = Number(given?.values.window ?? 6000);
+    if (!given || !given.values.model || !given.values.ask || !Number.isSafeInteger(calls) || calls < 1 || !Number.isSafeInteger(window) || window < 1
+      || !(given.positionals.length === 1 ? given.values.state === undefined && given.values.world === undefined : given.values.state && given.values.world)) {
+      console.error(USAGE);
+      process.exitCode = 1;
+    } else {
+      const dir = given.positionals[0], worldPath = dir === undefined ? given.values.world as string : join(dir, 'world.json');
+      const statePath = dir === undefined ? given.values.state as string : join(dir, 'state.sqlite');
+      const jsonFile = (path: string, sentence: string) => {
+        try { const text = readFileSync(path, 'utf8'); return { text, value: JSON.parse(text) as unknown }; } catch (error) {
+          if (!(error instanceof SyntaxError) && !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
+          throw new EvalError(sentence);
+        }
+      };
+      const world = jsonFile(worldPath, 'The world file cannot be read as JSON.');
+      const questions = readQuestions(jsonFile(given.values.ask as string, 'The questions file cannot be read as JSON.').value);
+      let environment = '';
+      const name = isObject(world.value) && typeof world.value.environment === 'string' ? world.value.environment : null;
+      if (name !== null && isEnvironmentName(name)) {
+        try { environment = readFileSync(new URL(`../environments/${name}.json`, import.meta.url), 'utf8'); } catch (error) {
+          if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+          // An environment absent from this checkout leaves only the world file to compare.
+        }
+      }
+      const state = (await import('./state.ts')).readState(statePath, world.text, environment);
+      if (typeof given.values.out === 'string') {
+        try { output = openSync(outputPath = given.values.out, 'wx'); } catch (error) {
+          if (!(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
+          throw new EvalError('The report file cannot be made: it must be a new file in a directory that can be written.');
+        }
+      }
+      const nameOfModel = given.values.model as string, player = modelFor(nameOfModel);
+      const result = await runEval({ entries: state.entries, world: world.value, questions, ...player, name: nameOfModel, calls, window, cache: randomUUID(), worldCheck: state.world });
+      const text = `${JSON.stringify(result)}\n`;
+      if (output === undefined) process.stdout.write(text); else { writeFileSync(output, text); written = true; }
+      const total = (field: 'input' | 'cached' | 'output') => result.usage.reduce((sum, row) => sum + (row[field] ?? 0), 0);
+      const unreported = result.usage.filter(row => row.input === null && !row.error).length;
+      const dropped = result.usage.reduce((sum, row) => sum + row.kept, 0) - result.findings.length;
+      console.error(`${result.status}${result.reason ? ` (${result.reason})` : ''}: ${result.records} records, ${result.shown} shown, ${result.findings.length} findings, ${dropped} taken back, ${Object.values(result.refused).reduce((a, b) => a + b, 0)} refused, ${result.calls} calls, ${result.invalid} invalid, ${total('input')} input tokens, ${total('cached')} of them cached, ${total('output')} output tokens${unreported ? `, without ${unreported} answers that reported no usage` : ''}`);
+      if (result.status === 'failed') process.exitCode = 1;
+    }
+  } catch (error) {
+    console.error(`failed: ${error instanceof EvalError || error instanceof StateError ? error.message : 'unexpected'}`);
+    process.exitCode = 1;
+  } finally {
+    if (output !== undefined) {
+      try {
+        const empty = !written && fstatSync(output).size === 0;
+        closeSync(output);
+        if (empty) unlinkSync(outputPath);
+      } catch {
+        // Cleanup can leave an empty file, but cannot lose a report or replace the run's failure.
+      }
+    }
   }
 } else if (command === 'live') {
   try {

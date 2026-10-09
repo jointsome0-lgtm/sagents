@@ -384,6 +384,30 @@ test('a closing event must hold a response, no tool call, and the same text as i
     await assert.rejects(createChatgpt({ path, fetch: async () => closing(response) }).respond(request), { code });
   }
   assert.equal((await createChatgpt({ path, fetch: async () => closing({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }] }) }).respond(request)).text, 'ok');
+  const deltas: string[] = [];
+  const interim = sse([
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'message', phase: 'commentary', role: 'assistant' } },
+    { type: 'response.output_text.delta', output_index: 0, delta: '{"draft":1}' },
+    { type: 'response.output_item.added', output_index: 1, item: { type: 'reasoning' } },
+    { type: 'response.output_item.added', output_index: 2, item: { type: 'message', phase: 'commentary', role: 'assistant' } },
+    { type: 'response.output_text.delta', output_index: 2, delta: '{"draft":2}' },
+    { type: 'response.output_item.added', output_index: 3, item: { type: 'message', phase: 'final_answer', role: 'assistant' } },
+    ...['{"ok":', 'true}'].map(delta => ({ type: 'response.output_text.delta', output_index: 3, delta })),
+    { type: 'response.completed', response: { output: [] } },
+  ]);
+  assert.equal((await createChatgpt({ path, fetch: async () => interim }).respond(request, { onText: delta => { deltas.push(delta); } })).text, '{"ok":true}');
+  assert.deepEqual(deltas, ['{"ok":', 'true}']);
+  const late = sse([
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'message' } },
+    { type: 'response.output_text.delta', output_index: 0, delta: 'draft' },
+    { type: 'response.output_item.done', output_index: 0, item: { type: 'message', phase: 'commentary' } },
+    { type: 'response.output_item.added', output_index: 1, item: { type: 'message', phase: 'final_answer' } },
+    { type: 'response.output_text.delta', output_index: 1, delta: 'final' },
+    { type: 'response.completed', response: { output: [
+      { type: 'message', phase: 'commentary', content: [{ type: 'output_text', text: 'draft' }] },
+      { type: 'message', phase: 'final_answer', content: [{ type: 'output_text', text: 'final' }] }] } },
+  ]);
+  assert.equal((await createChatgpt({ path, fetch: async () => late }).respond(request)).text, 'final');
 });
 
 test('a limit or an abort ends a text callback even when it never settles', async () => {

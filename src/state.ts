@@ -5,13 +5,41 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { StateError } from './journal.ts';
 import type { Entry, Store } from './journal.ts';
+import type { StoredEntry } from './eval.ts';
 
 const FORMAT = '18';
 // SQLite's own result codes for a statement that names what the file does not have, for a file another connection
-// holds, and for a file that is not a database.
-const NO_SUCH = 1, BUSY = 5, NOT_A_DATABASE = 26;
+// holds, for a file or directory SQLite cannot write, for a file SQLite cannot open, and for a file that is not a database.
+const NO_SUCH = 1, BUSY = 5, READ_ONLY = 8, CANNOT_OPEN = 14, NOT_A_DATABASE = 26;
 const FOREIGN = 'The state file cannot be used: it is not a state file of `live`.';
 const sqliteCode = (error: unknown) => error instanceof Error && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode & 0xff : null;
+
+// Reads the saved events without replaying them or changing a row. Read-only SQLite sees the last committed rows
+// in the write-ahead file too; an immutable connection would miss them. The format mark is not this reader's limit.
+export function readState(path: string, world?: string, environment = ''): { entries: StoredEntry[]; world?: 'matches' | 'unverified' } {
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(path, { readOnly: true, timeout: 0 });
+    database.exec('BEGIN');
+    const known = new Map(database.prepare('SELECT key, value FROM meta').all().map(row => [row.key, row.value]));
+    if (!known.has('format') || typeof known.get('world') !== 'string') throw new StateError(FOREIGN);
+    const entries = database.prepare('SELECT seq, record, event, by FROM journal ORDER BY seq').all().map(row => {
+      try {
+        return { seq: row.seq as number, record: JSON.parse(row.record as string), event: JSON.parse(row.event as string), by: row.by as string | null };
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new StateError('The state file cannot be used: a record in it is damaged.');
+      }
+    });
+    const hash = world === undefined ? undefined : createHash('sha256').update(JSON.stringify([world, environment])).digest('hex');
+    return { entries, ...(hash === undefined ? {} : { world: known.get('world') === hash ? 'matches' as const : 'unverified' as const }) };
+  } catch (error) {
+    if (sqliteCode(error) === BUSY) throw new StateError('The state file is in use by another run. Wait until that run ends.');
+    if (sqliteCode(error) === CANNOT_OPEN || sqliteCode(error) === READ_ONLY) throw new StateError('The state file cannot be opened: it is missing, or its run was not closed and its directory cannot be written for SQLite side files.');
+    if (sqliteCode(error) === NO_SUCH || sqliteCode(error) === NOT_A_DATABASE) throw new StateError(FOREIGN);
+    throw error;
+  } finally { database?.close(); }
+}
 
 // Opens the journal of the world whose file holds `world` and whose environment's file holds `environment`, or begins
 // one. A journal belongs to the two together: under another environment the same records would not be the same world. The file is held until `close` or the end

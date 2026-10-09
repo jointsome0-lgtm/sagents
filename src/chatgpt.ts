@@ -104,7 +104,7 @@ type Account = { hostId: string; clientId?: string; subject?: string; accessToke
   expiresAt?: number; scopes?: string[]; declined?: boolean };
 type Failure = { code?: unknown; param?: unknown } | null;
 type StreamEvent = {
-  type?: unknown; delta?: unknown; code?: unknown; param?: unknown; error?: Failure; item?: { type?: unknown } | null;
+  type?: unknown; delta?: unknown; output_index?: unknown; code?: unknown; param?: unknown; error?: Failure; item?: { type?: unknown; phase?: unknown } | null;
   response?: {
     model?: unknown; error?: Failure; incomplete_details?: { reason?: unknown } | null; output?: unknown;
     usage?: { input_tokens?: unknown; output_tokens?: unknown; input_tokens_details?: { cached_tokens?: unknown } | null;
@@ -384,7 +384,14 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
             if (!response.body?.locked) await response.body?.cancel();
             throw new ModelError('invalid_stream');
           }
-          let text = '';
+          const pieces: { index: number | undefined; text: string }[] = [];
+          let length = 0;
+          const commentary = new Set<number>();
+          const interim = (index: number) => {
+            if (commentary.has(index)) return;
+            commentary.add(index);
+            length -= pieces.filter(piece => piece.index === index).reduce((sum, piece) => sum + piece.text.length, 0);
+          };
           let completed: StreamEvent | undefined;
           // Every delta is an event of some 300 bytes, and the closing event repeats the whole answer.
           for await (const data of events(response.body, MAX_STREAM)) {
@@ -409,10 +416,14 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
             if (event.type === 'response.incomplete') throw new ModelError(stopped === 'max_output_tokens' ? 'output_limit' : stopped === 'content_filter' ? 'declined' : 'incomplete_stream');
             // No tools are sent, so an item of any other kind than these is not an answer.
             if (event.type === 'response.output_item.added' && !PASSIVE_ITEMS.includes(event.item?.type as string)) throw new ModelError('unexpected_tools');
+            if (['response.output_item.added', 'response.output_item.done'].includes(event.type as string)
+              && event.item?.type === 'message' && event.item.phase === 'commentary' && typeof event.output_index === 'number') interim(event.output_index);
             if (event.type === 'response.output_text.delta') {
               if (typeof event.delta !== 'string') throw new ModelError('invalid_stream');
-              text += event.delta;
-              if (text.length > MAX_TEXT) throw new ModelError('output_limit');
+              if (typeof event.output_index === 'number' && commentary.has(event.output_index)) continue;
+              pieces.push({ index: typeof event.output_index === 'number' ? event.output_index : undefined, text: event.delta });
+              length += event.delta.length;
+              if (length > MAX_TEXT) throw new ModelError('output_limit');
               await untilStopped(() => onText(event.delta as string), current, until);
             }
             // The closing event ends the reading at once: a connection left open after it is not waited for.
@@ -426,8 +437,11 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
           if (output !== undefined && !Array.isArray(output)) throw new ModelError('invalid_stream');
           if (Array.isArray(output) && output.some(item => !isObject(item) || !PASSIVE_ITEMS.includes(item.type as string))) throw new ModelError('unexpected_tools');
           if (Array.isArray(output) && output.some(item => isObject(item) && Array.isArray(item.content) && item.content.some(part => isObject(part) && part.type === 'refusal'))) throw new ModelError('declined');
+          if (Array.isArray(output)) output.forEach((item, index) => { if (item.type === 'message' && item.phase === 'commentary') interim(index); });
+          const text = pieces.filter(piece => piece.index === undefined || !commentary.has(piece.index)).map(piece => piece.text).join('');
           if (Array.isArray(output)) {
-            const parts = output.flatMap(item => isObject(item) && Array.isArray(item.content) ? item.content : []);
+            const parts = output.flatMap((item, index) => isObject(item) && !commentary.has(index)
+              && Array.isArray(item.content) ? item.content : []);
             const closing = parts.filter(part => isObject(part) && part.type === 'output_text');
             if (closing.some(part => typeof part.text !== 'string') || (closing.length && closing.map(part => part.text).join('') !== text)) throw new ModelError('invalid_stream');
           }
