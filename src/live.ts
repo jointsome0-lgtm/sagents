@@ -438,7 +438,10 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   pause = false, cutRun = 3, declinedRun = 3, invalidRun = 5, cache, onAsk = () => {} }: Live): Promise<Outcome> {
   const given = world, state = replay(world, journal.entries());
   world = worldOf(given, state);
-  const stands = vehicleDue(world, state)?.at ?? next(state.people).freeAt;
+  const broughtFor = (actor: Person) => LAWS.map(law => law.due(world, state.laws, actor)).find(record => record !== null);
+  const first = next(state.people);
+  // Neither a vehicle's arrival nor what a law brings is due after the next person's free moment.
+  const stands = state.deed?.at ?? Math.min(vehicleDue(world, state)?.at ?? first.freeAt, broughtFor(first)?.at ?? first.freeAt);
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(given), shared = sharedOf(given);
   const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
@@ -588,7 +591,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const now = actor.freeAt, who = actor.id, mind = state.minds.get(who)!;
     // What the clock brings by a law comes first, and no model is asked: the weather changes before anyone acts at
     // that moment, and someone awake to the limit falls asleep at its turn.
-    const brought = LAWS.map(law => law.due(world, state.laws, actor)).find(record => record !== null);
+    const brought = broughtFor(actor);
     const parked = vehicleDue(world, state);
     if (parked && parked.at < horizon && (!brought || parked.at < brought.at || (parked.at === brought.at && brought.kind !== 'weather'))) {
       await happened(parked);

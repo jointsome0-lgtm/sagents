@@ -647,8 +647,10 @@ The journal and the state file:
 - Without `--state` the journal lives in memory and ends with the run. Then the run is the whole story: a turn says
   how much of it is left, and speech shortens towards the end.
 - With `--state <file>` the journal is a SQLite file, written one record at a time, and `live` continues the world
-  it finds there. `--minutes` then count from where the world stands, and the end of a run is a pause: nobody is
-  told how much is left. When the file is opened, every record is replayed and must give the event stored with it;
+  it finds there. `--minutes` then count from where the world stands: from an unfinished deed's moment, or else from
+  what the clock brings first if it is due (a change of the weather, a vehicle's arrival), or else from the next
+  person's turn. The end of a run is a pause: nobody is told how much is left.
+  When the file is opened, every record is replayed and must give the event stored with it;
   a journal that does not is refused. The file belongs to one world file and its environment together, by a hash
   of the content of both, and refuses another of either, so neither can be edited or exchanged while the world is
   under way. A second run on a file that is in use is

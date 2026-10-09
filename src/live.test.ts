@@ -126,6 +126,34 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   const limited = await runLive({ world, respond: short.respond, model: 'stand-in', minutes: 600, calls: 3, journal: few });
   assert.deepEqual([limited.status, limited.reason, limited.calls, few.all.length], ['done', 'calls', 3, 3]);
   assert.equal(Object.values(short.sent).flat().length, 3);
+  // A run stopped before a deed's result continues from the deed's moment, even if a sound ends a wait next door.
+  const rooms = { ...world, characters: [world.characters[0], { ...world.characters[1], place: 'blue' }],
+    places: world.places.map(place => ({ ...place, nextDoor: [place.id === 'red' ? 'blue' : 'red'] })) };
+  const pending = memoryStore(), stopped = standIn({ boris: [act('do', { text: 'knocks', seconds: 600 })] });
+  await runLive({ world: rooms, respond: stopped.respond, model: 'stand-in', calls: 2, journal: pending, pause: true });
+  assert.deepEqual(pending.all.map(({ event }) => [event.who, event.kind, event.at, event.seconds]), [['anna', 'wait', 0, 600], ['boris', 'do', 0, 600]]);
+  const continued = [];
+  for (const calls of [1, 60]) {
+    const kept = memoryStore(), answer = standIn({ world: [came({ beyond: 'A knock.' })] });
+    kept.append(pending.all);
+    const ran = await runLive({ world: rooms, respond: answer.respond, model: 'stand-in', minutes: 1, calls, journal: kept, pause: true });
+    continued.push([ran.seconds, ran.reason, ran.calls, kept.all.slice(2).map(({ event }) => event.at)]);
+  }
+  assert.deepEqual(continued, [[0, 'calls', 1, [0]], [60, 'horizon', 2, [0, 0]]]);
+  // A change of the weather due before anyone is free begins the continued run's minute.
+  const skies = { ...rooms, places: rooms.places.map(place => ({ ...place, open: place.id === 'red' })),
+    weather: { start: { text: 'Clear.', indoors: null }, changes: [{ at: 60, text: 'Rain.', indoors: null }] } };
+  const waiting = memoryStore();
+  await runLive({ world: skies, respond: standIn({}).respond, model: 'stand-in', minutes: 1, calls: 2, journal: waiting, pause: true });
+  assert.deepEqual(waiting.all.map(({ event }) => [event.kind, event.at, event.seconds]), [['wait', 0, 600], ['wait', 0, 600]]);
+  const weathered = [];
+  for (const calls of [1, 60]) {
+    const kept = memoryStore(), answer = standIn({ anna: [act('wait', { seconds: 1 }), act('wait', { seconds: 59 })] });
+    kept.append(waiting.all);
+    const ran = await runLive({ world: skies, respond: answer.respond, model: 'stand-in', minutes: 1, calls, journal: kept, pause: true });
+    weathered.push([ran.seconds, ran.reason, ran.calls, kept.all.slice(2).map(({ event }) => event.at)]);
+  }
+  assert.deepEqual(weathered, [[1, 'calls', 1, [60, 60]], [60, 'horizon', 2, [60, 60, 61]]]);
   const metered = standIn({});
   const capped = await runLive({ world, respond: metered.respond, model: 'stand-in', minutes: 600, tokens: 150 });
   assert.deepEqual([capped.status, capped.reason, capped.calls, capped.inputTokens + capped.outputTokens, Object.values(metered.sent).flat().length], ['done', 'tokens', 2, 220, 2]);
