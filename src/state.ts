@@ -7,7 +7,14 @@ import { StateError } from './journal.ts';
 import type { Entry, Store } from './journal.ts';
 import type { StoredEntry } from './eval.ts';
 
-const FORMAT = '18';
+// Vehicles keep moving places, and routes take fares and follow the clock. Other worlds keep their mark.
+const FORMAT = '18', VEHICLES_FORMAT = '19', BUSES_FORMAT = '20';
+const formatOf = (world: string) => {
+  try { const file = JSON.parse(world); return Array.isArray(file?.vehicles) && file.vehicles.some((vehicle: { route?: unknown }) => vehicle?.route !== undefined) ? BUSES_FORMAT : file?.vehicles !== undefined ? VEHICLES_FORMAT : FORMAT; } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return FORMAT;
+  }
+};
 // SQLite's own result codes for a statement that names what the file does not have, for a file another connection
 // holds, for a file or directory SQLite cannot write, for a file SQLite cannot open, and for a file that is not a database.
 const NO_SUCH = 1, BUSY = 5, READ_ONLY = 8, CANNOT_OPEN = 14, NOT_A_DATABASE = 26;
@@ -70,7 +77,7 @@ export function openState(path: string, world: string, environment = ''): Store 
         throw new StateError(FOREIGN);
       }
       if (!known.has('format')) throw new StateError(FOREIGN);
-      if (known.get('format') !== FORMAT) throw new StateError('The state file cannot be used: it was written by another version of `live`.');
+      if (known.get('format') !== formatOf(world)) throw new StateError('The state file cannot be used: it was written by another version of `live`.');
       if (known.get('world') !== hash) throw new StateError('The state file belongs to another world file, or the world file has changed since.');
       cache = known.get('cache');
     }
@@ -78,7 +85,7 @@ export function openState(path: string, world: string, environment = ''): Store 
     if (fresh) {
       database.exec('BEGIN; CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT; '
         + 'CREATE TABLE journal (seq INTEGER PRIMARY KEY, record TEXT NOT NULL, event TEXT NOT NULL, by TEXT) STRICT');
-      database.prepare('INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)').run('format', FORMAT, 'world', hash);
+      database.prepare('INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)').run('format', formatOf(world), 'world', hash);
       database.exec('COMMIT');
     }
     if (typeof cache !== 'string') database.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('cache', cache = randomUUID());

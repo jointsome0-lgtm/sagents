@@ -23,7 +23,7 @@ export const waysOf = world => {
   const places = world.places, pace = world.walkMetresPerMinute > 0 ? world.walkMetresPerMinute : PACE, usual = world.travelMinutes ?? USUAL, kept = new Map();
   const listed = (a, b) => Object.hasOwn(a.minutesTo, b.id) ? a.minutesTo[b.id] : null;
   const way = (i, j) => {
-    const key = i < j ? i * places.length + j : j * places.length + i;
+    const key = i * places.length + j;
     if (kept.has(key)) return kept.get(key);
     const a = places[i], b = places[j], said = listed(a, b) ?? listed(b, a), line = distanceOf(a.at, b.at, pace);
     const walked = line === null ? null : line > 10 ? Math.round(line) : Math.round(line * 10) / 10;
@@ -299,6 +299,34 @@ export const whereAt = (characters, moves, T, started = true) => {
       share: move.kind === 'go' ? spent > 0 ? Math.min(1, (T - move.T) / spent) : 1 : 0, asleep: move.kind === 'sleep', unknown: false });
   }
   return where;
+};
+// Riders stay in their vehicle; the map puts their marks at its stop or along its drive. A bus follows its times,
+// even when no arrival was recorded because nobody was awake to meet it.
+export const ridersAt = (world, moves, T, started = true) => {
+  const where = whereAt(world.characters, moves, T, started), vehicles = world.vehicles ?? [];
+  if (!vehicles.length) return where;
+  const moving = whereAt(vehicles.map(vehicle => ({ ...vehicle, place: vehicle.at })), moves.filter(move => vehicles.some(vehicle => vehicle.id === move.who)), T, started);
+  const ways = waysOf(world), second = time => Number(time.slice(0, 2)) * 3600 + Number(time.slice(3)) * 60;
+  for (const vehicle of vehicles) {
+    if (!vehicle.route?.length || !vehicle.leaves?.length) continue;
+    const times = vehicle.leaves.map(second), day = Math.floor(T / 86400) * 86400;
+    const began = day + (times.findLast(time => day + time <= T) ?? times.at(-1) - 86400);
+    let at = began, position = { place: vehicle.route[0], to: null, since: null, until: null, share: 0, asleep: false, unknown: false };
+    for (const [index, from] of vehicle.route.entries()) {
+      const to = vehicle.route[(index + 1) % vehicle.route.length], source = world.places.findIndex(place => place.id === from), target = world.places.findIndex(place => place.id === to);
+      if (source === -1 || target === -1) break;
+      const spent = Math.max(30, Math.ceil(ways.seconds(source, target) / vehicle.faster));
+      if (T < at + spent) { position = { ...position, place: from, to, since: at, until: at + spent, share: Math.max(0, (T - at) / spent) }; break; }
+      at += spent;
+      position = { ...position, place: to };
+      if (index < vehicle.route.length - 1) { if (T < at + vehicle.stands) break; at += vehicle.stands; }
+    }
+    moving.set(vehicle.id, position);
+  }
+  return new Map([...where].filter(([id]) => !vehicles.some(vehicle => vehicle.id === id)).map(([id, is]) => {
+    const vehicle = moving.get(is.place);
+    return [id, vehicle ? { ...vehicle, asleep: is.asleep, aboard: is.place } : is];
+  }));
 };
 // The moments at which someone moved, fell asleep or woke, each once and in order: what the map steps by.
 export const momentsOf = moves => [...new Set(moves.map(move => move.T))].sort((one, other) => one - other);

@@ -1,7 +1,9 @@
 // What a resident of a live world does, with no model in it: its answer read as an action it can take now, and the
 // action as an event, with the actor and those who perceive it moved on.
+import { all } from './things.ts';
+import type { Things } from './things.ts';
 import { cut, isObject, wordsOf } from './reading.ts';
-import { clockAt, lasting, secondsUntil, speechSeconds, travelSeconds } from './time.ts';
+import { clockAt, driveSeconds, lasting, secondsUntil, speechSeconds, travelSeconds } from './time.ts';
 import { GESTURE_WORDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, SAYS_WORDS } from './world.ts';
 import type { Event, Kind, Person, Place, World } from './world.ts';
 
@@ -18,7 +20,7 @@ export type Action = { note: string | null; action: Kind; text: string | null; t
 // nobody who can be called, led to the place the character is in or to no place, or lasted no time the action allows;
 // or it never arrived whole, because the model wrote on to the limit of one answer (`long`); or the service declined to
 // write one (`declined`).
-export const REFUSALS = ['json', 'action', 'text', 'to', 'here', 'place', 'time', 'long', 'declined'] as const;
+export const REFUSALS = ['json', 'action', 'text', 'to', 'here', 'place', 'time', 'long', 'declined', 'vehicle', 'full', 'driving', 'driver', 'reach', 'round', 'fare'] as const;
 export type Refusal = typeof REFUSALS[number];
 export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(reason => reason === value);
 
@@ -42,7 +44,7 @@ export const next = (people: Person[]): Person => people.reduce((first, person) 
 // becomes one line; a note and what a `do` describes keep their first `MAX_WORDS` words, a gesture its first
 // `GESTURE_WORDS` and the words said with a `do` their first `SAYS_WORDS`, and a speech is cut when it
 // is made, at that turn's limit. The actor's `freeAt` is the moment of the turn.
-export function readAction(world: World, actor: Person, answer: string): Action | Refusal {
+export function readAction(world: World, actor: Person, answer: string, people: Person[] = [], things?: Things): Action | Refusal {
   let value: unknown;
   try { value = JSON.parse(answer); } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
@@ -74,8 +76,27 @@ export function readAction(world: World, actor: Person, answer: string): Action 
     return !known ? 'to' : text ? { ...none, action: 'call', text, to: value.to as string } : 'text';
   }
   if (value.action === 'go') {
-    if (value.place === actor.place) return 'here';
-    return world.places.some(place => place.id === value.place) ? { ...none, action: 'go', place: value.place as string } : 'place';
+    const inside = world.places.find(place => place.id === actor.place)?.vehicle;
+    const destination = value.place;
+    if (inside?.route && destination !== inside.at && world.places.some(place => !place.vehicle && place.id === destination)) return 'round';
+    if (inside?.heading) return 'driving';
+    if (destination === actor.place) return 'here';
+    const to = world.places.find(place => place.id === destination);
+    if (!to) return 'place';
+    if (to.vehicle) {
+      if (inside || to.vehicle.at !== actor.place || to.vehicle.heading) return 'vehicle';
+      if (people.filter(person => person.place === to.id).length >= to.vehicle.seats) return 'full';
+      const fare = to.vehicle.fare;
+      if (fare && all(things?.people.get(actor.id) ?? world.characters.find(person => person.id === actor.id)!.carries).reduce((sum, thing) => sum + (thing.money && thing.name === fare.name ? thing.n! : 0), 0) < fare.n) return 'fare';
+      return { ...none, action: 'go', place: to.id };
+    }
+    if (inside) {
+      if (to.id === inside.at) return { ...none, action: 'go', place: to.id };
+      if (inside.drivers !== null && !inside.drivers.includes(actor.id)) return 'driver';
+      if (!inside.reach.includes(to.id)) return 'reach';
+      return { ...none, action: 'go', place: to.id };
+    }
+    return { ...none, action: 'go', place: to.id };
   }
   if (value.action === 'do') {
     const done = short(text), lasts = span(MAX_SECONDS);
@@ -90,7 +111,7 @@ export function readAction(world: World, actor: Person, answer: string): Action 
 
 // Someone spoke, came or left near this character, or the weather changed over it: its wait or its activity ends. It is free now, or when its own
 // speech and the speech it is hearing have ended.
-export const attend = (person: Person, now: number) => { person.freeAt = Math.max(now, person.speaking, person.listening); };
+export const attend = (person: Person, now: number) => { person.freeAt = Math.max(now, person.speaking, person.listening, person.passageUntil ?? 0); };
 
 // Those who perceive what happens in a place: everyone there who is awake.
 export const awakeIn = (people: Person[], place: string, but: Person) => people.filter(person => person !== but && person.place === place && !person.asleep);
@@ -127,10 +148,23 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     actor.speaking = now + event.seconds;
   } else if (action.action === 'go') {
     event.to = action.place;
-    event.seconds = travelSeconds(world, place, action.place as string);
+    const to = world.places.find(place => place.id === action.place);
+    const inside = world.places.find(item => item.id === place)?.vehicle;
+    if (inside && to!.id !== inside.at) {
+      Object.assign(event, { kind: 'drive', from: inside.at, arrival: now + driveSeconds(world, inside.at!, to!.id, inside.faster), seconds: 10 });
+      event.nearby = people.filter(person => person.place === inside.at && !person.asleep).map(person => person.id);
+      for (const witness of people.filter(person => event.nearby!.includes(person.id))) attend(witness, now);
+    } else if (inside || to?.vehicle) {
+      // Crossing the door places the person at once; the ten seconds still hold its next turn.
+      Object.assign(event, { transfer: true, seconds: 10 });
+      Object.assign(actor, { place: action.place, pose: null, passageUntil: now + 10 });
+      event.nearby = people.filter(person => person !== actor && person.place === action.place && !person.asleep).map(person => person.id);
+      for (const witness of people.filter(person => event.nearby!.includes(person.id))) attend(witness, now);
+    } else event.seconds = travelSeconds(world, place, action.place as string);
     for (const witness of here) attend(witness, now);
     // Whoever leaves is no longer placed as it was.
-    Object.assign(actor, { place: null, heading: action.place, pose: null });
+    if (!event.transfer && event.kind !== 'drive') Object.assign(actor, { place: null, heading: action.place, pose: null });
+    else actor.passageUntil = now + 10;
   } else if (action.action === 'do' && action.says !== undefined) {
     // Words said with a deed are a speech of that moment, cut at the turn's limit: they hold those who hear them
     // until they end, and the deed lasts at least as long as they take.

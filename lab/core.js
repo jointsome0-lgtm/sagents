@@ -36,7 +36,7 @@ export const keeps = (event, chosen, places) => (!places.size || inPlaces(event,
 
 // ---- The numbers of a run, from its usage rows (as `usageRow` of the data module gives them) and its events.
 export const KINDS = ['turn', 'world', 'reply', 'memory'];
-export const ACTORS = ['say', 'call', 'do', 'go', 'arrive', 'wait', 'sleep', 'wake', 'memory', 'result'];
+export const ACTORS = ['say', 'call', 'do', 'drive', 'go', 'arrive', 'wait', 'sleep', 'wake', 'memory', 'result'];
 export const median = values => { if (!values.length) return null; const sorted = [...values].sort((one, other) => one - other), mid = sorted.length >> 1; return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2; };
 const sums = () => ({ requests: 0, failed: 0, input: 0, cached: 0, output: 0, reasoning: 0, ms: [], models: new Set() });
 const count = (into, row) => { into.requests += 1; if (row.failed) into.failed += 1; into.input += row.input; into.cached += row.cached; into.output += row.output; into.reasoning += row.reasoning;
@@ -72,7 +72,7 @@ export const numbersOf = (usage, events, ids = []) => {
     const known = whoOf(event.who);
     if (event.kind === 'say' || event.kind === 'call') known.says += 1;
     if (event.kind === 'do') known.deeds += 1;
-    if (event.kind === 'go') known.moves += 1;
+    if (event.kind === 'go' || event.kind === 'drive') known.moves += 1;
     if (event.note) known.notes += 1;
   }
   return { events: events.length, all: closed(all), kinds: [...kinds].filter(([, known]) => known.requests).map(([kind, known]) => ({ kind, ...closed(known) })),
@@ -136,6 +136,12 @@ export const grouped = experiments => {
 // rewritten memory move nobody. `MOVES` are the kinds of event that are read.
 const MOVES = ['say', 'call', 'do', 'wait', 'arrive', 'wake', 'result', 'sleep', 'go'];
 export const moveOf = (event, T, known) => {
+  if (event.kind === 'drive' && typeof event.from === 'string' && typeof event.to === 'string' && Number.isFinite(event.arrival)) {
+    known.delete(event.place);
+    return { T, who: event.place, kind: 'go', place: event.from, to: event.to, seconds: event.arrival - event.at };
+  }
+  if (event.kind === 'park') { known.set(event.who, event.place); return { T, who: event.who, kind: 'at', place: event.place }; }
+  if (event.kind === 'go' && event.transfer) { known.set(event.who, event.to); return { T, who: event.who, kind: 'at', place: event.to }; }
   const { who, place, kind } = event, spent = Number.isFinite(event.seconds) && event.seconds > 0 ? event.seconds : 0;
   if (typeof who !== 'string' || who === '' || typeof place !== 'string' || place === '' || !MOVES.includes(kind)) return null;
   if (kind === 'go' && (typeof event.to !== 'string' || event.to === '')) return null;

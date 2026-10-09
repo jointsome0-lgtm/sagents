@@ -1,5 +1,5 @@
 import { secondsOf, clockAt as clockIn, timeOf, focusOf, numbersOf as numbersIn, median, ACTORS, linkOf, hashOf as hashIn, sidesOf, planOf, stretchAt, firstAt, narrowed, grouped } from './core.js';
-import { layoutOf, fitOf, sceneOf, peopleOf, roomFor, whereAt, momentsOf, waysFrom } from './map.js';
+import { layoutOf, fitOf, sceneOf, peopleOf, roomFor, ridersAt, momentsOf, waysFrom } from './map.js';
 import { STRINGS, languageOf } from './strings.js';
 // Every text of an event, of a world file, of `about.txt`, of a transcript and every name of a file comes from
 // outside: it goes into the page as a text node alone, through `textContent`, and never as markup.
@@ -77,7 +77,9 @@ const build = rec => {
   if (kind === 'say') { whoNode(head, who); if (to !== null) head.append(el('span', '', `→ ${personName(to)}`)); }
   else if (kind === 'call') { whoNode(head, who); head.append(el('span', '', `${TXT.calls} → ${personName(to ?? '')}`)); }
   else if (kind === 'do') { whoNode(head, who); head.append(el('span', '', TXT.does)); timed = true; }
-  else if (kind === 'go') { whoNode(head, who); head.append(el('span', '', `${TXT.goes} → ${placeName(to ?? '')}`)); slim = timed = true; text = null; }
+  else if (kind === 'drive') { whoNode(head, who); head.append(el('span', '', `${TXT.drives} ${placeName(event.place)} → ${placeName(to ?? '')}`)); slim = timed = true; text = null; }
+  else if (kind === 'park') { head.append(el('span', 'who', placeName(who)), el('span', '', TXT.pullsUp)); slim = true; text = null; }
+  else if (kind === 'go') { whoNode(head, who); head.append(el('span', '', `${event.transfer ? TXT.crosses : TXT.goes} → ${placeName(to ?? '')}`)); slim = timed = true; text = null; }
   else if (kind === 'arrive') { whoNode(head, who); head.append(el('span', '', TXT.arrives)); slim = true; text = null; }
   else if (kind === 'wait') { whoNode(head, who); head.append(el('span', '', TXT.waits)); slim = timed = true; }
   else if (kind === 'sleep') { whoNode(head, who); head.append(el('span', '', TXT.fallsAsleep)); slim = timed = true; }
@@ -115,7 +117,7 @@ const build = rec => {
   if (typeof event.says === 'string' && event.says !== '') line(TXT.says, event.says);
   if (event.search) line(TXT.search, TXT.searchText);
   for (const thing of list(event.found)) line(TXT.found, `${str(thing?.what)} ${str(thing?.name)} (${str(thing?.spot)})`);
-  for (const posting of list(event.moved)) line(posting?.stock ? TXT.movedStock : TXT.moved, `${str(posting?.what)} ${str(posting?.name)}${posting?.n == null ? '' : ` ×${str(posting.n)}`}, ${str(posting?.out ?? '') || holder(posting?.from)} → ${str(posting?.into ?? '') || holder(posting?.to)}${
+  for (const posting of list(event.moved)) line(posting?.sink === 'fare' ? TXT.fare : posting?.stock ? TXT.movedStock : TXT.moved, `${str(posting?.what)} ${str(posting?.name)}${posting?.n == null ? '' : ` ×${str(posting.n)}`}, ${str(posting?.out ?? '') || holder(posting?.from)} → ${posting?.sink === 'fare' ? TXT.fare : str(posting?.into ?? '') || holder(posting?.to)}${
     posting?.as == null || posting.as === posting.what ? '' : ` ${TXT.as} ${str(posting.as)}`}`);
   for (const thing of list(event.set)) line(TXT.state, `${str(thing?.what)} ${str(thing?.name)}: ${str(thing?.state)}`);
   for (const pose of list(event.poses)) line(`${TXT.pose} · ${personName(pose?.of)}`, str(pose?.text) || TXT.none);
@@ -769,7 +771,7 @@ const drawLanes = () => {
     if (at) { pen.fillStyle = cssColour('--line'); pen.fillRect(left - 2.5, 0, 1, height); }
     for (const rec of one.recs) {
       const kind = rec.e.kind;
-      if (!['say', 'call', 'do', 'go', 'sleep'].includes(kind)) continue;
+      if (!['say', 'call', 'do', 'drive', 'go', 'sleep'].includes(kind)) continue;
       const index = people.get(rec.e.who)?.index ?? 0, deed = kind !== 'say' && kind !== 'call';
       // A deed fills its lane, a speech is a narrower mark, a walk or a sleep a faint thread.
       const thread = kind === 'go' || kind === 'sleep';
@@ -1088,8 +1090,8 @@ let land = noLand(null), momentTimer = null;
 const svgOf = ([tag, attributes, ...children]) => { const node = svg(tag, attributes); for (const child of children) node.append(typeof child === 'string' ? child : svgOf(child)); return node; };
 const mapWords = { span: seconds => duration(seconds), due: (to, until) => TXT.mapDue(to, clockAt(until, false).replace(DAY_HEAD, '')), many: count => TXT.mapMany(count) };
 const landPerson = id => land.world?.characters.find(one => one.id === id)?.name ?? personName(id);
-const landPlace = id => land.world?.places.find(one => one.id === id)?.name ?? placeName(id);
-const landWhere = T => whereAt(land.world.characters, land.moves, T, (found(A.x)?.stretches.find(stretch => stretch.first != null)?.first.at ?? 0) === 0);
+const landPlace = id => [...(land.world?.places ?? []), ...(land.world?.vehicles ?? [])].find(one => one.id === id)?.name ?? placeName(id);
+const landWhere = T => ridersAt(land.world, land.moves, T, (found(A.x)?.stretches.find(stretch => stretch.first != null)?.first.at ?? 0) === 0);
 // The span of the whole world, as the list gives it for the stretches.
 const worldSpan = () => {
   let from = Infinity, to = -Infinity;
@@ -1151,7 +1153,7 @@ const showMoment = () => {
   land.marks.replaceWith(marks); land.marks = marks;
   $('map-who').replaceChildren(...[...where].map(([id, is]) => {
     const row = el('span');
-    row.append(el('span', `dot ${tone(id) || 'p0'}`), el('b', '', landPerson(id)), is.unknown ? TXT.mapUnknown : is.place === null ? TXT.mapNowhere : is.to !== null ? TXT.mapOnWay(landPlace(is.place), landPlace(is.to), clockAt(is.until, false))
+    row.append(el('span', `dot ${tone(id) || 'p0'}`), el('b', '', landPerson(id)), ...(is.aboard ? [el('span', '', `${landPlace(is.aboard)} · `)] : []), is.unknown ? TXT.mapUnknown : is.place === null ? TXT.mapNowhere : is.to !== null ? TXT.mapOnWay(landPlace(is.place), landPlace(is.to), clockAt(is.until, false))
       : `${landPlace(is.place)}${is.asleep ? ` · ${TXT.mapAsleep}` : ''}`);
     return row;
   }));

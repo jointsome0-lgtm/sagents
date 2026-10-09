@@ -12,25 +12,27 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { ModelError } from './chatgpt.ts';
 import type { Request } from './chatgpt.ts';
-import { JournalError, memoryStore, replay, StateError } from './journal.ts';
+import { begin, JournalError, memoryStore, replay, StateError } from './journal.ts';
 import type { Entry } from './journal.ts';
 import { requestLimit, runLive } from './live.ts';
 import { openState } from './state.ts';
 import { readWorld } from './laws.ts';
+import { readAction } from './action.ts';
 import { SINKS } from './things.ts';
 import type { Thing } from './things.ts';
-import { clockAt, speechSeconds } from './time.ts';
+import { busAt, clockAt, speechSeconds, travelSeconds } from './time.ts';
 import { GESTURE_WORDS, MAX_SECONDS, MAX_SLEEP, SAYS_WORDS, sizeOf, wordsOf } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
-// The weather changes every ten minutes of the story, from the fifth on; every third change does not get under a roof.
+// The weather changes every ten minutes of the story, from the first on; every third change does not get under a roof.
+// With its stand of 580 seconds the bus reaches its third stop at one of those minutes twice an hour, so that an arrival
+// and a change fall on one instant.
 // Each text is one word that says which state it is of and whether it is the sky's or the roof's.
-const SKIES = Array.from({ length: 2000 }, (_, index) => ({ at: 300 + index * 600, text: `sky-${index + 1}-0`, indoors: index % 3 ? `roof-${index + 1}-0` : null }));
+const SKIES = Array.from({ length: 2000 }, (_, index) => ({ at: 60 + index * 600, text: `sky-${index + 1}-0`, indoors: index % 3 ? `roof-${index + 1}-0` : null }));
 const START = 20 * 3600;
 // The pairs of places that are next door to each other, each listed by its first place only: one place has two such
 // neighbours, and the last place has none.
 const DOORS = [['p0', 'p1'], ['p2', 'p1'], ['p4', 'p3']];
-const neighbours = (spot: string) => DOORS.flatMap(([one, other]) => one === spot ? [other] : other === spot ? [one] : []);
 const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '20:00', remote: 'radio', travelMinutes: 3, shortWords: 300, longWords: 60,
   // Thirteen hours awake at the start, and the limit a quarter of an hour on, so that some reach it.
   tiredHours: 13.1,
@@ -47,8 +49,7 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
     ...(index < PLACES - 1 ? { at: [index * 150, index % 2 * 2000] } : {}), open: index % 2 === 1, clock: index % 3 === 0,
     facts: `facts-p${index}-0`,
     // Each place has things that are counted, among them money, food and what burns, two supplies with no count,
-    // things that hold others, and things with states. Some places have a permanent fire, some a stove that
-    // can go out, and some no fire at all.
+    // things that hold others, and things with states, one of which is a fire while it is lit.
     things: [{ name: `rack-p${index}`, fixed: true, open: true, holds: [{ name: 'coin', n: 40, money: true }, { name: 'bread', n: 30, food: 50, facts: 'lore-bread' }, { name: 'log', n: 30, burns: true },
       { name: `cup-p${index}`, holds: [] }, { name: `tool-p${index}`, facts: `lore-p${index}-tool` }] },
     { name: `stove-p${index}`, fixed: true, states: ['lit', 'out'], state: 'lit', fire: index % 2 === 0 ? 'lit' : false }, { name: `torch-p${index}`, fixed: true, fire: index % 3 === 0 },
@@ -62,6 +63,11 @@ const source = JSON.stringify({ title: 'Town', about: 'A small town.', clock: '2
     ...(index === 2 ? {} : { crowd: `crowd-p${index}-0` }) })),
   // Everyone wears a coat that is not open, with a thing in it that nobody else may be sent and some money, and
   // carries an open tray with food and with twigs to burn.
+  vehicles: [{ id: 'v0', name: 'Vehicle 0', about: 'A blue car.', at: 'p0', faster: 5, seats: 2, drivers: Array.from({ length: PEOPLE }, (_, index) => `c${index}`).filter((_, index) => index % 3 !== 2), reach: ['p0', 'p1', 'p2'] },
+    { id: 'v1', name: 'Vehicle 1', about: 'An open boat.', at: 'p1', faster: 3, seats: 1, open: true, reach: ['p0', 'p1', 'p2'] },
+    { id: 'v2', name: 'Vehicle 2', about: 'A town bus.', at: 'p0', faster: 30, seats: 10, route: ['p0', 'p1', 'p2'], leaves: Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`), stands: 580, fare: { name: 'coin', n: 1 } },
+    // A van that may be driven anywhere, by one person, who never gets out of it and keeps the round the stand-in gives.
+    { id: 'v3', name: 'Vehicle 3', about: 'A small van.', at: 'p4', faster: 3, seats: 3, drivers: ['c10'] }],
   characters: Array.from({ length: PEOPLE }, (_, index) => ({ id: `c${index}`, name: `Person ${index}`, place: `p${index % PLACES}`, sheet: `Sheet ${index}.`,
     facts: `facts-c${index}-0`, looks: `looks-c${index}-0`, pose: `pose-c${index}-0`, clock: index % 5 === 0,
     carries: [{ name: `coat-c${index}`, holds: [{ name: `secret-c${index}` }, { name: 'coin', n: 10, money: true }] }, { name: `hat-c${index}`, facts: `lore-c${index}-hat` },
@@ -75,6 +81,16 @@ const world = readWorld(JSON.parse(source), JSON.parse(ENVIRONMENT));
 
 // The laws of a live world, each one sentence. A run that breaks one fails with that sentence and the record's number.
 export const LAWS = {
+  timetable: 'Every bus crossing and arrival is at the standing stop given by its timetable.',
+  meeting: 'A bus arrival is recorded exactly when someone awake is inside or at its stop, once, and no other bus instant is recorded.',
+  fare: 'Each boarding takes exactly the fare from its carrier alone, nobody boards without it, and a refusal takes nothing.',
+  bus: 'Nobody drives a bus, and a stretch with everyone asleep or away from its stops has no bus record.',
+  seats: 'A vehicle holds no more people than its seats.',
+  crossing: 'Nobody gets into or out of a vehicle that is driving.',
+  vehicle: 'A vehicle is standing at one place of the world file that is not a vehicle or driving, never both and never neither.',
+  drive: 'A drive takes the walk time divided by faster, and at least thirty seconds.',
+  riders: 'Everyone inside at departure stays inside until arrival.',
+  way: 'Listed walks keep their times, and every walk takes its time.',
   time: 'Time never goes back.',
   order: 'Nobody takes a turn at an instant before everyone who arrives or wakes at that instant has done so.',
   place: 'Nobody perceives what happened in another place, except the one a call was made to and those next door to a deed, who are told only what the world says is heard there.',
@@ -91,9 +107,9 @@ export const LAWS = {
   waking: 'A sleeper wakes only when its sleep ends or a deed\'s result wakes it, and a deed wakes nobody outside its place and the places next door to it.',
   spent: 'Nobody acts after being awake for the world\'s limit: at that turn it falls asleep instead.',
   body: 'How a person is placed changes only by the world\'s answer to a deed done in the place where it is; a pose is also dropped when its owner leaves or falls asleep.',
-  kept: 'A thing is where the postings of events put it and nowhere else, and the world is told of exactly those of its place and of the people there: a record has one holder, lies no deeper than four under a person or a place, a person carries thirty records at most and a place holds sixty, and for every name what there is, what was eaten or burned and what was taken from a supply add up to what the world file gave; the sum of money never changes.',
+  kept: 'A thing is where the postings of events put it and nowhere else, and the world is told of exactly those of its place and of the people there: a record has one holder, lies no deeper than four under a person or a place, a person carries thirty records at most and a place holds sixty, and for every name what there is, what was eaten or burned and what was taken from a supply add up to what the world file gave; the sum of money and fares paid never changes.',
   burning: 'Nothing burns without a fire in the place or on someone there, before the answer changes any states.',
-  moved: 'An answer of the world moves only what is in its place or on the people there, to them, into that place or, for a deed, out of the world by being eaten or burned; an answer that the rules refuse changes nothing, and so does one whose moves are all to where their things already are, which is refused.',
+  moved: 'An answer of the world moves only what is in its place or on the people there, to them, into that place or, for a deed, out of the world by being eaten or burned, and a boarding takes only its fare; an answer that the rules refuse changes nothing, and so does one whose moves are all to where their things already are, which is refused.',
   unseen: 'No resident is sent a label, what lies inside a thing that another person carries and that is not open, what is hidden in a place before it is found, the facts of the people of a place whom nobody plays, or the looks or pose of a person in another place.',
   reply: 'Someone of a place whom nobody plays speaks only in answer to a speech addressed to it in its place, once and right after that speech.',
   found: 'A hidden thing is found only where it lies, by a search of its finder that has lasted its minutes or by a deed the world says went straight to it, and then it is hidden for nobody.',
@@ -133,14 +149,16 @@ const askedOf = (request: Request, record: number, who: string, turn: boolean): 
   const content = request.messages[0].content, body = `${request.system}${content}`;
   return { record, who, turn, marks: body.match(MARK) ?? [], labelled: /\bt\d+\b/.test(content), records: (content.replace(/\n[^\n]* Person \d+ did \([^\n]*/g, '').match(/\bt\d+ [^,;[\]\n]*/g) ?? []).map(found => found.replace(/\..*$/, '').trim()), sky: body.match(SKY) ?? [], now: content.slice(content.lastIndexOf('\nNow ') + 1).match(SKY) ?? [],
     clocks: body.match(CLOCK) ?? [], feels: body.match(FEELS) ?? [], lore: body.match(LORE) ?? [], facts: content.slice(0, content.indexOf('\n')).match(LORE) ?? [],
-    doors: [...content.matchAll(/\n- Place \d+ \((p\d+)\): ([^\n]*)/g)].map(found => `${found[1]} ${found[2]}`), sounds: body.split('\n').filter(line => /\bbeyond-|woke you/.test(line)),
+    doors: [...content.matchAll(/\n- (?:Place|Vehicle) \d+ \(([pv]\d+)\): ([^\n]*)/g)].map(found => `${found[1]} ${found[2]}`), sounds: body.split('\n').filter(line => /\bbeyond-|woke you/.test(line)),
     earlier: (/\nWhat came of earlier deeds here:\n((?:[^\n]* Person \d+ did \([^\n]*\n)*)/.exec(content)?.[1] ?? '').split('\n').filter(Boolean) };
 };
 const MARK = /\b(?:looks|pose|facts|crowd|hidden|inside|secret)-[cpf]\d+(?:-\d+)?/g;
 function standIn(record: () => number) {
   const seen: { largest: number; record: number; again: number; full: number; deep: number; same: number; turns: Asked[] | null; feels: Map<number, Feeling[]>;
-    said: Map<number, { beyond: string | null; wakes: string[] }> } = { largest: 0, record: 0, again: 0, full: 0, deep: 0, same: 0, turns: [], feels: new Map(), said: new Map() };
+    said: Map<number, { beyond: string | null; wakes: string[] }>; called: number[]; opening: Map<string, string>; fixed: number } =
+    { largest: 0, record: 0, again: 0, full: 0, deep: 0, same: 0, turns: [], feels: new Map(), said: new Map(), called: [], opening: new Map(), fixed: 0 };
   const respond = async (request: Request) => {
+    seen.called.push(record());
     const body = `${request.system}${request.messages.map(message => message.content).join('')}`;
     if (body.length > seen.largest) Object.assign(seen, { largest: body.length, record: record() });
     let seed = 2166136261;
@@ -151,10 +169,17 @@ function standIn(record: () => number) {
     const roll = random();
     let answer: unknown;
     const asks = (request.schema as { properties: object }).properties;
+    if (seen.turns && ('action' in asks || 'memory' in asks)) {
+      const who = asker(request), before = seen.opening.get(who);
+      if (before !== undefined) { assert.equal(request.system, before); seen.fixed += 1; }
+      else seen.opening.set(who, request.system!);
+    }
+    const doors = [...DOORS, ...[...body.matchAll(/- Place (\d+) \(p\d+\): [^\n]* Next door: Place (\d+)\./g)].map(match => [`p${match[1]}`, `p${match[2]}`])];
+    const neighbours = (spot: string) => doors.flatMap(([one, other]) => one === spot ? [other] : other === spot ? [one] : []);
     if ('result' in asks || 'reply' in asks) {
       // The world: sometimes no answer, sometimes nothing to notice, and it wakes some of the sleepers and names others.
       const sleepers = [...body.matchAll(/\((c\d+)\), asleep/g)].map(match => match[1]);
-      const here = [...body.matchAll(/\n- Person \d+ \((c\d+)\), a/g)].map(match => match[1]), spot = /^The place: Place \d+ \((p\d+)\)/.exec(request.messages[0].content)![1];
+      const here = [...body.matchAll(/\n- Person \d+ \((c\d+)\), a/g)].map(match => match[1]), spot = /^The place: (?:Place|Vehicle) \d+ \(([pv]\d+)\)/.exec(request.messages[0].content)![1];
       seen.turns?.push({ ...askedOf(request, record(), spot, true), reply: 'reply' in asks });
       const content = request.messages[0].content, labels = [...content.matchAll(/\nHidden here \((t\d+)\)/g)].map(match => match[1]);
       if (content.includes('was not taken')) seen.again += 1;
@@ -187,10 +212,11 @@ function standIn(record: () => number) {
           const what = pick([...free, ...fixed, 't99999']);
           return { what, n: upTo(3) - 1, to: pick([...tos, what, `p${upTo(PLACES) - 1}`, `c${upTo(PEOPLE) - 1}`]) };
         }
-        const what = pick(careful), has = / ×(\d+)/.exec(told(what));
+        const stocks = careful.filter(label => told(label).includes(', stock'));
+        const what = pick(stocks.length && random() < 0.3 ? stocks : careful), has = / ×(\d+)/.exec(told(what));
         const sink = SINKS.find(to => tos.includes(to) && told(what).includes(to === 'eaten' ? ', food' : ', burns') && random() < 0.5);
         return { what, n: told(what).includes(', stock') ? upTo(5) : has ? random() < 0.3 ? Number(has[1]) : upTo(Number(has[1])) : 1,
-          to: sink ?? pick(hard.length && random() < 0.15 ? hard : tos.filter(to => to !== what && !unfound.has(to) && !SINKS.includes(to))) };
+          to: sink ?? (has && random() < 0.4 ? spot : pick(hard.length && random() < 0.3 ? hard : tos.filter(to => to !== what && !unfound.has(to) && !SINKS.includes(to)))) };
       });
       const stated = lists.sets?.items.properties;
       const sets = Array.from({ length: stated?.what.enum ? upTo(3) - 1 : 0 }, () => {
@@ -206,21 +232,23 @@ function standIn(record: () => number) {
       // may be elsewhere, and now and then an entry has no words.
       const awake = here.filter(id => !sleepers.includes(id));
       const feels = 'reply' in asks ? [] : Array.from({ length: upTo(4) - 1 }, () => {
-        const of = random() < 0.6 ? pick(awake) : sleepers.length && random() < 0.6 ? pick(sleepers) : `c${upTo(PEOPLE) - 1}`;
+        const of = random() < 0.4 ? pick(awake) : sleepers.length && random() < 0.85 ? pick(sleepers) : `c${upTo(PEOPLE) - 1}`;
         return { of, text: random() < 0.2 ? '' : `feels-${of}-${upTo(99_999)}` };
       });
       if (seen.turns) seen.feels.set(record(), feels);
-      // About half of the deeds are heard next door, whether or not the place has such a neighbour, now and then with
-      // no words. The sleepers it wakes are of the place and of the places next door alike, since the request names
+      // About half of the deeds are heard next door, and most of those of the one place that has no such neighbour,
+      // where the answer is to be dropped, now and then with no words. The sleepers it wakes are of the place and of the places next door alike, since the request names
       // both, and it wakes them whether or not anything was heard; the one more it names may sleep far away.
-      const beyond = random() < 0.5 ? null : random() < 0.1 ? ' ' : `beyond-${spot}-${upTo(99_999)}`;
-      const wakes = [...sleepers.filter(() => random() < 0.5), `c${upTo(PEOPLE) - 1}`];
+      // It wakes some of them, so that some sleep three hours through and wake with a memory written anew.
+      // At a place with no neighbour a sound is tried in 98 answers of 100, so that its dropping is covered.
+      const beyond = random() < (neighbours(spot).length ? 0.5 : 0.02) ? null : random() < 0.1 ? ' ' : `beyond-${spot}-${upTo(99_999)}`;
+      const wakes = [...sleepers.filter(() => random() < 0.15), `c${upTo(PEOPLE) - 1}`];
       if (seen.turns && !('reply' in asks)) seen.said.set(record(), { beyond, wakes });
       // For a figure it gives words, too many now and then, or none.
       answer = roll < 0.1 ? 'no answer' : 'reply' in asks ? { reply: roll < 0.35 ? null : words(upTo(90)), moves }
-        // It calls about half of the deeds a search, and now and then says that a deed went straight to a hidden thing
-        // of the place or to one that is not there.
-        : { search: random() < 0.5, finds: random() < 0.15 ? [labels[upTo(labels.length + 1) - 1] ?? 't0'] : [], moves, sets, poses,
+        // Some deeds are searches, and most try a hidden thing directly, so a direct finding is covered before a search
+        // has found it; now and then the thing is not there.
+        : { search: random() < 0.1, finds: random() < 0.8 ? [labels[upTo(labels.length + 1) - 1] ?? 't0'] : [], moves, sets, poses,
           wakes, feels, beyond, result: roll < 0.4 ? null : words(upTo(90)) };
     } else if ('memory' in (request.schema as { properties: object }).properties) {
       seen.turns?.push(askedOf(request, record(), asker(request), false));
@@ -230,20 +258,60 @@ function standIn(record: () => number) {
       // A gesture and words for a deed come with any action, too long now and then: only a `say` keeps the one and a `do` the other.
       const none = { text: null, to: null, place: null, seconds: null, until: null, gesture: roll * 100 % 1 < 0.4 ? words(upTo(20)) : null, says: roll * 10_000 % 1 < 0.4 ? words(upTo(30)) : null,
         note: roll * 1000 % 1 < 0.3 ? words(upTo(90)) : null };
+      const places = (asks as { place: { enum: (string | null)[] } }).place.enum.filter(id => id !== null);
       // A time of day at random: for a wait it is mostly out of reach, for a sleep about half the time, and such a span
       // is cut to the longest one; now and then a wait names no time of day at all, which is refused.
-      const figures = [...request.messages[0].content.matchAll(/\n- Figure \d+ \((f\d+)\)\./g)].map(match => match[1]);
+      // The figures of the place it is in: those listed since it last arrived.
+      const lines = request.messages[0].content, figures = [...lines.slice(lines.lastIndexOf(' You arrive in ') + 1).matchAll(/\n- Figure \d+ \((f\d+)\)\./g)].map(match => match[1]);
       const until = `${String(upTo(24) - 1).padStart(2, '0')}:${String(upTo(60) - 1).padStart(2, '0')}`;
-      answer = roll < 0.02 ? 'not an action' : roll < 0.03 ? { ...none, action: 'fly' } : roll < 0.04 ? { ...none, action: 'say' }
-        : roll < 0.05 ? { ...none, action: 'call', to: 'all', text: 'anyone' } : roll < 0.06 ? { ...none, action: 'go', place: 'gates' }
+      // Someone in a place with no neighbour walks off less often and does a deed instead.
+      const apart = !neighbours(/ You are in [^\n(]+ \(([pv]\d+)\)[.,]/g.exec(lines)![1]).length;
+      const spot = / You are in [^\n(]+ \(([pv]\d+)\)[.,]/g.exec(lines)![1];
+      const local = lines.slice(lines.lastIndexOf('\nNow ') + 1);
+      const available = [...new Set([...local.matchAll(/^Here stands: Vehicle \d+ \((v\d+)\),/gm)].filter(match => local.lastIndexOf(`Vehicle ${match[1].slice(1)} has driven off.`) < Math.max(match.index, local.lastIndexOf(`Vehicle ${match[1].slice(1)} has pulled up.`))).map(match => match[1]))];
+      const filled = available.filter(id => [...local.matchAll(new RegExp(`^Here stands: Vehicle \\d+ \\(${id}\\), (\\d+) of`, 'gm'))].at(-1)?.[1] === '0');
+      const destinations = places;
+      const inside = /You are in Vehicle \d+ \((v\d+)\), standing at Place \d+ \((p\d+)\)/.exec(lines.split('\n').findLast(line => line.startsWith('Now '))!);
+      const allowed = inside && request.system!.split('\n').find(line => line.startsWith(`- Vehicle ${inside[1].slice(1)} (${inside[1]}):`))!;
+      const mayDrive = allowed && (allowed.includes('Anyone may drive it.') || (allowed.match(/ ([^.]+) may drive it\./)?.[1].split(', ') ?? []).includes(`Person ${asker(request).slice(1)}`));
+      // In a bus someone now and then waits to a second past its leaving and then waits on, so that a wait begins while it
+      // is on the way: the file part stops at such a wait.
+      const last = lines.split('\n').findLast(line => line.startsWith('Now '))!, leaving = spot === 'v2' && /, leaving for Place \d+ in (\d+) min (\d+) s/.exec(last), riding = spot === 'v2' && last.includes(', on the way to ');
+      const target = () => {
+        if (inside) return random() < (mayDrive ? 0.1 : 0.8) ? inside[2] : `p${upTo(3) - 1}`;
+        const nearby = filled.length && random() < 0.3 ? filled : available.includes('v2') && random() < 0.5 ? ['v2'] : available;
+        return nearby.length && random() < 0.9 ? nearby[upTo(nearby.length) - 1] : random() < 0.6 ? `p${upTo(3) - 1}` : destinations[upTo(destinations.length) - 1];
+      };
+      // Drivers keep moving while the vehicle stands.
+      answer = inside && mayDrive && roll * 10_000_000 % 1 < 0.35 ? { ...none, action: 'go', place: target() }
+        : leaving && roll * 100_000_000 % 1 < 0.25 ? { ...none, action: 'wait', seconds: Number(leaving[1]) * 60 + Number(leaving[2]) + 1 }
+        : riding && roll * 100_000_000 % 1 < 0.5 ? { ...none, action: 'wait', seconds: 30 }
+        : roll < 0.02 ? 'not an action' : roll < 0.04 ? { ...none, action: 'fly' } : roll < 0.05 ? { ...none, action: 'say' }
+        : roll < 0.06 ? { ...none, action: 'call', to: 'all', text: 'anyone' } : roll < 0.07 ? { ...none, action: 'go', place: 'gates' }
+        : roll < 0.1 ? { ...none, action: 'go', place: spot }
+        : roll < 0.14 ? { ...none, action: 'go', place: 'p4' }
+        : roll < 0.16 ? { ...none, action: 'go', place: `v${upTo(3) - 1}` }
+        : roll < 0.2 ? { ...none, action: 'go', place: target() }
         // A speech is often addressed: to the figure of the place, to one of another place, to a character or to nobody of the kind.
-        : roll < 0.4 ? { ...none, action: 'say', text: roll < 0.08 ? 'y'.repeat(3000) : words(upTo(90)), to: [figures[0] ?? 'f1', figures[0] ?? null, `f${upTo(PLACES) - 1}`, 'c1', null][upTo(5) - 1] }
+        : roll < 0.4 ? { ...none, action: 'say', text: roll < 0.21 ? 'y'.repeat(3000) : words(upTo(90)), to: [figures[0] ?? 'f1', figures[0] ?? null, `f${upTo(PLACES) - 1}`, 'c1', null][upTo(5) - 1] }
           : roll < 0.55 ? { ...none, action: 'call', to: `c${upTo(PEOPLE) - 1}`, text: words(upTo(40)) }
-            : roll < 0.7 ? { ...none, action: 'go', place: `p${upTo(PLACES) - 1}` }
+            : roll < (inside ? 0.78 : apart ? 0.6 : 0.75) ? { ...none, action: 'go', place: target() }
               : roll < 0.8 ? { ...none, action: 'do', text: words(upTo(120)), seconds: upTo(600) }
                 : roll < 0.86 ? { ...none, action: 'wait', seconds: upTo(300) }
-                  : roll < 0.9 ? { ...none, action: 'wait', until: roll < 0.87 ? 'noon' : until, seconds: 5 }
+                  : roll < 0.9 ? { ...none, action: 'wait', until: roll < 0.88 ? 'noon' : until, seconds: 5 }
                     : roll < 0.95 ? { ...none, action: 'sleep', until } : { ...none, action: 'sleep', seconds: upTo(roll < 0.96 ? 43_200 : 1800) };
+      // The van's driver gets in at once and keeps a round by its own clock, so the same request gives the same answer.
+      // The van goes between the remote places, sleeping until the next hour between rounds.
+      if (asker(request) === 'c10' && (spot === 'v3' || available.includes('v3'))) {
+        const now = lines.split('\n').findLast(line => line.startsWith('Now '))!, time = /^Now (?:day \d+ )?(\d\d):(\d\d):(\d\d)/.exec(now)!, left = /(\d+) min (\d+) s of the drive are left/.exec(now);
+        const second = Number(time[1]) * 3600 + Number(time[2]) * 60 + Number(time[3]);
+        answer = spot !== 'v3' ? { ...none, action: 'go', place: 'v3' }
+          : left ? { ...none, action: 'wait', seconds: Math.max(1, Number(left[1]) * 60 + Number(left[2])) }
+          : inside![2] === 'p4' ? { ...none, action: 'go', place: 'p5' }
+          : inside![2] === 'p5' ? { ...none, action: 'go', place: 'p3' }
+          : second % 3600 >= 30 ? { ...none, action: 'sleep', seconds: 3600 - second % 3600 }
+          : { ...none, action: 'go', place: 'p4' };
+      }
     }
     // Now and then the model writes on to its limit, whatever it was asked: the connection then fails with this code.
     // The same request is cut again when it is asked again, so the runs here do not end at three in a row.
@@ -255,7 +323,10 @@ function standIn(record: () => number) {
   return { seen, respond };
 }
 
-test('thousands of steps of any answers leave a journal in which every law of the world holds', async () => {
+test('thousands of steps with vehicles leave a journal in which every law of the world holds', async (t) => {
+  let current = { ...world, places: begin(world).places };
+  const initial = current.places;
+  const neighbours = (spot: string) => current.places.find(place => place.id === spot)?.nextDoor ?? [];
   const journal = memoryStore();
   const { seen, respond } = standIn(() => journal.all.length);
   const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity });
@@ -264,12 +335,19 @@ test('thousands of steps of any answers leave a journal in which every law of th
   seen.turns = null;
 
   const place = new Map(world.characters.map(character => [character.id, character.place]));
+  const arrivalAt = new Map<string, number>();
   const away = new Map<string, string>(), asleep = new Set<string>(), held = new Map<string, number>(), folded = new Map<string, number>();
   const count = { say: 0, call: 0, gestured: 0, spoken: 0, waited: 0, go: 0, do: 0, sleep: 0, wake: 0, until: 0, capped: 0, cut: 0, memory: 0, memoryCut: 0, memoryLost: 0,
     json: 0, action: 0, text: 0, to: 0, here: 0, place: 0, time: 0, long: 0, declined: 0, result: 0, nothing: 0, woken: 0, spent: 0, posed: 0, unposed: 0, weather: 0, roofless: 0, clocked: 0, clockless: 0, found: 0, straight: 0, reply: 0, silent: 0,
     moved: 0, parted: 0, joined: 0, taken: 0, eaten: 0, burned: 0, set: 0, handed: 0, carried: 0, lent: 0, told: 0, felt: 0, feltAsleep: 0, feltAway: 0, feltEmpty: 0,
     lore: 0, loreMoved: 0, loreParted: 0, loreHidden: 0, beyond: 0, wokenBeyond: 0, wokenMute: 0, unwoken: 0, wokenFar: 0, hush: 0,
-    keptWords: 0, keptBoth: 0, keptLists: 0, keptNone: 0, met: 0 };
+    keptWords: 0, keptBoth: 0, keptLists: 0, keptNone: 0, met: 0, waitedRiding: 0, tied: 0 };
+  const refusals = { vehicle: 0, full: 0, driving: 0, driver: 0, reach: 0 };
+  // What only a vehicle that goes anywhere does, by thousand calls: it arrives beyond the first three places
+  // and at the place with no neighbour, and leaves it.
+  const vehicles = { far: [0, 0, 0, 0, 0, 0], isolatedArrival: [0, 0, 0, 0, 0, 0], isolatedDeparture: [0, 0, 0, 0, 0, 0] };
+  let calls = 0;
+  const vehicleCount = (kind: keyof typeof vehicles) => vehicles[kind][Math.min(5, Math.max(0, Math.floor((calls - 1) / 1000)))] += 1;
   const sleepEnds = new Map<string, number>();
   // The instant of the latest turn, an action or a falling asleep at the limit, and the latest arrival or waking.
   let turned = -1, came = { at: -1, who: '' };
@@ -295,7 +373,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
       enter(thing.holds ?? [], thing.label);
     }
   };
-  for (const item of world.places) enter(item.things, item.id);
+  for (const item of initial) enter(item.things, item.id);
   for (const character of world.characters) enter(character.carries, character.id);
   const sums = () => { const now = new Map<string, number>(); for (const { name, n, stock } of ledger.values()) if (!stock) more(now, name, n ?? 1); return now; };
   const money = () => [...ledger.values()].reduce((sum, thing) => sum + (thing.money ? thing.n! : 0), 0), purse = money();
@@ -304,30 +382,93 @@ test('thousands of steps of any answers leave a journal in which every law of th
   const depthOf = (key: string): number => ledger.has(key) ? 1 + depthOf(ledger.get(key)!.holder) : 0;
   const labelOf = new Map([...ledger].map(([label, thing]) => [thing.name, label])), first = new Set(ledger.keys());
   // What is still hidden in each place, the names of what was found, and the seconds each one has searched each place.
-  const hidden = new Map(world.places.map(item => [item.id, item.things.filter(thing => thing.hidden)])), searched = new Map<string, number>();
+  const hidden = new Map(initial.map(item => [item.id, item.things.filter(thing => thing.hidden)])), searched = new Map<string, number>();
   const known = new Set<string>();
   // Which state of the weather holds, and the words of it that each one has perceived so far.
-  const open = new Set(world.places.filter(item => item.open).map(item => item.id));
+  const open = new Set(initial.filter(item => item.open).map(item => item.id));
   const felt = new Map(world.characters.map(character => [character.id, new Set<string>()]));
   const reaching = (state: number, spot: string) => open.has(spot) ? `sky-${state}-0` : state && !SKIES[state - 1].indoors ? null : `roof-${state}-0`;
   // The times of the clock each one could read: those of the records that came while a clock was at hand.
   const timed = new Map(world.characters.map(character => [character.id, new Set<string>()]));
-  const clocks = new Set(world.places.filter(item => item.clock).map(item => item.id));
+  const clocks = new Set(initial.filter(item => item.clock).map(item => item.id));
   const reads = ({ id, clock }: { id: string; clock: boolean }) => clock || (!away.has(id) && clocks.has(place.get(id)!));
   const read = (...times: string[]) => { for (const character of world.characters) if (reads(character)) for (const time of times) timed.get(character.id)!.add(time); };
   // The words of what bodies feel that a result has given so far, and those of them that a request has shown since.
   const bodily = new Set<string>(), met = new Set<string>();
   // What each place keeps of the deeds done in it, written here from the events alone.
-  const kept = new Map(world.places.map(item => [item.id, [] as string[]]));
+  const kept = new Map(initial.map(item => [item.id, [] as string[]]));
   // Who may be told each word of what was heard next door; who was woken by whom in the deed's own place, and who
   // from which place next door with which word or with none; and from when each one who heard such a word is free.
   const sounded = new Map<string, Set<string>>(), shaken = new Set<string>(), knocked = new Set<string>(), roused = new Map<string, number>();
   const WHEN = String.raw`(?:\[[^\]\n]+\]|(?:day \d+ )?\d\d:\d\d:\d\d)`;
-  const HEARD = new RegExp(`^${WHEN} From Place (\\d+), next door: (beyond-p\\d+-\\d+)$`), WOKEN = new RegExp(`^${WHEN} Something from Place (\\d+), next door, woke you(?:\\.|: (beyond-p\\d+-\\d+))$`),
+  const HEARD = new RegExp(`^${WHEN} From ((?:Place|Vehicle) \\d+), next door: (beyond-[pv]\\d+-\\d+)$`), WOKEN = new RegExp(`^${WHEN} Something from ((?:Place|Vehicle) \\d+), next door, woke you(?:\\.|: (beyond-[pv]\\d+-\\d+))$`),
     SHAKEN = new RegExp(`^${WHEN} Person (\\d+) woke you by this: [^\\n]*$`);
-  let at = 0, asked = 0, sky = 0;
+  let payments = 0, paid = 0, busRecords = 0, boardings = 0, quiet = 0, busAfter = 0;
+  let busPassed: string[] = [];
+  let at = 0, asked = 0, sky = 0, drives = 0, crossings = 0, parks = 0;
+  const riding = new Map(world.vehicles!.filter(item => item.vehicle!.route).map(item => [item.id, world.characters.filter(person => person.place === item.id).map(person => person.id)])), passage = new Map<string, number>();
+  const doorsOf = () => {
+    current = { ...current, places: current.places.map(place => ({ ...place, nextDoor: current.places.filter(other => other !== place && (place.vehicle
+      ? place.vehicle.at === other.id : other.vehicle ? other.vehicle.at === place.id : place.nextDoor.includes(other.id))).map(other => other.id) })) };
+  };
+  // This count of the timetable uses the listed distances and daily times, not the engine's bus position.
+  const rounds = world.vehicles!.filter(item => item.vehicle!.route).map(item => {
+    const bus = item.vehicle!, times = bus.leaves!.map(time => Number(time.slice(0, 2)) * 3600 + Number(time.slice(3)) * 60);
+    let elapsed = 0;
+    const stops = bus.route!.map((from, index) => {
+      const to = bus.route![(index + 1) % bus.route!.length], leaves = elapsed;
+      elapsed += Math.max(30, Math.ceil(travelSeconds(world, from, to) / bus.faster));
+      const stop = { from, to, leaves, at: elapsed };
+      if (index < bus.route!.length - 1) elapsed += bus.stands!;
+      return stop;
+    });
+    return { item, times, stops };
+  });
   for (const { seq, record, event } of journal.all) {
-    law('time', event.at >= at, seq);
+    while (calls < seen.called.length && seen.called[calls] <= seq) calls += 1;
+    // A wait chosen in a bus on the way, not the one a refused answer is counted as: the file part below stops at a wait there.
+    if (event.kind === 'wait' && record.kind === 'act' && typeof record.action !== 'string' && rounds.some(({ item }) => item.id === event.place && busAt(world, item.vehicle!, event.at).heading)) count.waitedRiding += 1;
+    let expected: { who: string; at: number; stop: string; from: string } | null = null;
+    for (const { item, times, stops } of rounds) {
+      law('riders', isDeepStrictEqual(riding.get(item.id), [...place].filter(([, spot]) => spot === item.id).map(([id]) => id)), seq);
+      const lower = busAfter + (busPassed.includes(item.id) ? 1 : 0);
+      for (const stop of stops) for (const time of times) {
+        const offset = time + stop.at - START, arrival = offset + Math.ceil((lower - offset) / 86_400) * 86_400;
+        // An arrival at the instant of a change of the weather comes after it: it is owed by the next record.
+        if (arrival > event.at || (event.kind === 'weather' && arrival === event.at)) continue;
+        if (![...place].some(([id, spot]) => !asleep.has(id) && !away.has(id) && (spot === item.id || spot === stop.to))) { quiet += 1; continue; }
+        if (!expected || arrival < expected.at) expected = { who: item.id, at: arrival, stop: stop.to, from: stop.from };
+      }
+      const second = START + event.at, day = Math.floor(second / 86_400) * 86_400;
+      const began = day + (times.findLast(time => time <= second - day) ?? times.at(-1)! - 86_400) - START;
+      const segment = stops.find((stop, index) => event.at < began + stop.at + (index < stops.length - 1 ? item.vehicle!.stands! : 0));
+      const position = segment && event.at < began + segment.at ? { at: null, heading: { from: segment.from, to: segment.to, at: began + segment.at } }
+        : { at: segment?.to ?? item.vehicle!.route![0], heading: null };
+      current = { ...current, places: current.places.map(spot => spot.id === item.id ? { ...spot, vehicle: { ...spot.vehicle!, ...position } } : spot) };
+    }
+    law('meeting', !expected || event.kind === 'park' && event.at === expected.at && (event.who === expected.who && event.place === expected.stop && event.from === expected.from || !rounds.some(({ item }) => item.id === event.who)), seq);
+    doorsOf();
+    const busRecord = event.kind === 'park' && rounds.some(({ item }) => item.id === event.who);
+    if (busRecord) {
+      law('meeting', expected !== null && event.heard.length > 0 && isDeepStrictEqual(event.heard, [...place].filter(([id, spot]) => !asleep.has(id) && !away.has(id) && (spot === event.who || spot === event.place)).map(([id]) => id)), seq);
+      law('timetable', current.places.find(spot => spot.id === event.who)!.vehicle!.at === event.place, seq);
+      busRecords += 1;
+      // An arrival at the instant of a change of the weather, which the law of the weather puts before it.
+      if (sky && SKIES[sky - 1].at === event.at) count.tied += 1;
+    }
+    if (event.kind === 'drive') law('bus', !rounds.some(({ item }) => item.id === event.place), seq);
+    // A change of the weather comes before the vehicles due at its instant, so it closes that instant to no bus.
+    busPassed = event.kind === 'park' || event.kind === 'weather' ? [...(busAfter === event.at ? busPassed : []), ...(busRecord ? [event.who] : [])] : rounds.map(({ item }) => item.id);
+    busAfter = event.at;
+    const boarding = event.transfer && current.places.find(item => item.id === event.to)?.vehicle?.route;
+    if (boarding) {
+      const bus = current.places.find(item => item.id === event.to)!.vehicle!;
+      const amount = [...ledger].filter(([label, thing]) => thing.money && thing.name === bus.fare?.name && rootOf(label) === event.who).reduce((sum, [, thing]) => sum + thing.n!, 0);
+      law('fare', !bus.fare ? !(event.moved ?? []).length : amount >= bus.fare.n && event.moved!.reduce((sum, posting) => sum + posting.n!, 0) === bus.fare.n
+        && event.moved!.every(posting => rootOf(posting.what) === event.who && posting.sink === 'fare' && posting.to === 'fare' && posting.as === null && posting.name === bus.fare!.name), seq);
+      boardings += 1;
+    } else law('fare', !(event.moved ?? []).some(posting => posting.sink === 'fare'), seq);
+    law('time' , event.at >= at, seq);
     // A sleeper a deed wakes is told the moment the deed ends, and an answer is heard from the moment its speech ends.
     const ends = record.kind === 'result' || record.kind === 'reply' ? [clockAt(world, journal.all[seq - 1].event.at + journal.all[seq - 1].event.seconds)] : [];
     read(event.clock, ...ends);
@@ -335,7 +476,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
     // The world is sent everything of the deed's place and of those in it. A resident is sent its own looks and, for
     // a turn, its pose, holdings and what it carries, with what is seen of those in its place.
     for (; asked < turns.length && turns[asked].record === seq; asked += 1) {
-      const { who, turn, marks } = turns[asked], spot = who.startsWith('p') ? who : place.get(who);
+      const { who, turn, marks } = turns[asked], spot = /^[pv]\d+$/.test(who) ? who : place.get(who);
       // A word of what a body feels is in a request of its owner alone, and only after the result that gave it.
       for (const word of turns[asked].feels) {
         law('felt', who !== spot && word.startsWith(`feels-${who}-`) && bodily.has(word), seq);
@@ -346,8 +487,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
       // sleeper woken from next door reads the place and the sound or the place alone, and never who did what.
       for (const line of turns[asked].sounds) {
         const heard = HEARD.exec(line), woken = WOKEN.exec(line), shook = !/\bbeyond-/.test(line) && SHAKEN.exec(line);
-        law('door', who !== spot && (heard ? heard[2].startsWith(`beyond-p${heard[1]}-`) && sounded.get(heard[2])!.has(who)
-          : woken ? knocked.has(`${who} p${woken[1]} ${woken[2] ?? ''}`) : !!shook && shaken.has(`${who} c${shook[1]}`)), seq);
+        law('door', who !== spot && (heard ? current.places.some(item => item.name === heard[1] && heard[2].startsWith(`beyond-${item.id}-`)) && sounded.get(heard[2])!.has(who)
+          : woken ? current.places.some(item => item.name === woken[1] && knocked.has(`${who} ${item.id} ${woken[2] ?? ''}`)) : !!shook && shaken.has(`${who} c${shook[1]}`)), seq);
         if (met.has(`${who} ${line}`)) continue;
         met.add(`${who} ${line}`);
         if (!shook) count[heard ? 'beyond' : woken![2] ? 'wokenBeyond' : 'wokenMute'] += 1;
@@ -360,11 +501,11 @@ test('thousands of steps of any answers leave a journal in which every law of th
       const near = turn ? world.characters.filter(({ id }) => id !== who && !away.has(id) && place.get(id) === spot) : [];
       const seen = (id: string) => [`looks-${id}-0`, poses.get(id)!];
       // The people of the place whom nobody plays: the world is sent their looks and facts, a resident's turn their looks.
-      const local = world.places.find(item => item.id === spot)!;
-      const due = new Set((who === spot ? [`facts-${who}-0`, local.crowd,
+      const local = current.places.find(item => item.id === spot)!;
+      const due = new Set((who === spot ? [local.facts, local.crowd,
         ...local.figures.flatMap(figure => [figure.looks, figure.facts]), ...near.flatMap(({ id }) => [...seen(id), `facts-${id}-0`])]
         : [`looks-${who}-0`, ...(turn ? [...seen(who), local.crowd, ...local.figures.map(figure => figure.looks)] : []),
-          ...near.flatMap(({ id }) => seen(id))]).flatMap(text => text?.match(MARK) ?? []));
+          ...near.flatMap(({ id }) => seen(id))]).flatMap(text => typeof text === 'string' ? text.match(MARK) ?? [] : []));
       // A word that is not due is another's secret or a text of another place, or else a text that is no longer so.
       const shown = new RegExp(`^(?:(looks|pose)-(${[who, ...near.map(({ id }) => id), ...local.figures.map(({ id }) => id)].join('|')})|crowd-${spot})-`);
       const guarded = marks.filter(mark => /^(?:hidden|inside|secret)-/.test(mark)), plain = marks.filter(mark => !guarded.includes(mark));
@@ -392,7 +533,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
           count[!line.includes(' In the lists: ') ? 'keptWords' : line.includes(' Result: ') ? 'keptBoth' : 'keptLists'] += 1;
         }
         // A deed's request says who is in each place next door, awake or asleep, and a figure's says nothing of them.
-        law('door', isDeepStrictEqual(turns[asked].doors, turns[asked].reply ? [] : world.places.filter(item => neighbours(spot).includes(item.id)).map(item => `${item.id} ${
+        law('door', isDeepStrictEqual(turns[asked].doors, turns[asked].reply ? [] : current.places.filter(item => neighbours(spot).includes(item.id)).map(item => `${item.id} ${
           world.characters.filter(({ id }) => !away.has(id) && place.get(id) === item.id).map(({ id, name }) => `${name} (${id}), ${asleep.has(id) ? 'asleep' : 'awake'}`).join('; ') || 'nobody'}.`)), seq);
       } else {
         // A resident is sent no label. A guarded thing is named to it only when it carries the thing, three deep at
@@ -429,7 +570,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
     // A figure answers the speech addressed to it just before, where it lives, and nothing else.
     const addressed = before?.kind === 'say' && before.to !== null;
     law('reply', addressed === (record.kind === 'reply'), seq);
-    if (event.kind === 'say' && event.to !== null) law('reply', world.places.find(item => item.id === event.place)!.figures.some(figure => figure.id === event.to), seq);
+    if (event.kind === 'say' && event.to !== null) law('reply', current.places.find(item => item.id === event.place)!.figures.some(figure => figure.id === event.to), seq);
     if (record.kind === 'reply') {
       law('reply', before.who === record.who && before.at === record.at && before.to === record.figure && event.who === record.figure && event.place === before.place, seq);
       law('limit', record.text === null || sizeOf(record.text) <= 65, seq);
@@ -465,7 +606,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
       // the newest line whatever its size, and nothing of a deed that left neither.
       const doer = world.characters.find(({ id }) => id === record.who)!.name, lines = kept.get(event.place)!;
       // The lists are in it under labels, every posting, with the holder as the answer named it and a request writes it.
-      const holder = (id: string) => { const one = [...world.characters, ...world.places].find(item => item.id === id); return one ? `${one.name} (${id})` : `${id} ${ledger.get(id)!.name}`; };
+      const holder = (id: string) => { const one = [...world.characters, ...current.places].find(item => item.id === id); return one ? `${one.name} (${id})` : `${id} ${ledger.get(id)!.name}`; };
       const lists = [...event.moved!.map(({ what, name, n, to, as }) => `${as ?? what} ${name}${n === null ? '' : ` ×${n}`} ${
         to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went to ${holder(to)}`}.`),
       ...event.set!.map(({ what, name, state }) => `${what} ${name} is now ${state}.`), ...event.found!.map(({ what, name, spot }) => `${what} ${name} was found: ${spot}.`)].join(' ');
@@ -513,21 +654,21 @@ test('thousands of steps of any answers leave a journal in which every law of th
     // holder there or to a sink; then the ledger is as the posting says.
     const here = (key: string) => { const root = rootOf(key); return root === event.place || (place.get(root) === event.place && !away.has(root)); };
     for (const posting of event.moved ?? []) {
-      const thing = ledger.get(posting.what)!, amount = posting.n ?? 1, gone = SINKS.includes(posting.to);
+      const thing = ledger.get(posting.what)!, amount = posting.n ?? 1, gone = SINKS.includes(posting.to) || posting.sink === 'fare';
       law('kept', thing?.holder === posting.from && thing.name === posting.name && thing.stock === posting.stock, seq);
       law('kept', posting.n === null ? thing.n === null && !thing.stock : thing.stock || (posting.n >= 1 && posting.n <= thing.n!), seq);
-      law('moved', here(posting.from) && (gone ? record.kind === 'result' && posting.as === null && !thing.money : here(posting.to)), seq);
+      law('moved', here(posting.from) && (gone ? posting.sink === 'fare' ? !!boarding && posting.as === null && thing.money && rootOf(posting.what) === event.who : record.kind === 'result' && posting.as === null && !thing.money : here(posting.to)), seq);
       if (posting.to === 'burned') law('burning', [...fires].some(([label, thing]) => here(label) && (thing.fire === true || thing.fire === thing.state)), seq);
       if (thing.stock) more(taken, thing.name, amount);
       else if (thing.n !== null && thing.n > amount) thing.n -= amount;
       else ledger.delete(posting.what);
       const twin = posting.as === null ? undefined : ledger.get(posting.as);
-      if (gone) more(sunk, thing.name, amount);
+      if (gone) { more(sunk, thing.name, amount); if (posting.sink === 'fare') { paid += amount; payments += 1; } }
       else if (twin) {
         law('kept', twin.holder === posting.to && twin.name === thing.name && twin.n !== null && twin.facts === thing.facts, seq);
         twin.n! += amount;
       } else ledger.set(posting.as!, { name: thing.name, n: posting.n, holder: posting.to, stock: false, money: thing.money, facts: thing.facts });
-      count[gone ? posting.to as 'eaten' | 'burned' : thing.stock ? 'taken' : twin ? 'joined' : posting.as !== posting.what ? 'parted' : 'moved'] += 1;
+      if (posting.sink !== 'fare') count[gone ? posting.to as 'eaten' | 'burned' : thing.stock ? 'taken' : twin ? 'joined' : posting.as !== posting.what ? 'parted' : 'moved'] += 1;
     }
     for (const entry of event.set ?? []) if (fires.has(entry.what)) fires.get(entry.what)!.state = entry.state;
     if (event.moved?.length) {
@@ -536,18 +677,41 @@ test('thousands of steps of any answers leave a journal in which every law of th
         law('kept', depthOf(label) <= 4, seq);
         more(held, rootOf(label), 1);
       }
-      for (const [root, records] of held) law('kept', records <= (root.startsWith('p') ? 60 : 30), seq);
+      for (const [root, records] of held) law('kept', records <= (current.places.some(place => place.id === root) ? 60 : 30), seq);
       const now = sums();
       for (const [name, n] of given) law('kept', (now.get(name) ?? 0) + (sunk.get(name) ?? 0) - (taken.get(name) ?? 0) === n, seq);
-      law('kept', money() === purse, seq);
+      law('kept', money() + paid === purse, seq);
+    }
+    if (event.kind === 'drive') {
+      const vehicle = current.places.find(item => item.id === event.place)!.vehicle!;
+      // A vehicle that stands at the place with no neighbour is next door to it, and is not once it has driven off.
+      if (event.from === 'p5') law('door', neighbours('p5').includes(event.place), seq);
+      law('drive', record.kind === 'act' && isDeepStrictEqual(record.drive, { vehicle: event.place, from: event.from, to: event.to, at: event.arrival })
+        && vehicle.at === event.from && event.arrival! - event.at === Math.max(30, Math.ceil(travelSeconds(current, event.from!, event.to!) / vehicle.faster)), seq);
+      riding.set(event.place, [...place].filter(([, spot]) => spot === event.place).map(([id]) => id));
+      current = { ...current, places: current.places.map(item => item.id === event.place ? { ...item, vehicle: { ...vehicle, at: null, heading: { from: event.from!, to: event.to!, at: event.arrival! } } } : item) };
+      doorsOf();
+      if (event.from === 'p5' && !neighbours('p5').length) vehicleCount('isolatedDeparture');
+      drives += 1;
+    } else if (event.kind === 'park' && !busRecord) {
+      const vehicle = current.places.find(item => item.id === event.who)!.vehicle!;
+      if (['p3', 'p4', 'p5'].includes(event.place)) vehicleCount('far');
+      if (event.place === 'p5' && !neighbours('p5').length) vehicleCount('isolatedArrival');
+      law('vehicle', event.at === vehicle.heading!.at && event.place === vehicle.heading!.to && event.at > Math.max(turned, came.at), seq);
+      law('riders', isDeepStrictEqual(riding.get(event.who), [...place].filter(([, spot]) => spot === event.who).map(([id]) => id)), seq);
+      current = { ...current, places: current.places.map(item => item.id === event.who ? { ...item, vehicle: { ...vehicle, at: event.place, heading: null } } : item) };
+      doorsOf();
+      if (event.place === 'p5') law('door', neighbours('p5').includes(event.who), seq);
+      parks += 1;
     }
     at = event.at;
     if (record.kind === 'spent') count.spent += 1;
     if (record.kind === 'act' || record.kind === 'spent') law('spent', (debtOf(record.who, record.at) >= limit) === (record.kind === 'spent'), seq);
     if (event.kind === 'sleep' || event.kind === 'wake') debts.set(event.who, { debt: debtOf(event.who, event.at), since: event.at });
-    // Whoever heard something from next door is free then, or when a speech that holds it has ended.
+    // Whoever heard something from next door is free then, or when a speech that holds it has ended; a doze may come before that.
     if ((record.kind === 'act' || record.kind === 'spent' || record.kind === 'memory') && roused.has(record.who)) {
-      law('door', record.at === Math.max(roused.get(record.who)!, held.get(record.who) ?? 0), seq);
+      const free = Math.max(roused.get(record.who)!, held.get(record.who) ?? 0, passage.get(record.who) ?? 0);
+      law('door', record.at === free, seq);
       roused.delete(record.who);
     }
     if (record.kind === 'act' || record.kind === 'spent') {
@@ -562,7 +726,10 @@ test('thousands of steps of any answers leave a journal in which every law of th
     if (record.kind === 'act') {
       law('absent', !away.has(record.who) && !asleep.has(record.who), seq);
       law('speech', record.at >= (held.get(record.who) ?? 0), seq);
-      if (typeof record.action === 'string') count[record.action as keyof typeof count] += 1;
+      if (typeof record.action === 'string') {
+        if (record.action in count) count[record.action as keyof typeof count] += 1;
+        if (record.action in refusals) refusals[record.action as keyof typeof refusals] += 1;
+      }
       else if (record.action.until !== null) count.until += 1;
       else if (record.action.capped) {
         // A span that was cut lasts the longest one.
@@ -572,7 +739,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
     }
     for (const id of event.heard) {
       law('absent', !away.has(id) && !asleep.has(id), seq);
-      law('place', event.kind === 'weather' || (id !== event.who && (place.get(id) === event.place || (event.kind === 'call' && id === event.to))), seq);
+      law('place', event.kind === 'weather' || event.kind === 'park' && (place.get(id) === event.who || place.get(id) === event.place) || (id !== event.who && (place.get(id) === event.place || (event.kind === 'call' && id === event.to))), seq);
     }
     if (event.kind === 'say' || event.kind === 'call') {
       law('limit', sizeOf(event.text as string) <= (record.kind === 'act' ? record.limit : 0), seq);
@@ -580,13 +747,23 @@ test('thousands of steps of any answers leave a journal in which every law of th
       count[event.kind] += 1;
       if (event.cut) count.cut += 1;
       if (event.kind === 'call' && !event.heard.includes(event.to as string)) count.waited += 1;
+    } else if (event.kind === 'go' && event.transfer) {
+      const vehicle = current.places.find(item => (item.id === event.place || item.id === event.to) && item.vehicle)?.vehicle;
+      if (vehicle?.route) law('timetable', vehicle.at === (boarding ? event.place : event.to), seq);
+      law('crossing', !!vehicle && vehicle.heading === null && event.seconds === 10, seq);
+      place.set(event.who, event.to!);
+      poses.set(event.who, null);
+      crossings += 1;
     } else if (event.kind === 'go') {
+      law('way', event.seconds === travelSeconds(current, event.place, event.to!) && !asleep.has(event.who), seq);
       away.set(event.who, event.to as string);
+      arrivalAt.set(event.who, event.at + event.seconds);
       if (poses.get(event.who) !== null) count.unposed += 1;
       poses.set(event.who, null);
       count.go += 1;
     } else if (event.kind === 'arrive') {
       law('arrival', away.get(event.who) === event.place, seq);
+      law('way', event.at === arrivalAt.get(event.who), seq);
       away.delete(event.who);
       place.set(event.who, event.place);
       // The one who arrives reads the clock of the place it came to.
@@ -618,13 +795,27 @@ test('thousands of steps of any answers leave a journal in which every law of th
         count.spoken += 1;
       }
     }
+    for (const vehicle of current.places.filter(item => item.vehicle)) {
+      law('vehicle', (vehicle.vehicle!.at !== null) !== (vehicle.vehicle!.heading !== null)
+        && (vehicle.vehicle!.at === null || world.places.some(place => place.id === vehicle.vehicle!.at && !place.vehicle)), seq);
+      law('seats', [...place.values()].filter(spot => spot === vehicle.id).length <= vehicle.vehicle!.seats, seq);
+      if (vehicle.vehicle!.route && !vehicle.vehicle!.heading) riding.set(vehicle.id, [...place].filter(([, spot]) => spot === vehicle.id).map(([id]) => id));
+      if (vehicle.vehicle!.heading) law('riders', isDeepStrictEqual(riding.get(vehicle.id), [...place].filter(([, spot]) => spot === vehicle.id).map(([id]) => id)), seq);
+    }
+    law('arrival', [...place.values(), ...away.values()].every(id => current.places.some(spot => spot.id === id)), seq);
     law('limit', (event.gesture === undefined || (event.kind === 'say' && sizeOf(event.gesture) <= GESTURE_WORDS)) && (event.says === undefined || event.kind === 'do'), seq);
     if (event.gesture !== undefined) count.gestured += 1;
+    if (event.kind === 'drive' || event.transfer) passage.set(event.who, event.at + 10);
   }
+  assert.ok(busRecords >= 5 && boardings >= 5 && quiet >= 5 && payments >= 5, `bus records ${busRecords}, boardings ${boardings}, quiet arrivals ${quiet}`);
   // The run had all of it in it, or the laws above were tried on little. The stand-in's answer comes from the text of
   // the request, so any change of a request's wording plays another run: a kind that then falls short is too rare in
   // the stand-in, and the cure is to make it less rare there, not to ask for fewer.
+  for (const [kind, times] of Object.entries({ drives, crossings, parks })) assert.ok(times >= 5, `${kind} happened ${times} times`);
   for (const [kind, times] of Object.entries(count)) assert.ok(times >= 5, `${kind} happened ${times} times`);
+  for (const [kind, thousands] of Object.entries(vehicles)) assert.ok(thousands.reduce((sum, n) => sum + n, 0) >= 5, `${kind} happened ${thousands.reduce((sum, n) => sum + n, 0)} times`);
+  // Driving, driver and reach are too rare with these odds to ask for five.
+  for (const [kind, times] of Object.entries({ vehicle: refusals.vehicle, full: refusals.full })) assert.ok(times >= 5, `${kind} happened ${times} times`);
   assert.deepEqual([whole.rewrites, whole.lost], [count.memory, count.memoryLost]);
   // Answers were refused and each was asked again with the reason, and some deeds were left with nothing.
   for (const [kind, times] of Object.entries({ refused: whole.refused, void: whole.void, full: seen.full, deep: seen.deep, same: seen.same })) assert.ok(times >= 5, `${kind} happened ${times} times`);
@@ -637,6 +828,10 @@ test('thousands of steps of any answers leave a journal in which every law of th
   assert.ok(whole.overlong > count.long, 'no answer of the world or memory was cut short');
   assert.ok(whole.declined > count.declined, 'no answer of the world or memory was declined');
   law('request', seen.largest <= requestLimit(world), seen.record);
+  // The memory here is short beside what a turn tells of thirty people, so most turns follow a rewrite; some hundreds follow a turn.
+
+  t.diagnostic(`cache: ${seen.fixed} fixed comparisons; bus: ${busRecords} arrivals, ${boardings} boardings, ${quiet} quiet arrivals, ${count.tied} at a change of the weather; ${paid} coins paid`);
+  t.diagnostic(`a vehicle that goes anywhere, by thousand calls: ${JSON.stringify(vehicles)}`);
 
   // The record a replay refuses, which the journal's own sentence names, or null when it takes them all.
   const refused = (entries: Entry[]) => {
@@ -646,7 +841,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
     }
     return null;
   };
-  law('replay', refused(journal.all) === null, refused(journal.all) ?? 0);
+  const invalid = refused(journal.all);
+  law('replay', invalid === null, invalid ?? 0);
   const touched = (change: (entries: Entry[]) => unknown) => {
     const entries = structuredClone(journal.all.slice(0, 500));
     change(entries);
@@ -655,6 +851,38 @@ test('thousands of steps of any answers leave a journal in which every law of th
   law('replay', touched(entries => entries[400].event.heard.push('c0', 'c1', 'c2')) === 400, 400);
   law('replay', touched(entries => { entries[400].record.at += 1; }) === 400, 400);
   law('replay', touched(entries => entries.splice(300, 1)) === 300, 300);
+
+  const busArrival = journal.all.find(entry => entry.event.kind === 'park' && entry.event.who === 'v2')!;
+  for (const change of [
+    (entries: Entry[]) => { entries[busArrival.seq].record.at += 1; },
+    (entries: Entry[]) => { entries[busArrival.seq].event.place = 'p5'; },
+    (entries: Entry[]) => { entries.splice(busArrival.seq, 1); entries.forEach((entry, seq) => entry.seq = seq); },
+  ]) {
+    const changed = structuredClone(journal.all.slice(0, busArrival.seq + 3));
+    change(changed);
+    law('replay', refused(changed) === busArrival.seq, busArrival.seq);
+  }
+  const boarding = journal.all.find(entry => entry.event.to === 'v2' && entry.event.transfer)!;
+  const underpaid = structuredClone(journal.all.slice(0, boarding.seq + 1));
+  underpaid[boarding.seq].event.moved![0].n = 0;
+  law('replay', refused(underpaid) === boarding.seq, boarding.seq);
+
+  // Coin in hand pays before coin in a coat; arrivals shared by two buses are both due, even after replay.
+  const town = readWorld({ title: 'Town', about: 'An invented town.', clock: '08:00', travelMinutes: 2,
+    places: [{ id: 'a', name: 'Pier', about: 'A pier.' }, { id: 'b', name: 'Market', about: 'A market.' }],
+    characters: [{ id: 'r', name: 'Rider', place: 'a', sheet: 'Ride.', carries: [{ name: 'coat', holds: [{ name: 'coin', n: 2, money: true }] }, { name: 'coin', n: 2, money: true }] },
+      { id: 'w', name: 'Waiter', place: 'b', sheet: 'Wait.' }],
+    vehicles: ['bus0', 'bus1'].map(id => ({ id, name: id, about: 'A town bus.', at: 'a', faster: 2, seats: 2, route: ['a', 'b'], leaves: ['08:01'], fare: { name: 'coin', n: 3 } })) });
+  const buses = memoryStore();
+  await runLive({ world: town, model: 'stand-in', journal: buses, minutes: 5, calls: 20, pause: true, respond: async request => ({
+    text: JSON.stringify(request.system!.includes('You are Rider') && !buses.all.some(entry => entry.event.who === 'r')
+      ? { action: 'go', place: 'bus0' } : { action: 'wait', seconds: 3600 }), usage: null }) });
+  const paidRide = buses.all.find(entry => entry.event.transfer)!;
+  law('fare', paidRide.event.moved!.length === 2 && paidRide.event.moved!.reduce((sum, posting) => sum + posting.n!, 0) === 3, paidRide.seq);
+  law('meeting', buses.all.filter(entry => entry.event.kind === 'park' && entry.event.at === 120).length === 2, buses.all.length);
+  const busEnd = replay(town, buses.all);
+  const carried = busEnd.things.people.get('r')!;
+  law('kept', carried.length === 1 && carried[0].holds?.length === 1 && carried[0].holds[0].n === 1 && !busEnd.things.people.get('w')!.length, buses.all.length);
 
   const directory = mkdtempSync(join(tmpdir(), 'sagents-test-'));
   try {
@@ -674,6 +902,35 @@ test('thousands of steps of any answers leave a journal in which every law of th
       } finally { state.close(); }
     }
     assert.ok(stops.includes('do'), 'no run stopped between a deed and its result');
+    // A separate file stops just after a drive and continues to the same arrival with the same passengers.
+    const drive = journal.all.find(entry => entry.event.kind === 'drive')!, pathOnWay = join(directory, 'driving.sqlite');
+    const parked = journal.all.find(entry => entry.event.kind === 'park' && entry.event.who === drive.event.place && entry.event.at === drive.event.arrival)!;
+    const throughArrival = seen.called.filter(seq => seq > drive.seq && seq < parked.seq).length + 1;
+    let moving = openState(pathOnWay, source, ENVIRONMENT);
+    moving.append(journal.all.slice(0, drive.seq + 1));
+    moving.close();
+    moving = openState(pathOnWay, source, ENVIRONMENT);
+    try {
+      await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: throughArrival, journal: moving, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity });
+      const continued = [...moving.entries()];
+      law('resume', isDeepStrictEqual(continued, journal.all.slice(0, continued.length)), continued.length);
+      assert.ok(continued.some(entry => entry.event.kind === 'park' && entry.event.who === drive.event.place && entry.event.at === drive.event.arrival));
+    } finally { moving.close(); }
+    const bus = world.vehicles!.find(place => place.id === 'v2')!.vehicle!;
+    const onBus = journal.all.find(entry => entry.event.place === 'v2' && entry.event.kind === 'wait'
+      && busAt(world, bus, entry.event.at).heading && replay(world, journal.all.slice(0, entry.seq + 1)).places.find(place => place.id === 'v2')!.vehicle!.heading)!;
+    const busPath = join(directory, 'bus.sqlite');
+    let busState = openState(busPath, source, ENVIRONMENT);
+    busState.append(journal.all.slice(0, onBus.seq + 1));
+    busState.close();
+    busState = openState(busPath, source, ENVIRONMENT);
+    try {
+      await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 10, journal: busState, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity });
+      const continued = [...busState.entries()];
+      law('resume', isDeepStrictEqual(continued, journal.all.slice(0, continued.length)), continued.length);
+    } finally { busState.close(); }
+    const meta = new DatabaseSync(busPath, { readOnly: true });
+    try { assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '20'); } finally { meta.close(); }
     // The file's name for a service's cache is the same at every opening, and a journal begun in another file has another.
     const fresh = openState(join(directory, 'fork.sqlite'), source, ENVIRONMENT);
     fresh.close();

@@ -1,11 +1,12 @@
 // The world of the `live` mode as its file gives it and as a run holds it, with no model in it: named places, who is
 // where, and the events of a run. The rules are next to it: the clock and the distances in `time.ts`, what a
 // resident does in `action.ts`, and what the world answers to a deed or for a figure in `answer.ts`.
-import { boundedOf, amountOf, countOf, durationOf, isObject, listOf, MAX_FACTS, refuse, textOf, TIME } from './reading.ts';
+import { boundedOf, amountOf, countOf, durationOf, isObject, listOf, MAX_FACTS, refuse, secondsOfDay, textOf, TIME } from './reading.ts';
 import { all, MAX_IN_PLACE, MAX_ON_PERSON, readThings, SINKS } from './things.ts';
 import type { Posting, Thing } from './things.ts';
 import type { Sleep } from './sleep.ts';
 import type { Weather } from './weather.ts';
+import { busRound } from './time.ts';
 
 export { CHARS_PER_WORD, cut, MAX_FACTS, sizeOf, wordsOf, WorldError } from './reading.ts';
 
@@ -34,9 +35,11 @@ export const LOST_SECONDS = 30;
 // A place with a `clock` shows the time to everyone in it, and a character with one, a watch or a phone, reads it
 // anywhere. Neither changes in a run: a clock is not yet a thing that can be handed over.
 export type Figure = { id: string; name: string; looks: string | null; facts: string | null };
+export type Vehicle = { at: string | null; heading: { from: string; to: string; at: number } | null; faster: number; seats: number; drivers: string[] | null; reach: string[];
+  route?: string[]; leaves?: string[]; stands?: number; fare?: { name: string; n: number }; departure?: { to: string; at: number } };
 export type Place = { id: string; name: string; about: string; facts: string | null; things: Thing[]; open: boolean; clock: boolean;
   crowd: string | null; figures: Figure[];
-  at: [number, number] | null; minutesTo: { [place: string]: number }; nextDoor: string[] };
+  at: [number, number] | null; minutesTo: { [place: string]: number }; nextDoor: string[]; vehicle?: Vehicle };
 export type Character = { id: string; name: string; place: string; sheet: string; memory: string | null; facts: string | null; looks: string | null; pose: string | null;
   carries: Thing[]; clock: boolean };
 // The most words each of these texts may hold, in the world file and in the world's answer alike; `feels` is of one
@@ -47,7 +50,7 @@ export const LIMITS = { looks: 60, pose: 20, feels: 20, beyond: 20, crowd: 60 };
 // `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `sleep` and
 // `weather` are the settings of the laws the clock drives (`laws.ts`), as the world file and its environment give them.
 export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null;
-  travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
+  vehicles?: Place[]; travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // `place` is where it happened; `to` is the character called, the figure spoken to, or the place a `go` leads to; `heard` holds the ids of
@@ -67,15 +70,15 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // long they take from the end of that `say`, and `moved` what changed hands with them. A `weather` is a change of the
 // weather, which nobody does and which has no place: `who` and `place` are empty, `text` is the new weather under the
 // open sky and `indoors`, which only this kind has, what of it reaches someone under a roof, or null.
-export type Event = { at: number; clock: string; kind: Kind | 'arrive' | 'wake' | 'memory' | 'result' | 'reply' | 'weather'; who: string; place: string; to: string | null;
+export type Event = { at: number; clock: string; kind: Kind | 'drive' | 'park' | 'arrive' | 'wake' | 'memory' | 'result' | 'reply' | 'weather'; who: string; place: string; to: string | null;
   text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; gesture?: string; says?: string; wakes?: string[];
-  indoors?: string | null; search?: boolean; finds?: string[]; moved?: Posting[]; set?: { what: string; name: string; state: string }[];
+  transfer?: true; from?: string; arrival?: number; indoors?: string | null; search?: boolean; finds?: string[]; moved?: Posting[]; set?: { what: string; name: string; state: string }[];
   poses?: { of: string; text: string }[]; feels?: { of: string; text: string }[]; beyond?: string | null; nearby?: string[]; found?: { what: string; name: string; spot: string }[] };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
 // its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
 // is the start of its own last action. `pose` is how it is placed now.
 export type Person = { id: string; place: string | null; heading: string | null; asleep: boolean; freeAt: number; began: number | null;
-  speaking: number; listening: number; pose: string | null };
+  speaking: number; listening: number; passageUntil?: number; pose: string | null };
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const factsOf = (value: unknown, field: string) => boundedOf(value, field, MAX_FACTS);
@@ -166,11 +169,64 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   for (const [index, place] of places.entries()) {
     for (const [at, figure] of place.figures.entries()) idOf(figure.id, `places[${index}].figures[${at}].id`, taken);
   }
-  return { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
+  const vehicles: Place[] = [];
+  if (value.vehicles !== undefined) {
+    if (!Array.isArray(value.vehicles) || value.vehicles.length > 6) return refuse('vehicles', 'must be a list of at most 6 vehicles');
+    for (const [index, vehicle] of value.vehicles.entries()) {
+      const field = `vehicles[${index}]`;
+      if (!isObject(vehicle)) return refuse(field, 'must be an object');
+      const whole = (name: string, most: number, least: number) => {
+        const n = vehicle[name];
+        return typeof n === 'number' && Number.isInteger(n) && n >= least && n <= most ? n : refuse(`${field}.${name}`, `must be a whole number from ${least} to ${most}`);
+      };
+      const ids = (name: string, list: { id: string }[]): string[] | null => {
+        const given = vehicle[name];
+        if (given === undefined) return null;
+        if (!Array.isArray(given)) return refuse(`${field}.${name}`, 'must be a list');
+        const stray = given.findIndex((id, at) => !list.some(item => item.id === id) || given.indexOf(id) !== at);
+        if (stray !== -1) return refuse(`${field}.${name}[${stray}]`, 'must name an id of the list, and each once');
+        return given as string[];
+      };
+      if (!places.some(place => place.id === vehicle.at)) return refuse(`${field}.at`, 'must name a place of the list');
+      if (vehicle.open !== undefined && typeof vehicle.open !== 'boolean') return refuse(`${field}.open`, 'must be true or false');
+      let bus: Pick<Vehicle, 'route' | 'leaves' | 'stands' | 'fare'> = {};
+      if (vehicle.route !== undefined) {
+        const route = vehicle.route;
+        if (!Array.isArray(route) || route.length < 2 || route.length > 12 || route.some((id, at) => !places.some(place => place.id === id) || id === route[(at + 1) % route.length])) return refuse(`${field}.route`, 'must list 2 to 12 places, with no place twice in a row');
+        if (vehicle.drivers !== undefined || vehicle.reach !== undefined) return refuse(field, 'a route takes the place of drivers and reach');
+        const leaves = vehicle.leaves;
+        if (!Array.isArray(leaves) || leaves.length < 1 || leaves.length > 48 || leaves.some((time, at) => typeof time !== 'string' || !TIME.test(time) || at > 0 && time <= leaves[at - 1])) return refuse(`${field}.leaves`, 'must list 1 to 48 times of day in rising order');
+        if (vehicle.at !== route[0]) return refuse(`${field}.at`, 'must be the first stop of the route');
+        bus = { route, leaves, stands: vehicle.stands === undefined ? 60 : whole('stands', 1800, 30) };
+        if (vehicle.fare !== undefined) {
+          const fare = vehicle.fare;
+          if (!isObject(fare)) return refuse(`${field}.fare`, 'must be an object');
+          const name = textOf(fare.name, `${field}.fare.name`);
+          if (typeof fare.n !== 'number' || !Number.isInteger(fare.n) || fare.n < 1 || fare.n > 1_000_000_000) return refuse(`${field}.fare.n`, 'must be a whole number from 1 to 1,000,000,000');
+          bus.fare = { name, n: fare.n };
+        }
+      }
+      vehicles.push({ id: idOf(vehicle.id, `${field}.id`, taken), name: textOf(vehicle.name, `${field}.name`),
+        about: boundedOf(textOf(vehicle.about, `${field}.about`), `${field}.about`, 60)!, facts: null,
+        things: within(readThings(vehicle.things, `${field}.things`, labels, true), MAX_IN_PLACE, `${field}.things`),
+        open: vehicle.open === true, clock: false, crowd: null, figures: [], at: null, minutesTo: {}, nextDoor: [],
+        vehicle: { at: vehicle.at as string, heading: null, faster: whole('faster', 30, 2), seats: whole('seats', bus.route ? 60 : 12, 1),
+          drivers: ids('drivers', characters), reach: ids('reach', places) ?? places.map(place => place.id), ...bus } });
+    }
+  }
+  const core = { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute, remote: typeof value.remote === 'string' ? value.remote : null,
     travelMinutes,
     walkMetresPerMinute, shortWords: countOf(value.shortWords, 'shortWords', 2000),
-    longWords, places, characters };
+    longWords, places, characters, ...(value.vehicles === undefined ? {} : { vehicles }) };
+  for (const [index, place] of vehicles.entries()) {
+    const bus = place.vehicle!;
+    if (!bus.route) continue;
+    if (bus.fare && !all([...places.flatMap(place => place.things), ...vehicles.flatMap(place => place.things), ...characters.flatMap(person => person.carries)]).some(thing => thing.name === bus.fare!.name && thing.money)) return refuse(`vehicles[${index}].fare.name`, 'must name a counted thing of money');
+    const times = bus.leaves!.map(secondsOfDay), gap = Math.min(...times.map((time, at) => (times[(at + 1) % times.length] - time + 86_400 - 1) % 86_400 + 1));
+    if (busRound(core, bus).at(-1)!.at >= gap) return refuse(`vehicles[${index}].leaves`, 'the round must finish before the next leaving');
+  }
+  return core;
 }
 
 // Everyone with a name whom nobody plays, and everyone a line may name: the characters and those.

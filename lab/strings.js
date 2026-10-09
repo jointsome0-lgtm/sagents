@@ -6,7 +6,7 @@ const en = {
   point: '.', day: 'day', dayShort: 'd', seconds: 's', minutes: 'min', hours: 'h', wholeDay: 'a day',
   title: 'sagents lab', titleOf: name => `${name} · sagents lab`,
   // An event of the feed.
-  calls: 'calls', does: 'does', goes: 'goes', arrives: 'arrives', waits: 'waits', fallsAsleep: 'falls asleep', wakes: 'wakes', worldTag: 'world', whatCame: 'what came of it',
+  drives: 'drives', pullsUp: 'has pulled up', crosses: 'crosses the door', fare: 'fare', calls: 'calls', does: 'does', goes: 'goes', arrives: 'arrives', waits: 'waits', fallsAsleep: 'falls asleep', wakes: 'wakes', worldTag: 'world', whatCame: 'what came of it',
   nothingNoticed: 'nothing that could be noticed', answers: 'answers', noAnswer: 'does not answer', weather: 'weather', memoryRewritten: 'memory rewritten', memoryLost: ' — lost',
   memoryMissing: 'The rewrite failed: what was to stay is forgotten.', cut: '(cut)', heardBy: 'heard by', indoors: 'Under a roof',
   search: 'search', searchText: 'the world took this for a search of the place', found: 'found', moved: 'moved', movedStock: 'moved from stock', as: 'as', state: 'state', pose: 'pose', none: 'none',
@@ -64,7 +64,7 @@ const en = {
 const ru = {
   point: ',', day: 'день', dayShort: 'д', seconds: 'с', minutes: 'мин', hours: 'ч', wholeDay: 'сутки',
   title: 'Лаборатория sagents', titleOf: name => `${name} · лаборатория sagents`,
-  calls: 'звонит', does: 'делает', goes: 'идёт', arrives: 'приходит', waits: 'ждёт', fallsAsleep: 'засыпает', wakes: 'просыпается', worldTag: 'мир', whatCame: 'что вышло',
+  drives: 'ведёт', pullsUp: 'подъезжает', crosses: 'проходит через дверь', fare: 'плата за проезд', calls: 'звонит', does: 'делает', goes: 'идёт', arrives: 'приходит', waits: 'ждёт', fallsAsleep: 'засыпает', wakes: 'просыпается', worldTag: 'мир', whatCame: 'что вышло',
   nothingNoticed: 'ничего заметного', answers: 'отвечает', noAnswer: 'не отвечает', weather: 'погода', memoryRewritten: 'память переписана', memoryLost: ' — утрачена',
   memoryMissing: 'Переписать не удалось: то, что должно было остаться, забыто.', cut: '(обрезано)', heardBy: 'слышат', indoors: 'Под крышей',
   search: 'поиск', searchText: 'мир счёл это обыском места', found: 'найдено', moved: 'перешло', movedStock: 'перешло из запаса', as: 'как', state: 'состояние', pose: 'поза', none: 'нет',

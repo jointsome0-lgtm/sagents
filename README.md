@@ -194,7 +194,7 @@ The rules of time and hearing:
 - Every numeric setting must be finite, and each duration derived from the settings must be a whole number of
   seconds from 1 to 10^12; a world of 0.1.0 with a longer derived duration, over thirty thousand years, is refused
   on purpose. These checks cover settings and their derived durations, not seconds accumulated over a long story.
-- The clock counts whole seconds of the story, and from the second day on a time names its day. The character who
+- The clock counts seconds of the story, displayed as whole seconds, and from the second day on a time names its day. The character who
   is free first plays next. Of those free at one instant, whoever arrives comes first and whoever wakes after them,
   so everyone who comes or wakes at an instant has done so before anyone takes a turn at it: two who walk to a place
   together are both there when either looks around. On GPT-6 Luna, in a scene where two leave together, 81 requests, both were in the place before anyone took a turn in 4 leavings of 4, against a turn between the two arrivals in 4 of 4 on the engine before; the rule changes no text that a model reads, so it was played on no second model. A state file
@@ -215,6 +215,88 @@ The rules of time and hearing:
   the world's `walkMetresPerMinute`, 80 by default, as whole minutes above ten and tenths of a minute up to there;
   else the world's `travelMinutes`. A walk of some kilometres is one action, and the clock stands at its end when the walker arrives. On the way a character hears
   nothing and does not act. A call to it is delivered when it arrives.
+- A world file may give `vehicles`, at most six, absent or empty for none. A vehicle is a small place that moves.
+  For example, a seaside town may have `{ "id": "blue", "name": "Blue car", "about": "A small blue car.",
+  "at": "pier", "faster": 4, "seats": 3 }`. Its id differs from every place, character, figure and other vehicle;
+  `about` holds at most 60 words. `at` names a place of the world file, `faster` is a whole number from 2 to 30,
+  and `seats` from 1 to 12. Optional `drivers` lists the character ids allowed to drive, absent for anyone;
+  optional `reach` lists the world file's places it may drive to, absent for all of them. Either may be empty.
+  Optional `open` is true for an inside under the open sky, false otherwise, and `things` has a place's form.
+  It has no hours, figures, crowd, clock or coordinates. A standing vehicle and its place are next door to each
+  other; a driving vehicle has no neighbour. Things and people inside stay in that place throughout a drive,
+  hearing, seeing, talking, doing things and sleeping as in any place. The weather reaches the inside under its
+  roof, or under the open sky with `open`, just as it reaches other places; the world's weather holds on the way.
+- A `go` from the place where a vehicle stands to its id gets in when a seat is free; a `go` from inside to that
+  place gets out. Each crosses the door at once and holds the person's next turn for ten
+  seconds. From inside, a `go` to another place drives there when the character may drive and the place is within reach. The vehicle
+  leaves at once and takes the walk's time divided by `faster`, rounded up to a whole second and at least
+  thirty seconds. The driver's action takes ten seconds; everyone inside then takes turns throughout the drive.
+  An unavailable or full vehicle, any `go` while driving, an unauthorised driver or a destination out of reach is refused with one fixed sentence after
+  the usual sentence about a wait of thirty seconds. A `go` between ordinary places stays a walk.
+  Nobody gets out, turns back or changes the destination on the way. There is no fuel or key.
+- A bus is a vehicle with a `route` instead of `drivers` and `reach`: 2 to 12 ids of listed places in stop order,
+  with no consecutive stop repeated, including the return to the first. Its `at` is the first stop. For example,
+  `{ "id": "bus4", "name": "Bus 4", "about": "A yellow town bus.", "at": "pier", "faster": 4,
+  "seats": 20, "route": ["pier", "market", "hill"], "leaves": ["08:00", "08:30"],
+  "stands": 60, "fare": { "name": "rubles", "n": 30 } }` is an invented town bus. `leaves` lists 1 to 48
+  times of day in rising order, the same every day; `stands` is 30 to 1800 whole seconds at each stop other than
+  the first, 60 when absent. A bus has up to 60 seats. Its round takes the same drives as a driven vehicle,
+  with those stands, and must finish strictly before the next leaving, including the gap over midnight.
+  It stands at the first stop until then. Its position at the start and afterwards follows from the clock alone.
+  Nobody drives it: a `go` inside to another place is refused with `This vehicle goes its round by itself.`
+- A bus without `fare` takes none. With one, its `name` names counted money and its whole `n`, from 1 to
+  1,000,000,000, is the price of one ride. The name must belong to counted money in the world file. Getting in
+  takes exactly that much, nearest to hand first: from the money the person carries directly, then from what their things hold, then from what those hold, each in the order of its list, and it is
+  gone. The boarding event keeps the postings with `to` `fare` and `sink` `fare`, so an ordinary move to a person
+  or place whose id is `fare` stays a move to that holder; a deed still cannot use up money. Too little is
+  refused with `You need 30 rubles for the fare.` and takes nothing. Only the payer reads `You pay 30 rubles.`,
+  after the line of getting in. A free seat is still needed.
+  A fare is not given back to someone who gets out before the bus leaves.
+  Whoever stays inside for another round pays nothing more. These bus rules are a candidate checked with stand-ins,
+  not yet played on any model. Those checks describe the other line; this port onto the main line is played on no model.
+- The bus's fixed opening gives its round, times and fare instead of drivers. The vehicle rule stays one line,
+  with a clause about a vehicle that goes its round by itself only in worlds with a bus, saying the fare is taken
+  by itself only when a bus has one. Someone awake at a stop
+  reads `Bus 4 has pulled up.`, then `Here stands: Bus 4 (bus4), 19 of 20 seats free, leaving for Hill in 1 min 0 s.`
+  Someone who walks in reads the same standing line on arriving, and someone who gets out at their own next turn if
+  the bus still stands there then, and `Bus 4 has driven off.` if it has left. A standing line is written when someone first sees
+  the vehicle there, comes there, it pulls up or the number of free seats changes, with the time left then; the passing
+  of time alone never writes another.
+  A pull-up at a stop is a record and the line `Bus 4 has pulled up.` for everyone awake there, and a turn only for
+  those who wait: they read the standing line at once, and anyone else at their own next turn if the vehicle still
+  stands there, with the time left then.
+  A wait may name seconds or a time of day; a long deed continues until its own end. Those awake inside are freed
+  as before. A departure does not end a wait, and
+  `Bus 4 has driven off.` is appended at their own next turn. Inside, an arrival ends the wait and is told in
+  the vehicle's words. Departure appears only in the next `Now` line, which gives the standing stop and time to
+  leaving, or the destination and time left of the drive. Sleepers receive no bus notices, however they fell asleep,
+  including on waking;
+  someone waking inside reads its position from `Now`. People and things inside stay in that vehicle place.
+  The world reads it as a vehicle. Each bus arrival has one engine record only if someone awake is at the stop
+  or inside before it arrives. It comes after a change of the weather at that instant and before people's arrivals
+  and turns, as a driven vehicle's arrival does.
+  No other bus instant has a record or holds up the run or its horizon. With everyone asleep or away from the stops,
+  the bus adds no record and asks nobody. Its timetable still gives its position after a pause. A replay refuses a
+  `round` refusal in a world with no round.
+- Only worlds with a vehicle add one rule line to a resident's instructions. The fixed opening lists the world
+  file's vehicles after its places, under `Vehicles:`, each with its name, id, description, number of seats and
+  who may drive it, by name, or that anyone may; a bus gives its round, times and fare instead. It never says where a vehicle is and stays the same throughout
+  the run. The resident's schema names all vehicles from the first turn and does not change when one moves.
+  At the start and on arrival, the lines of the place list each vehicle standing there: `Here stands:
+  Blue car (car), 1 of 2 seats free.` Getting in and out are told as that, to the person moving and by name to
+  those at the place and those inside. The `Now` line of someone inside says where the vehicle stands, by
+  name and id, or where it is going, by name and id, with the minutes and seconds left of the drive. No resident
+  reads a clock time of arrival, or where a vehicle is that neither stands at their place nor holds them.
+  For a deed the world reads only the vehicles standing at its place, in the same `Here stands:` lines; inside,
+  it reads the vehicle's description and where it stands or the two places between which it drives.
+  Those outside hear that the vehicle has driven off or pulled up, by name; those inside hear that it has arrived
+  and where, on waking if asleep in a driven vehicle. No arrival or departure line tells outsiders who is inside. The engine records
+  an arrival before all people's arrivals and turns at that instant, after a change of the weather that falls
+  on it and before a sleep that the main line's tiredness brings at it, as it does for someone who arrives on foot.
+  This is a candidate: checked with a stand-in only and played on no model. Those checks describe the other line; this port onto the main line is played on no model.
+  Worlds without vehicles keep their requests and journals unchanged. Turns keep the main line's rebuilt form,
+  with the transport lines in the candidate's words. Opening hours and places on demand are absent here, so their
+  closed-place refusals and go by words are absent too.
 - A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
   next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours: an answer that asks for
   more, in `seconds` or to a time of day further off, lasts that most in seconds and is no lost turn, the character reads the seconds it lasts and is not told of the cut, and the record's
@@ -465,10 +547,10 @@ Things:
   the entry and the cause in the words of its instructions. After the second nothing came of the deed. The totals
   count the answers `refused` and the deeds and speeches left `void`. A refused answer is neither used nor unusable
   and neither adds to the row of unusable answers nor ends it.
-- A thing appears only out of a stock and leaves the world only by being eaten or burned, so for every name what
-  there is, what was eaten or burned and what came from a stock add up to what the world file gave, and the sum
-  of money never changes. The event of an answer holds `moved`, a posting for each thing with how many went from
-  which holder to which, and an `eaten` posting says who ate what; `set`; and `found`. The laws of the random run
+- A thing appears only out of a stock and leaves the world only by being eaten or burned, or as a bus fare. For
+  every name what there is and what was eaten or burned or paid as fare, less what came from a stock, add up to what the
+  world file gave, and the sum of money together with fares paid never changes. The event of an answer holds
+  `moved`, a posting for each thing with how many went from which holder to which, and an `eaten` posting says who ate what; `set`; and `found`. The laws of the random run
   count by these postings.
 - The rules read no prose, and no words of a model change a count. Whoever perceives an answer reads after it one
   line that the rules wrote from the postings: what went from whom or from what to whom, what was eaten or burned,
@@ -554,7 +636,12 @@ The journal and the state file:
 
 - Everything that happens is a record in an append-only journal: an action as it was read from the answer, or the
   reason why the answer could not be used, the world's answer to a deed, a figure's answer to a speech, an arrival, a waking or a falling asleep
-  at the limit, a change of the weather, a memory rewrite. Each record is stored with the event the rules made of it. There is no other
+  at the limit, a change of the weather, a memory rewrite. A drive is one action record, with the driver, vehicle,
+  departure, destination and arrival instant; its arrival is one record of the engine at that instant. A state
+  stopped on the way continues to the same arrival. A world without `vehicles` keeps format `18`, so its state
+  files open as before. A world with `vehicles`, even an empty list, takes `19`; one with a `route` takes `20`,
+  since bus positions follow the clock and fares leave the world. A file with another mark is refused as another
+  version. Each record is stored with the event the rules made of it. There is no other
   state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
   plays the world. Any beginning of a journal is a whole world at that moment.
 - Without `--state` the journal lives in memory and ends with the run. Then the run is the whole story: a turn says
@@ -956,6 +1043,13 @@ is `t` of the address, as in the feed, `J` and `K` step to the next and the prev
 asleep or woke, and with the newest followed it is the newest. Pointing at a place shows its description, who is
 there and the time to every other place; a click puts it into the feed's filter by place. Beside a second
 experiment the map is of the left one alone and says so. The same world file gives the same drawing at every load.
+For a world with vehicles, the feed names drives, pull-ups and door crossings, and marks fare postings as fares.
+The map keeps a rider in the vehicle and draws its mark at the standing stop or along the drive. Bus positions
+come from their timetable even when no arrival was recorded: times are hours and minutes, and each leg takes the
+engine's walk time in that direction divided by `faster`, rounded up to a whole second and at least thirty seconds.
+The bus stands for `stands` seconds at each stop after the first, and waits at the first until its next leaving.
+The list beside the map names the vehicle too;
+empty vehicles have no mark of their own.
 The map was checked without a browser: its positions as tables and its drawings as SVG files made by the layout
 code that the page uses, over the three example worlds and a synthetic one played by a stand-in for the model, and
 the page's script was run through over a stand-in for the document.
@@ -970,7 +1064,8 @@ What the lab may do with the files, and `lab/lab.test.ts` holds it to that:
 - No name from a request builds a path: an experiment is looked up among those the walk found.
 - Of a world file there leave the lab the ids and names of characters and places and what the map is drawn from: of
   the world `travelMinutes` and `walkMetresPerMinute`; of every place `at`, `minutesTo`, `nextDoor`, `open`, `about`
-  and the ids and names of its `figures`; of every character the `place` it starts in. Nothing else of it: never a
+  and the ids and names of its `figures`; of every character the `place` it starts in; of every vehicle its id,
+  name, `at`, `faster`, and, for a bus, `route`, `leaves` and `stands`. Nothing else of it: never a
   sheet, a memory, looks, facts or things of anyone or anything, never `crowd`, never the description or the facts
   of the world. Of a chapter everything but its `carry`; of a usage row the counted fields; of a failure its code.
 - The list gives `mapKey`, the world file's modified time and size as one value, so that an edit refreshes the map.

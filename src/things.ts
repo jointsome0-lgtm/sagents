@@ -35,8 +35,9 @@ export const SINKS = ['eaten', 'burned'];
 // What one entry did: so many of the record `what`, called `name`, went from the holder `from` to `to`, and are there
 // the record `as`, or gone when `to` is a sink; `n` is null for a thing that has no count. `stock` says that they
 // were taken from a supply, which is as it was. `out` and `into` say the two holders as anyone sees them: the
-// person who has the thing on them, or the thing of the place it lies in or on, or the place.
-export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string };
+// person who has the thing on them, or the thing of the place it lies in or on, or the place. `sink` marks a fare,
+// whose `to` can also be the id of a person or a place.
+export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string; sink?: 'fare' };
 // Why the rules refuse an answer whole: the first entry they cannot take, and the cause. `same` is an answer whose
 // moves moved nothing, each to where its thing already was, so that its words would tell of a move the lists never took.
 export const CODES = ['what', 'hidden', 'fixed', 'n', 'to', 'inside', 'sink', 'full', 'same', 'state'] as const;
@@ -195,4 +196,27 @@ export function settle(things: Things, place: string, present: string[], names: 
 export function keep(things: Things, place: string, settled: Settled): void {
   for (const [id, list] of settled.lists) (id === place ? things.places : things.people).set(id, list);
   things.next = settled.next;
+}
+
+// A fare takes counted money of its name from the carrier's own list first, then each deeper level in list order,
+// and leaves no holder in the world.
+export function pay(things: Things, who: string, name: string, n: number, owner: string): Posting[] {
+  const held = things.people.get(who)!;
+  if (all(held).reduce((sum, thing) => sum + (thing.money && thing.name === name ? thing.n! : 0), 0) < n) throw new Error('A fare cannot be paid.');
+  const moved: Posting[] = [];
+  const pockets = [{ list: held, from: who }];
+  for (const { list, from } of pockets) {
+    if (!n) break;
+    for (const thing of [...list]) {
+      if (!n) break;
+      if (thing.money && thing.name === name) {
+        const amount = Math.min(n, thing.n!);
+        moved.push({ what: thing.label, name, n: amount, from, to: 'fare', sink: 'fare', as: null, stock: false, out: owner, into: '' });
+        n -= amount;
+        if (amount === thing.n) list.splice(list.indexOf(thing), 1);
+        else thing.n! -= amount;
+      } else if (thing.holds) pockets.push({ list: thing.holds, from: thing.label });
+    }
+  }
+  return moved;
 }

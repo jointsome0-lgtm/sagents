@@ -2,13 +2,13 @@
 // someone with no clock at hand can tell it, and how long speech and a walk between two places take.
 import { secondsOfDay } from './reading.ts';
 import { MAX_SECONDS, MAX_SLEEP, MAX_WORDS } from './world.ts';
-import type { Person, World } from './world.ts';
+import type { Person, Vehicle, World } from './world.ts';
 
 // The story's clock at so many seconds from its start, as a time of day. From the second day on it names the day.
 export function clockAt(world: World, at: number): string {
   const [hours, minutes] = world.clock.split(':').map(Number);
   const since = hours * 3600 + minutes * 60 + at, second = since % 86_400, day = Math.floor(since / 86_400) + 1;
-  const time = [Math.floor(second / 3600), Math.floor(second / 60) % 60, second % 60].map(part => String(part).padStart(2, '0')).join(':');
+  const time = [Math.floor(second / 3600), Math.floor(second / 60) % 60, Math.floor(second % 60)].map(part => String(part).padStart(2, '0')).join(':');
   return day > 1 ? `day ${day} ${time}` : time;
 }
 
@@ -62,7 +62,8 @@ export const wordLimit = (world: World, secondsLeft: number) => Math.max(1, Math
 // `minutesTo` is read both ways. A pair that is not listed takes the straight line between the two at the world's
 // pace when both say where they lie, as whole minutes above ten and tenths of a minute up to there, and the world's
 // `travelMinutes` otherwise.
-export function travelSeconds(world: World, from: string, to: string): number {
+type Distances = Pick<World, 'places' | 'travelMinutes' | 'walkMetresPerMinute'>;
+export function travelSeconds(world: Distances, from: string, to: string): number {
   const a = world.places.find(place => place.id === from), b = world.places.find(place => place.id === to);
   const walked = a?.at && b?.at ? Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1]) / world.walkMetresPerMinute : null;
   const paced = walked === null ? null : walked > 10 ? Math.round(walked) : Math.round(walked * 10) / 10;
@@ -70,9 +71,36 @@ export function travelSeconds(world: World, from: string, to: string): number {
   return Math.max(1, Math.round((listed(a, to) ?? listed(b, from) ?? paced ?? world.travelMinutes) * 60));
 }
 
+export const driveSeconds = (world: Distances, from: string, to: string, faster: number) => Math.max(30, Math.ceil(travelSeconds(world, from, to) / faster));
+
 // The moment of the story `at` seconds from its start, as seconds since the midnight before the start.
 const sinceMidnight = (world: World, at: number) => secondsOfDay(world.clock) + at;
 // The seconds from `at` to the next moment the story's clock shows the time of day `until`, a whole day when it shows it now.
 export function secondsUntil(world: World, at: number, until: string): number {
   return (secondsOfDay(until) - sinceMidnight(world, at) % 86_400 + 86_400 - 1) % 86_400 + 1;
+}
+
+// The arrivals of one round, in seconds from leaving the first stop.
+export function busRound(world: Distances, bus: Vehicle) {
+  let at = 0;
+  return bus.route!.map((from, index) => {
+    const to = bus.route![(index + 1) % bus.route!.length];
+    at += driveSeconds(world, from, to, bus.faster);
+    const stop = { from, to, at };
+    if (index < bus.route!.length - 1) at += bus.stands!;
+    return stop;
+  });
+}
+// A bus has no position to save: the latest daily leaving and its round give it at any instant, even before the story.
+export function busAt(world: World, bus: Vehicle, now: number): Vehicle {
+  const second = secondsOfDay(world.clock) + now, day = Math.floor(second / 86_400) * 86_400;
+  const times = bus.leaves!.map(secondsOfDay), latest = times.findLast(time => day + time <= second);
+  const began = (latest === undefined ? day - 86_400 + times.at(-1)! : day + latest) - secondsOfDay(world.clock);
+  const next = times.find(time => day + time > second);
+  for (const [index, stop] of busRound(world, bus).entries()) {
+    if (now < began + stop.at) return { ...bus, at: null, heading: { from: stop.from, to: stop.to, at: began + stop.at }, departure: undefined };
+    if (index < bus.route!.length - 1 && now < began + stop.at + bus.stands!) return { ...bus, at: stop.to, heading: null,
+      departure: { to: bus.route![(index + 2) % bus.route!.length], at: began + stop.at + bus.stands! } };
+  }
+  return { ...bus, at: bus.route![0], heading: null, departure: { to: bus.route![1], at: (next === undefined ? day + 86_400 + times[0] : day + next) - secondsOfDay(world.clock) } };
 }

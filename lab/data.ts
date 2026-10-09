@@ -34,7 +34,8 @@ export type Names = { characters: Named[]; places: Named[] };
 // `nextDoor` those that share a door or a wall with the place, `open` whether it lies under the open sky, `figures`
 // its people whom nobody plays; a character's `place` is where it starts. null stands for what the file does not say.
 export type MapPlace = Named & { about: string; at: [number, number] | null; minutesTo: { [place: string]: number }; nextDoor: string[]; open: boolean; figures: Named[] };
-export type WorldMap = { travelMinutes: number | null; walkMetresPerMinute: number | null; places: MapPlace[]; characters: (Named & { place: string | null })[] };
+export type MapVehicle = Named & { at: string; faster: number; route?: string[]; leaves?: string[]; stands?: number };
+export type WorldMap = { travelMinutes: number | null; walkMetresPerMinute: number | null; places: MapPlace[]; vehicles?: MapVehicle[]; characters: (Named & { place: string | null })[] };
 // Where a character is from the story second `T` on, as `moveOf` of the core module reads it from an event.
 export type Move = { T: number; who: string; kind: 'at' | 'go' | 'sleep'; place: string; to?: string; seconds?: number };
 export type Chapter = { n: number | null; stretches: string[]; title: string; span: string; text: string; model: string | null };
@@ -66,7 +67,7 @@ export const chapterOf = (value: unknown, numbered: number | null = null): Chapt
 export const namesOf = (value: unknown): Names | null => {
   if (!isObject(value) || !Array.isArray(value.characters) || !Array.isArray(value.places)) return null;
   const named = (list: unknown[]) => list.filter(isObject).filter(item => typeof item.id === 'string').map(item => ({ id: item.id as string, name: text(item.name) ?? item.id as string }));
-  return { characters: named(value.characters), places: named(value.places) };
+  return { characters: named(value.characters), places: named([...value.places, ...(Array.isArray(value.vehicles) ? value.vehicles : [])]) };
 };
 // Of a world file, what the map is drawn from: of the world `travelMinutes` and `walkMetresPerMinute`; of every place
 // its id and name, `about`, `at`, `minutesTo`, `nextDoor`, `open` and the ids and names of its `figures`; of every
@@ -87,7 +88,12 @@ export const mapOf = (value: unknown): WorldMap | null => {
   });
   const characters = (value.characters as unknown[]).filter(isObject).filter(character => typeof character.id === 'string')
     .map(character => ({ id: character.id as string, name: text(character.name) ?? character.id as string, place: typeof character.place === 'string' && ids.has(character.place) ? character.place : null }));
-  return { travelMinutes: amount(value.travelMinutes), walkMetresPerMinute: amount(value.walkMetresPerMinute), places, characters };
+  const stops = new Set(places.map(place => place.id));
+  const vehicles = (Array.isArray(value.vehicles) ? value.vehicles : []).filter(isObject).filter(vehicle => typeof vehicle.id === 'string' && typeof vehicle.at === 'string' && stops.has(vehicle.at))
+    .map((vehicle): MapVehicle => ({ id: vehicle.id as string, name: text(vehicle.name) ?? vehicle.id as string, at: vehicle.at as string, faster: amount(vehicle.faster) || 2,
+      ...(Array.isArray(vehicle.route) && Array.isArray(vehicle.leaves) ? { route: vehicle.route.filter((id): id is string => typeof id === 'string' && stops.has(id)),
+        leaves: vehicle.leaves.filter((time): time is string => typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)), stands: amount(vehicle.stands) ?? 60 } : {}) }));
+  return { travelMinutes: amount(value.travelMinutes), walkMetresPerMinute: amount(value.walkMetresPerMinute), places, characters, ...(vehicles.length ? { vehicles } : {}) };
 };
 
 // Read through the opened file, not through a pathname checked by an earlier walk. With /proc the descriptor's
@@ -263,8 +269,8 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
       if (!got.lines.length) break;
       known.events += got.lines.length;
       const marks = got.lines.map(line => { const event = parsed(line);
-        // Whose events these are, for the choice of a world file: a figure's answer is no character's.
-        if (event && typeof event.who === 'string' && event.who !== '' && event.kind !== 'reply') known!.who.add(event.who);
+        // Whose events these are, for the choice of a world file: a figure's answer and a vehicle's arrival are no character's.
+        if (event && typeof event.who === 'string' && event.who !== '' && event.kind !== 'reply' && event.kind !== 'park') known!.who.add(event.who);
         return event && typeof event.at === 'number' && Number.isFinite(event.at) ? { at: event.at, clock: text(event.clock) } : null; });
       known.first ??= marks[0];
       known.last = marks.at(-1) ?? known.last;

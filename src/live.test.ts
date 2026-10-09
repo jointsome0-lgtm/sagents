@@ -495,3 +495,63 @@ test('world settings cannot overflow a duration or poison the replay of a move',
     assert.deepEqual(replay(world, JSON.parse(JSON.stringify([{ seq: 0, record, event, by: 'stand-in' }]))).people, state.people);
   }
 });
+
+test('a vehicle keeps the opening fixed and its changing lines local', async () => {
+  const cars = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', clock: '12:00', travelMinutes: 3.1, shortWords: 180,
+    places: [{ id: 'red', name: 'Red room', about: 'Red walls.' }, { id: 'blue', name: 'Blue room', about: 'Blue walls.' }],
+    vehicles: [{ id: 'car', name: 'Blue car', about: 'A small blue car.', at: 'red', faster: 4, seats: 2, drivers: ['anna'] }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'red', sheet: 'SHEET-ANNA' }, { id: 'boris', name: 'Boris', place: 'red', sheet: 'SHEET-BORIS' },
+      { id: 'clara', name: 'Clara', place: 'blue', sheet: 'SHEET-CLARA' }] });
+  const { sent, respond } = standIn({ anna: [act('wait', { seconds: 1 }), act('go', { place: 'car' }), act('do', { text: 'Look inside.', seconds: 1 }),
+    act('go', { place: 'blue' }), act('wait', { seconds: 600 }), act('go', { place: 'blue' }), act('do', { text: 'Look around.', seconds: 1 }),
+    act('go', { place: 'car' }), act('go', { place: 'red' }), act('wait', { seconds: 600 }), act('go', { place: 'red' })],
+    boris: [act('go', { place: 'car' })] });
+  const journal = memoryStore();
+  await runLive({ world: cars, respond: async request => {
+    if (!('memory' in (request.schema as { properties: object }).properties)) return respond(request);
+    const id = /\nYou are \w+ \((\w+)\)\.\n/.exec(request.system!)![1];
+    (sent[id] ??= []).push(structuredClone(request));
+    return { text: JSON.stringify({ memory: 'We rode in the car.' }), usage: null };
+  }, model: 'stand-in', calls: 80, journal, pause: true });
+  for (const id of ['anna', 'boris', 'clara']) {
+    for (const request of sent[id]) {
+      assert.equal(request.system, sent[id][0].system);
+      assert.match(request.system!, /\n\nVehicles:\n- Blue car \(car\): A small blue car\. 2 seats\. Anna may drive it\.\n\nPeople:/);
+      const content = request.messages.at(-1)!.content;
+      assert.doesNotMatch(content, /^Vehicles:|arriving /m);
+    }
+  }
+  assert.doesNotMatch(sent.clara[0].messages[0].content, /Here stands:|standing at|of the drive are left/);
+  assert.ok(sent.anna.some(request => /You get out of Blue car\./.test(request.messages[0].content)));
+  assert.ok(sent.boris.some(request => /Anna gets into Blue car\./.test(request.messages[0].content)));
+  const drives = journal.all.filter(entry => entry.event.kind === 'drive');
+  assert.equal(drives.length, 2);
+  for (const { event } of drives) assert.equal(event.arrival! - event.at, 47);
+  const deeds = sent.world.map(request => request.messages[0].content);
+  assert.ok(deeds.some(text => text.includes('This vehicle stands at Red room (red).')));
+  assert.ok(deeds.some(text => text.includes('Here stands: Blue car (car), 1 of 2 seats free.')));
+  for (const text of deeds) assert.doesNotMatch(text, /^Vehicles:|^Other places[^\n]*Blue car/m);
+});
+
+test('a resumed run counts its horizon from a vehicle due before the next person is free', async () => {
+  const town = readWorld({ title: 'Town', about: 'Two places.', clock: '12:00', travelMinutes: 3, shortWords: 10000,
+    places: [{ id: 'home', name: 'Home', about: 'A room.' }, { id: 'shop', name: 'Shop', about: 'A shop.' }],
+    vehicles: [{ id: 'car', name: 'Car', about: 'A car.', at: 'home', faster: 2, seats: 1 }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'home', sheet: 'SHEET-ANNA', clock: true }] });
+  const journal = memoryStore(), first = standIn({ anna: [act('go', { place: 'car' }), act('go', { place: 'shop' }), act('wait', { seconds: 600 })] });
+  const stopped = await runLive({ world: town, respond: first.respond, model: 'stand-in', minutes: 1, journal });
+  assert.equal(stopped.seconds, 60);
+  assert.equal(journal.all.find(entry => entry.event.kind === 'drive')!.event.arrival, 100);
+  assert.equal(replay(town, journal.all).people[0].freeAt, 620);
+  for (const calls of [1, 100]) {
+    const continued = memoryStore();
+    continued.append(structuredClone(journal.all));
+    const second = standIn({ anna: Array.from({ length: 100 }, () => act('wait', { seconds: 1 })) });
+    const outcome = await runLive({ world: town, respond: second.respond, model: 'stand-in', minutes: 1, calls, journal: continued });
+    assert.deepEqual([outcome.reason, outcome.seconds, outcome.calls], calls === 1 ? ['calls', 1, 1] : ['horizon', 60, 60]);
+    assert.match(second.sent.anna[0].messages[0].content, /Now 12:01:40\./);
+    assert.match(second.sent.anna[0].messages[0].content, / 1 min 0 s of the story are left\.$/);
+    assert.ok(continued.all.slice(journal.all.length).every(entry => entry.event.at >= 100 && entry.event.at < 160));
+    assert.deepEqual(replay(town, continued.all), replay(town, structuredClone(continued.all)));
+  }
+});
