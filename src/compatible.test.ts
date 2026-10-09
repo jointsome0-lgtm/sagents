@@ -163,6 +163,8 @@ test('a stream is an answer only when it came whole: its text and usage, and a f
   assert.deepEqual(await respond(request, { onText: (part: string) => { parts.push(part); } }),
     { text: '{"ok":true}  \u2014', usage: { inputTokens: 120, cachedInputTokens: 100, outputTokens: 30, reasoningTokens: null } });
   assert.deepEqual(parts, ['{"ok":', 'true}  \u2014']);
+  const multiline = createCompatible({ env: streaming, fetch: async () => stream('data: {"choices":\r\n: a comment\r\nevent: message\r\ndata: [{"delta":{"content":"ok"},"finish_reason":"stop"}]}\r\n\r\ndata: [DONE]\n')() });
+  assert.equal((await multiline.respond(request)).text, 'ok');
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].init.headers, { authorization: `Bearer ${KEY}`, 'content-type': 'application/json', accept: 'text/event-stream' });
   // The body is the one of a request without the setting, and the two fields of a stream after it.

@@ -95,7 +95,7 @@ This turn the \`text\` of a say or a call may hold 57 words at most. 0 min 57 s 
   assert.match(sent.dan[0].messages[0].content, /^So far:\n09:00:00 Clara calls Anna \(telephone\): "CALL-WORD for you"\n\nNow 09:00:03\./);
 });
 
-test('speech takes the time of its words, holds its listeners and is cut at the limit; the horizon and the call limit end the run', async () => {
+test('speech takes the time of its words, holds its listeners and is cut at the limit; the horizon, calls, tokens and unusable answers end the run', async () => {
   const { sent, respond } = standIn({
     anna: [act('say', { text: words(10) }), act('say', { text: words(70) }), 'not an action', act('wait', { seconds: 600 })],
     boris: [act('do', { text: 'reads', seconds: 300 }), act('wait', { seconds: 600 })],
@@ -126,6 +126,17 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   const limited = await runLive({ world, respond: short.respond, model: 'stand-in', minutes: 600, calls: 3, journal: few });
   assert.deepEqual([limited.status, limited.reason, limited.calls, few.all.length], ['done', 'calls', 3, 3]);
   assert.equal(Object.values(short.sent).flat().length, 3);
+  const metered = standIn({});
+  const capped = await runLive({ world, respond: metered.respond, model: 'stand-in', minutes: 600, tokens: 150 });
+  assert.deepEqual([capped.status, capped.reason, capped.calls, capped.inputTokens + capped.outputTokens, Object.values(metered.sent).flat().length], ['done', 'tokens', 2, 220, 2]);
+  let asked = 0;
+  const invalid = await runLive({ world, respond: async () => { asked += 1; return { text: 'not an action', usage: null }; }, model: 'stand-in', minutes: 600, calls: 20 });
+  assert.deepEqual([invalid.status, invalid.reason, invalid.calls, invalid.invalid, asked], ['failed', 'invalid', 5, 5, 5]);
+  let judged = 0;
+  const alternating = await runLive({ world, model: 'resident', minutes: 600, calls: 20,
+    respond: async () => ({ text: act('do', { text: 'looks', seconds: 1 }), usage: null }),
+    worldPlayer: { model: 'world', respond: async () => ({ text: ++judged % 2 ? 'not an answer' : came({ moves: [{ what: 'absent', n: 1, to: 'anna' }] }), usage: null }) } });
+  assert.deepEqual([alternating.status, alternating.reason, alternating.calls, alternating.invalid, alternating.refused, judged], ['failed', 'invalid', 14, 5, 4, 9]);
 });
 
 test('a gesture is seen with its speech, and words said with a deed are heard in its place as a speech and never reach the world', async () => {

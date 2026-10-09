@@ -16,7 +16,7 @@ import { WorldError } from './world.ts';
 const USAGE = `sagents login [--new]          sign in with ChatGPT in the browser; --new registers this tool again
 sagents status [<model>]       whether this computer is signed in, and whether the plan's list of models has the model
 sagents ask [--timeout <s>]    one request as JSON on stdin, one JSON line on stdout
-sagents live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>]
+sagents live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>] [--tokens <n>]
                   [--state <file> | --run <dir>] [--environment <name>] [--json]
                                the characters of a world file, each played by the model, under the story's clock;
                                --cast gives one character a model of its own; --world-model answers what comes of a deed;
@@ -149,11 +149,13 @@ else if (command === 'lab') {
   }
 } else if (command === 'live') {
   try {
-    const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, 'world-model': { type: 'string' }, minutes: { type: 'string' }, calls: { type: 'string' },
+    const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, 'world-model': { type: 'string' }, minutes: { type: 'string' }, calls: { type: 'string' }, tokens: { type: 'string' },
       state: { type: 'string' }, run: { type: 'string' }, environment: { type: 'string' }, json: { type: 'boolean' } }, 1);
     const minutes = Number(given?.values.minutes ?? 30);
     const calls = Number(given?.values.calls ?? 60);
-    if (!given || given.positionals.length !== 1 || !(minutes > 0 && minutes <= 1440) || !(Number.isInteger(calls) && calls >= 1)) {
+    const ceiling = given?.values.tokens === undefined ? undefined : Number(given.values.tokens);
+    if (!given || given.positionals.length !== 1 || !(minutes > 0 && minutes <= 1440) || !(Number.isInteger(calls) && calls >= 1)
+      || (ceiling !== undefined && !(Number.isSafeInteger(ceiling) && ceiling >= 1))) {
       console.error(USAGE);
       process.exitCode = 1;
     } else {
@@ -210,7 +212,7 @@ else if (command === 'lab') {
         };
         const { seconds, ...totals } = await runLive({ world, ...playerOf((given.values.model as string | undefined) ?? LIVE_MODEL),
           cast: Object.fromEntries([...names].map(([id, name]) => [id, playerOf(name)])),
-          worldPlayer: typeof given.values['world-model'] === 'string' ? playerOf(given.values['world-model']) : undefined, minutes, calls, journal: state, pause: state !== undefined,
+          worldPlayer: typeof given.values['world-model'] === 'string' ? playerOf(given.values['world-model']) : undefined, minutes, calls, tokens: ceiling, journal: state, pause: state !== undefined,
           // The players' names for a service's cache are made of the state file's own, and of one made here for a run that keeps no file.
           cache: state?.cache ?? randomUUID(), onAsk: kept?.onAsk,
           // A kept run has the event in its file before anyone is shown it.

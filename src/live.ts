@@ -367,19 +367,22 @@ export type Player = { respond: (request: Request) => Promise<Result>; model: st
 // name of the model whose answer it came of, or null. `worldPlayer` answers what came of a deed, and is the same
 // player as everyone's when it is not given. `cutRun` is how many answers of one model cut short at its limit, one
 // after another, end a run: 3 when it is not given. `declinedRun` is how many requests that a service declined to
-// answer end a run, wherever in it they came: 3 when it is not given. `cache` is a name of this world's journal that
+// answer end a run, wherever in it they came: 3 when it is not given. `invalidRun` is how many answers of one model's
+// name that could not be used, with none of its answers used in between, end a run: 5 when it is not given. It counts
+// cut and declined answers too. `cache` is a name of this world's journal that
 // its keeper made up, the same for every run that continues it: each resident's requests and the world's then carry a
 // name of their own made of it, as `cache` of a request, which says nothing of who that is. With none, no request has one.
 // `onAsk` is told of every request just before it is sent: what it is for, where a figure's answer is told from the
 // world's answer to a deed, whose it is, a resident's id or null for the world's, and the name of the model asked.
-export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number;
-  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number; declinedRun?: number; cache?: string;
+export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number; tokens?: number;
+  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number; declinedRun?: number; invalidRun?: number; cache?: string;
   onAsk?: (kind: Asked | 'reply', who: string | null, name: string) => unknown };
 export type Tally = { calls: number; invalid: number; overlong: number; declined: number; unreported: number; inputTokens: number; cachedInputTokens: number; outputTokens: number };
 // What a request was for: a resident's turn, a memory written anew, or an answer of the world, to a deed or for a figure.
 export type Asked = 'turn' | 'memory' | 'world';
 export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 'outputTokens'>;
-// `reason` is `horizon` or `calls` for a run that ended as planned, and the failure's code for one that did not.
+// `reason` is `horizon`, `calls` or `tokens` for a run that ended as planned, and the failure's code for one that did
+// not, or `invalid` when `invalidRun` answers of one model's name could not be used in a row.
 // `seconds` is the story time this run played. `rewrites` counts the memories written anew and `lost` those of them
 // whose answer could not be used twice, so that the lines they were to keep are forgotten. `invalid` counts every
 // answer that could not be used, whatever was asked, and `overlong` those of them that the model's own limit of one
@@ -400,11 +403,12 @@ const MAX_ENDPOINTS = 16;
 
 const CUT = Symbol('cut'), DECLINED = Symbol('declined');
 const spent = (): Spent => ({ calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
-// Plays the world on from its journal until the horizon, the limit of model calls or a failure of the connection.
+// Plays the world on from its journal until the horizon, the limit of model calls or tokens, or a failure.
 // `calls` counts the answers that arrived or were cut short at the model's limit, a memory's as well as a turn's. Any
-// other failure ends the run at once: nothing is tried again, and the journal holds everything up to it.
-export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, onEvent = () => {}, journal = memoryStore(),
-  pause = false, cutRun = 3, declinedRun = 3, cache, onAsk = () => {} }: Live): Promise<Outcome> {
+// other failure ends the run at once: nothing is tried again, and the journal holds everything up to it. `tokens`
+// limits the reported input and output tokens before each request; the one that crosses it is the last.
+export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, tokens, onEvent = () => {}, journal = memoryStore(),
+  pause = false, cutRun = 3, declinedRun = 3, invalidRun = 5, cache, onAsk = () => {} }: Live): Promise<Outcome> {
   const state = replay(world, journal.entries());
   const stands = next(state.people).freeAt;
   const horizon = stands + Math.round(minutes * 60);
@@ -423,9 +427,14 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   // the world's answers under another. A hash, so that the name holds no id of the story and not the journal's own name.
   const owned = (...whose: string[]) => cache === undefined ? {} : { cache: createHash('sha256').update(JSON.stringify([cache, ...whose])).digest('hex').slice(0, 32) };
   const tallyOf = (player: { name: string }) => own(outcome.models, player.name, () => ({ invalid: 0, overlong: 0, declined: 0, unreported: 0, ...spent() }));
+  const invalids = new Map<string, number>();
   const unusable = (player: { name: string }) => {
     outcome.invalid += 1;
     tallyOf(player).invalid += 1;
+    invalids.set(player.name, (invalids.get(player.name) ?? 0) + 1);
+    if (invalids.get(player.name)! < invalidRun) return false;
+    Object.assign(outcome, { status: 'failed', reason: 'invalid' });
+    return true;
   };
   // The one way anything happens: the record goes through the rules, then to the journal, then to whoever watches.
   const happened = async (record: Record, by: string | null = null) => {
@@ -447,6 +456,10 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       outcome.reason = 'calls';
       return null;
     }
+    if (tokens !== undefined && outcome.inputTokens + outcome.outputTokens >= tokens) {
+      outcome.reason = 'tokens';
+      return null;
+    }
     onAsk(asked, who, player.name);
     let answer: Result;
     try { answer = await player.respond({ model: player.model, ...content }); } catch (error) {
@@ -466,7 +479,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
         for (const tally of [outcome, tallyOf(player), outcome.kinds[kind]]) tally.calls += 1;
         for (const tally of [outcome, tallyOf(player)]) tally.declined += 1;
         unusable(player);
-        if (outcome.declined < declinedRun) return DECLINED;
+        if (outcome.declined < declinedRun) return outcome.status === 'failed' ? null : DECLINED;
       }
       Object.assign(outcome, { status: 'failed', reason: error.code, ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}),
         ...(error.providerCode ? { providerCode: error.providerCode } : {}), ...(error.param ? { param: error.param } : {}) });
@@ -507,7 +520,8 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       if (answer === DECLINED) break;
       came = answer === CUT ? null : read(answer);
       const refused = came && refusal(world, state.people, state.things, deed, came);
-      if (!came) unusable(judge);
+      if (!came) { if (unusable(judge)) return null; }
+      else if (!refused) invalids.delete(judge.name);
       if (refused) {
         outcome.refused += 1;
         [came, again] = [null, `\n${againOf(refused)}`];
@@ -573,7 +587,8 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
         if (answer === null) return outcome;
         if (answer === DECLINED) break;
         memory = answer === CUT ? null : readMemory(answer, world.longWords);
-        if (!memory) unusable(player);
+        if (!memory) { if (unusable(player)) return outcome; }
+        else invalids.delete(player.name);
       }
       outcome.rewrites += 1;
       if (!memory) outcome.lost += 1;
@@ -610,7 +625,8 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     ].join('\n') }] }, who);
     if (answer === null) return outcome;
     const action = answer === CUT ? 'long' : answer === DECLINED ? 'declined' : readAction(world, actor, answer);
-    if (typeof action === 'string' && answer !== DECLINED) unusable(player);
+    if (typeof action === 'string' && answer !== DECLINED) { if (unusable(player)) return outcome; }
+    else if (typeof action !== 'string') invalids.delete(player.name);
     await happened({ kind: 'act', who, at: now, limit, action }, player.name);
   }
 }

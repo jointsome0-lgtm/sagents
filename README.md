@@ -89,11 +89,14 @@ and what share of a request was then read from a cache.
   answers in plain text fails nothing. Both were played against a stand-in for such a server on the same computer.
   When it answered HTTP 400, the totals began `failed (invalid_request 400 unsupported_parameter response_format)`,
   the server's own code and field name after the status. When it answered in plain text, no answer could be used and
-  each counted as a wait of 30 seconds, which prints no line, so the run printed only its totals, `done (calls)` with
-  as many `invalid` as `calls`.
+  each counted as a wait of 30 seconds, which prints no line, so that check printed only its totals, `done (calls)` with
+  as many `invalid` as `calls`. Today five unusable answers of one model in a row end it as `failed (invalid)`,
+  unless the same answer reaches the cut or decline limit, whose reason wins, as described below.
 - `--calls` is the most requests one run sends, 60 when it is not given, and every request counts, whatever it is
-  for: a resident's turn, the world's answer to a deed, a memory rewrite. The run also ends after `--minutes` of the
-  story, 30 by default.
+  for: a resident's turn, the world's answer to a deed, a memory rewrite. `--tokens <n>` also ends the run before
+  another request when the reported input and output tokens reach that ceiling, with reason `tokens`. An answer
+  with no usage adds nothing; the request that crosses the ceiling is the last, so it can go over by one request.
+  Without `--tokens` there is no token ceiling. The run also ends after `--minutes` of the story, 30 by default.
 - Without `--model` the residents are played through the ChatGPT plan, which needs the `login` below.
 - The address is `https`, or plain `http` to this computer only; a card elsewhere is reached through an SSH tunnel to
   a local port or over `https`. This, the other settings and what is sent to whom are under
@@ -164,7 +167,7 @@ gateway on a rented card, so what another account or server does differently is 
 
 ```sh
 sagents live examples/night-station.json [--model <id>] [--cast <character>=<id>]... [--world-model <id>] \
-  [--minutes <n>] [--calls <n>] [--state <file> | --run <dir>] [--environment <name>] [--json]
+  [--minutes <n>] [--calls <n>] [--tokens <n>] [--state <file> | --run <dir>] [--environment <name>] [--json]
 ```
 
 `live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
@@ -259,13 +262,20 @@ The rules of time and hearing:
   character is already in or to no place of the list, lasted no time the action allows, was cut short at the
   model's limit of one answer, or the service declined to write it (`declined`). The character's next turn
   says which, and what to do instead; after a declined turn it reads the sentence of an answer that was no JSON
-  object, since no sentence for it was measured, and only the journal tells the two apart.
+  object, since no sentence for it was measured, and only the journal tells the two apart. Five answers of one
+  model's name that could not be used, with none of its answers used in between, end the run as `failed (invalid)`,
+  unless the same answer reaches the cut or decline limit, when `output_limit` or `declined` wins respectively.
+  This counts turns, world answers and memory rewrites, including cut and declined answers. An answer that the
+  rules of things refuse is neither used nor unusable: it is counted under `refused` and neither adds to that row
+  nor ends it. The answer that ends the run is counted but is not put in the journal. `invalidRun` of `runLive()`
+  sets this limit, with no command flag.
 - A request that the service declined to answer is not sent again: the same words would be declined again. A turn
   goes as the wait above, nothing comes of a deed whose answer the world's model declined, and a memory rewrite is
   lost as after two answers that could not be used. Each counts as a request and as an unusable answer, with no
-  tokens known for it. The third in a run, whoever was asked and for what, ends the run as `failed (declined)`: a
-  service that keeps declining is not asked on. No refusal of a real service was seen: the shapes that are read as
-  one are those of the table of reasons above.
+  tokens known for it. The third in a run, whoever was asked and for what, ends the run as `failed (declined)`.
+  The row of unusable answers can end it before then as `failed (invalid)`; when one decline reaches both limits,
+  `declined` wins. A service that keeps declining is not asked on. No refusal of a real service was seen: the shapes
+  that are read as one are those of the table of reasons above.
 
 The world answers a deed:
 
@@ -453,7 +463,8 @@ Things:
   is, so that nothing moved and its words would tell of a move that the lists never took. Next to a move that changes something, such an entry is passed over as before. More than 12 moves or 6 states make the answer unusable. A refused answer changes nothing
   and never reaches the journal: the world is asked once more with the same request and one sentence that names
   the entry and the cause in the words of its instructions. After the second nothing came of the deed. The totals
-  count the answers `refused` and the deeds and speeches left `void`.
+  count the answers `refused` and the deeds and speeches left `void`. A refused answer is neither used nor unusable
+  and neither adds to the row of unusable answers nor ends it.
 - A thing appears only out of a stock and leaves the world only by being eaten or burned, so for every name what
   there is, what was eaten or burned and what came from a stock add up to what the world file gave, and the sum
   of money never changes. The event of an answer holds `moved`, a posting for each thing with how many went from
@@ -577,14 +588,22 @@ for thousands of steps with answers of every kind, checks each law from the jour
 law and the record. Each law is one sentence, and they are written in one place: `LAWS` in
 `src/invariants.test.ts`.
 
-The run ends after `--minutes` of the story, 30 by default, or after `--calls` requests, 60 by default; a memory
-rewrite is a request too. It stops at the first failure of the model connection and tries nothing again, with two
+The run ends after `--minutes` of the story, 30 by default, after `--calls` requests, 60 by default, or before a
+request when the reported input and output tokens reach `--tokens`, if given; a memory rewrite is a request too.
+Usage that was not reported adds nothing, and the request that crosses the token ceiling is the last.
+It stops at the first failure of the model connection and tries nothing again, with two
 exceptions. A request that the service declined to answer (`declined`) counts as a request and as an unusable answer,
-as the rules of time and hearing above say, and only the third in a run ends it. And an answer that the model's own
+as the rules of time and hearing above say, and the third in a run ends it as `failed (declined)` unless the row of
+unusable answers ends it before then. And an answer that the model's own
 limit cut short (`output_limit`) is an answer that cannot be used. For a
 turn it is a lost turn like any other, for the world's answer and a memory rewrite it is one of their two tries,
 and it counts as a request, with no tokens known for it. Three such answers of one model in a row, with no answer
-of that model arriving whole in between, end the run as `failed (output_limit)`. It prints
+of that model arriving whole in between, end the run as `failed (output_limit)`, unless the row of unusable answers
+ends it before then. Five unusable answers of one model's name, with none of its answers used in between, end it
+as `failed (invalid)`, including cut and declined answers. An answer that the rules of things refuse is neither
+used nor unusable: it is counted under `refused` and neither adds to that row nor ends it. When one answer reaches
+the invalid limit and the cut or decline limit together, `output_limit` or `declined` wins respectively. `cutRun`,
+`declinedRun` and `invalidRun` of `runLive()` set these limits; they have no command flags. It prints
 each event as it happens. In the text output an event is one line, followed by a line for each thing it found, moved
 or put into another state, for each pose it changed, for each private feeling, for what was heard next door, for the words said with a deed and for a private note; a gesture stands in brackets before its speech; a `wait` with
 no note prints nothing,
@@ -784,9 +803,16 @@ What sagents sends and to whom:
   `stream_options` or `n`: a setting that names one is refused.
 - With `SAGENTS_API_STREAM=1` the body also holds `"stream": true` and `"stream_options": {"include_usage": true}`,
   and the request asks for `text/event-stream`. The text is the `delta.content` of the chunks, and reasoning in a
-  delta is never read. Only a stream that ends with `data: [DONE]` is an answer: one that breaks off before it is
-  `incomplete_stream`, one that holds an `error` event is a failure by that event's code, and neither returns the text
-  that came by then. The limits on the answer's size, the time limit and the `finish_reason` are read as without it.
+  delta is never read. With nothing held, a `data:` line that is JSON is read at once; otherwise it is held and
+  joined with line feeds to the next data lines of that event. The held event is read once, at its blank line,
+  which may end in a carriage return; comments and other fields are skipped and end nothing. A held event that
+  is not JSON at its blank line, or a stream that ends with an event held, is `invalid_stream`. Only `data: [DONE]`
+  with nothing held ends an answer, at once; with something held it is one more data line of that event. A last
+  line broken off before its line feed is not read at all: with nothing held the stream is `incomplete_stream`,
+  like any stream that ends before `data: [DONE]`, or `invalid_stream` when it breaks off inside a character. One
+  that holds an `error` event is a failure by that event's code,
+  and no failure returns the text that came by then. The limits on the answer's size, the time limit and the
+  `finish_reason` are read as without it.
 - The `cache` name of a request goes out only when `SAGENTS_API_CACHE_FIELD` names the field for it, and then in the
   body under that field and nowhere else: servers call such a field by different names, and one that checks its
   fields refuses a name it does not know. The field cannot be one of those above or one of `SAGENTS_API_EXTRA`.

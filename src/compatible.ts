@@ -108,31 +108,57 @@ function failure(httpStatus: number | undefined, error: unknown) {
 }
 
 // A streamed answer in the shape of one that came whole, so that one set of checks reads both. Events are lines
-// `data: <json>`; a comment and any other line are skipped, and reasoning in a delta is never read. Only `[DONE]`
-// makes an answer: a stream that ends without it, or that holds an error at any point, is a failure, whatever text
-// came by then. The caller is handed each piece as it arrives, before any of that is known.
-async function streamOf(body: Response['body'], onText: (delta: string) => unknown): Promise<unknown> {
+// `data: <json>`; a line that is not yet JSON is held with the next data lines and read once at the event's blank line.
+// A blank line ends the event; a comment and other fields end nothing and are skipped. Reasoning is never read.
+// Only `[DONE]` makes an answer: a stream that ends without it, or that holds an error at any point, is a failure,
+// whatever text came by then. The caller is handed each piece as it arrives, before any of that is known.
+async function streamOf(body: Response['body'], onText: (delta: string) => unknown, stopped: () => ModelError | null): Promise<unknown> {
   if (!body) throw new ModelError('invalid_stream');
   const decoder = new TextDecoder('utf-8', { fatal: true });
-  let buffer = '', bytes = 0, text = '', finish: unknown, usage: unknown, provider: unknown;
+  let bytes = 0, text = '', finish: unknown, usage: unknown, provider: unknown;
+  // The pieces of a line that has not ended yet, joined once when its line feed comes: a long line that arrives in
+  // small pieces is read once, not once for every piece.
+  let rest: string[] = [];
+  let held: string[] | null = null, pieces = 0;
   for await (const part of body) {
+    // Pieces that are ready at once leave no timer room to fire. So now and then the loop steps aside, and the clock
+    // is read at every piece, after that step: a deadline and a cancellation are seen while a stream is read, text
+    // or none, and nothing of a piece is read once one of them has come.
+    if ((pieces += 1) % 256 === 0) await new Promise<void>(resolve => { setImmediate(resolve); });
+    const reason = stopped();
+    if (reason) throw reason;
     bytes += part.byteLength;
     if (bytes > MAX_ANSWER) throw new ModelError('output_limit');
-    try { buffer += decoder.decode(part, { stream: true }); } catch (error) {
+    let piece: string;
+    try { piece = decoder.decode(part, { stream: true }); } catch (error) {
       // A TypeError is how the decoder says that the bytes are not UTF-8.
       if (error instanceof TypeError) throw new ModelError('invalid_stream');
       throw error;
     }
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
+    const end = piece.lastIndexOf('\n');
+    if (end === -1) { if (piece) rest.push(piece); continue; }
+    const lines = `${rest.join('')}${piece.slice(0, end)}`.split('\n');
+    rest = [piece.slice(end + 1)];
     for (const line of lines) {
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      // Leaving the loop cancels the body: a connection left open after the end is not waited for.
-      if (data === '[DONE]') return { choices: [{ finish_reason: finish, message: { content: text } }], usage, provider };
+      const ended = line === '' || line === '\r';
+      let data: string;
+      if (ended && held !== null) {
+        data = held.join('\n');
+        held = null;
+      } else {
+        if (!line.startsWith('data:')) continue;
+        data = line.slice(5).trim();
+        if (held !== null) { held.push(data); continue; }
+        // Leaving the loop cancels the body: a connection left open after the end is not waited for.
+        if (data === '[DONE]') return { choices: [{ finish_reason: finish, message: { content: text } }], usage, provider };
+      }
       let chunk: unknown;
       try { chunk = JSON.parse(data); } catch (error) {
-        if (error instanceof SyntaxError) throw new ModelError('invalid_stream');
+        if (error instanceof SyntaxError) {
+          if (ended) throw new ModelError('invalid_stream');
+          held = [data];
+          continue;
+        }
         throw error;
       }
       if (!isObject(chunk)) throw new ModelError('invalid_stream');
@@ -163,7 +189,7 @@ async function streamOf(body: Response['body'], onText: (delta: string) => unkno
     if (error instanceof TypeError) throw new ModelError('invalid_stream');
     throw error;
   }
-  throw new ModelError('incomplete_stream');
+  throw new ModelError(held === null ? 'incomplete_stream' : 'invalid_stream');
 }
 
 type Options = { fetch?: Fetch; env?: Env };
@@ -192,7 +218,7 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
         // A refusal by the status is one JSON body also when a stream was asked for, and so is the answer of a server
         // that gave it whole all the same.
         streamed = stream && response.ok && !response.headers.get('content-type')?.includes('application/json');
-        answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until)), current, until)
+        answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until), stopped), current, until)
           : await untilStopped(() => jsonOf(response!).catch(error => {
             if (response!.ok || !(error instanceof Error)) throw error;
             return null;

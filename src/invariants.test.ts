@@ -258,7 +258,7 @@ function standIn(record: () => number) {
 test('thousands of steps of any answers leave a journal in which every law of the world holds', async () => {
   const journal = memoryStore();
   const { seen, respond } = standIn(() => journal.all.length);
-  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, cutRun: Infinity, declinedRun: Infinity });
+  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity });
   assert.deepEqual([whole.status, whole.reason, whole.calls], ['done', 'calls', 6000]);
   const turns = seen.turns!;
   seen.turns = null;
@@ -669,7 +669,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
         assert.throws(() => openState(path, source, ENVIRONMENT), StateError);
         caches.add(state.cache);
         let last = '';
-        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, cutRun: Infinity, declinedRun: Infinity, onEvent: event => { last = event.kind; } });
+        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity, onEvent: event => { last = event.kind; } });
         stops.push(last);
       } finally { state.close(); }
     }
