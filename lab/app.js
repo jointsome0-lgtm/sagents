@@ -64,7 +64,7 @@ const holder = id => A.names.characters.get(id) ?? A.names.places.get(id) ?? B.n
 // ---- One event as a node of the page.
 // The fields of an event that this page shows in a place of their own, or leaves out knowingly (`finds`, which the
 // line of what was found says). Any other is shown as a plain line.
-const KNOWN = new Set(['at', 'clock', 'kind', 'who', 'place', 'to', 'text', 'seconds', 'cut', 'heard', 'note', 'indoors', 'search', 'finds', 'found', 'moved', 'set', 'poses', 'feels', 'wakes', 'beyond', 'nearby', 'gesture', 'says']);
+const KNOWN = new Set(['at', 'clock', 'kind', 'who', 'place', 'to', 'text', 'seconds', 'cut', 'heard', 'note', 'indoors', 'search', 'finds', 'found', 'moved', 'set', 'poses', 'feels', 'touches', 'lingers', 'traced', 'wiped', 'wakes', 'beyond', 'nearby', 'gesture', 'says']);
 const dot =id => el('span', `dot ${tone(id)}`);
 const whoNode = (head, id, figure) => { head.append(figure ? el('span', 'dot') : dot(id), el('span', 'who', personName(id))); };
 const build = rec => {
@@ -122,6 +122,10 @@ const build = rec => {
   for (const thing of list(event.set)) line(TXT.state, `${str(thing?.what)} ${str(thing?.name)}: ${str(thing?.state)}`);
   for (const pose of list(event.poses)) line(`${TXT.pose} · ${personName(pose?.of)}`, str(pose?.text) || TXT.none);
   for (const feeling of list(event.feels)) rec.feels.push([str(feeling?.of), line(`${TXT.feels} · ${personName(feeling?.of)}`, str(feeling?.text), 'own')]);
+  for (const touch of list(event.touches)) line(`${TXT.touch} · ${personName(touch?.of)} → ${personName(touch?.to)}`, touch?.kind === 'none' ? TXT.ended : `${str(touch?.kind)}, ${str(touch?.force)}: ${str(touch?.text)}`);
+  for (const feeling of list(event.lingers)) rec.feels.push([str(feeling?.of), line(`${TXT.lingers} · ${personName(feeling?.of)}`, `${str(feeling?.zone)}, ${str(feeling?.kind)}, ${feeling?.level === 'none' ? TXT.gone : str(feeling?.level)}${feeling?.minutes == null ? '' : `, ${TXT.forMinutes(str(feeling.minutes))}`}${feeling?.level === 'none' ? '' : `: ${str(feeling?.text)}`}`, 'own')]);
+  for (const trace of list(event.traced)) line(`${TXT.traced} · ${personName(trace?.of)}`, `${str(trace?.label)}: ${str(trace?.text)}`);
+  for (const trace of list(event.wiped)) line(`${TXT.wiped} · ${personName(trace?.of)}`, `${str(trace?.label)}: ${str(trace?.text)}`);
   if (list(event.wakes).length) line(TXT.wakesList, list(event.wakes).map(personName).join(', '));
   if (event.beyond != null) line(TXT.beyond, `${str(event.beyond)}${list(event.nearby).length ? ` (${list(event.nearby).map(personName).join(', ')})` : ''}`);
   // A field this page does not know, of another version of the engine, is one line under the field's own name,

@@ -387,12 +387,17 @@ The world answers a deed:
   came of the latest earlier deeds in that place, in the world's words and in what the rules moved (400 words of
   them), the clock, and the doer's name with the deed
   and its span. It is sent no sheet, note, memory or speech, and of those next door no looks, pose or things.
+  A candidate played on real models over an earlier engine, still awaiting measurement over 0.1.1: in a world that
+  keeps traces it is also told, after each person's looks and pose, that person's traces under their labels, as
+  «Things» says. Those notes describe the other line; this port onto the main line is played on no model.
 - It answers with `search`, whether the deed was a search of the place; `finds`, the labels of the hidden things
   the deed went straight to; `moves`, `sets` and `poses`, described under «Things» below; `wakes`, the sleepers of
   that place or of a place next door whom the deed wakes; `feels`, what the deed makes a body feel, and `beyond`,
   what of the deed is heard next door, described in the next two points; and
   `result`, one or two sentences of what anyone there could see, hear or smell, 65 words at most, or null when
-  there is nothing to notice. The fields stand in this order, the entries before the words, so that the
+  there is nothing to notice. A world file with `touch` adds `touches` after `poses`, as the point on touches
+  below says, and one with `marks` adds `lingers` after `feels`, as the point after it says. Except for traces,
+  the fields stand in this order, the entries before the words, so that the
   words are written after the entries and cannot lead them; both orders passed the check of 2026-10-05 on the weak
   local model. The schema is made for each
   request and lists the labels, ids and states that the answer may name, so a model held to its schema names
@@ -401,6 +406,9 @@ The world answers a deed:
   own thing. The rules do the rest: an id of `finds`, `poses` or `feels` that is not of the place, or of `wakes` that is of
   no sleeper of the place or of a place next door, is
   dropped, and an entry of `moves` or `sets` that cannot be taken refuses the answer, as «Things» says.
+  In a world that keeps traces the answer has two fields more, `traces` and `wipes`, last, after `result`, in that
+  order, described under «Things». This order was played on two models on the other line and is the one taken
+  here; this port onto the main line is played on no model.
 - `feels` is a list of `{ of, text }`: what the deed makes the body of a person there feel, such as weight, cold,
   pain or taste, and never a thought or a wish. A deed that does something to a body gives entries, for the one
   touched and for the one who touches; a deed that only looks, listens or speaks gives none, and one who only
@@ -419,6 +427,89 @@ The world answers a deed:
   that the ordinary handling of a thing gives no entry. This wording has stood in the world's requests of every measurement since, but what it changed by itself was not counted. This is the first of three planned layers of sensation. The
   other two are not built: what a body feels from its own state over time, such as an arm tired by an hour of
   carrying, and a body that changes and is kept as a record.
+- A touch between two people is kept as state only in a world whose file says `"touch": true` at its top level
+  (`src/touch.ts`). **This candidate was played on real models over an earlier engine and still awaits
+  measurement over 0.1.1**. Those notes describe the other line; this port onto the main line is played on no model.
+  Without the setting a world is asked, answered and kept as before, to the letter, and a journal written before
+  the setting existed replays. With it:
+  - The world's answer has one more list, `touches`, after `poses` and before `wakes`, so that the fields before it
+    are written as they were measured and `wakes` and `feels` are written after the touches they should agree with.
+    The world's text has one more point for it, between those on `poses` and on `wakes`; `WORLD_INSTRUCTIONS` itself
+    is the measured text. An entry is `{ of, to, kind, force, text }`: `of` touches `to`, two different people of the
+    place, a sleeper too; `kind` is `touch`, `press`, `squeeze`, `hold`, `embrace`, `rub` or `lean`, or `none` when
+    the deed ended the touch of `of` on `to`; `force` is `light`, `firm` or `hard`; `text` says with what of their
+    body the one touches and where on the other's, 15 words at most, naming neither. An entry is due for a touch
+    that goes on after the deed, and a touch that already holds needs none unless the deed changes or ends it.
+  - A touch is one record for the ordered pair, so two people can each have a touch on the other, and a new entry
+    for a pair takes the place of the old one. The rules drop an entry whose `of` and `to` are not two different
+    people of the place, whose kind or force is none of the list, whose text has no word, or that ends a touch
+    which is not there; of two entries for one pair the later is read. A place holds 8 touches at most
+    (`MAX_TOUCHES`): the entries are taken in their order, an ending first makes room, and an entry that would
+    begin a ninth is dropped. An answer with no list `touches` cannot be used, like one with no `poses`.
+  - A touch knows when it began. An entry with the same kind and force changes its text and keeps that moment;
+    another kind or force begins the count anew, at the start of the deed that changed it. A touch ends by an entry
+    with `none`, and by the rules alone when either of the two leaves the place by a `go`. Sleep ends none. Two
+    who walk to another place do not keep their touch, and someone who is held can walk away: neither is built.
+    Two people inside one vehicle keep their touch when it drives or arrives, since they stay in one place;
+    getting in or out ends it. Someone outside and someone inside are in different places and cannot hold a touch.
+    The standing vehicle's door carries only what `beyond` says is heard, as on the main line.
+  - The result's record and event hold `touches` as they were read, so everything follows from the journal, and the
+    transcript shows each as a line `touch of … on …`. A `go` that ended a touch holds nothing of it: the next turns
+    simply lack the line.
+  - The world is told the touches of the place in every request about a deed there, after the people: `Touches that
+    hold now:` and one line each, `- of <id> to <id>: <kind>, <force>, for <time>: <text>`, or `Touches that hold
+    now: none.` The time is how long the touch has lasted when the deed begins, in seconds and from two minutes on
+    in whole minutes. A figure's answer is asked for without them.
+  - Each of the two is told it on every turn while it lasts, under the line of their own pose: `You touch <name>
+    (<kind>, <force>, for <time>): <text>` or `<name> touches you (…): <text>`. Anyone else awake in the place reads
+    `<name> touches <name> (<kind>): <text>` after the lines of the others, without the force and the time. Nobody
+    elsewhere is told anything. The resident's text says in two sentences more, after the one about `You feel:`,
+    what the line is and that a touch lasts until one of the two lets go, by a do, or leaves, so that nobody has to
+    renew it. No line of anyone's memory is written for a touch: the result and `feels` tell of its beginning.
+- A lasting feeling of a part of a body, a mark, is kept as state only in a world whose file says `"marks": true`
+  at its top level (`src/marks.ts`). **This candidate was played on real models over an earlier engine and still awaits
+  measurement over 0.1.1**. Those notes describe the other line; this port onto the main line is played on no model.
+  Without the setting a world is asked, answered and kept as before, to the letter. With it:
+  - A mark is one feeling of one person: `of`; `zone`, one of `head`, `face`, `neck`, `shoulders`, `chest`, `back`,
+    `belly`, `hips`, `arms`, `hands`, `legs`, `feet`, or `body` for the whole of it; `kind`, one of `itch`, `burn`,
+    `ache`, `pain`, `numb`; `level`, one of `faint`, `clear`, `strong`; and `text`, where exactly and what it is
+    like, 15 words at most. There is one mark for a person, a zone and a kind, and a person has 6 at most
+    (`MAX_MARKS`). A character of the world file may begin with some, the list `marks` on the character, each
+    `{ zone, kind, level, text }` and so for good; a list with an entry in a world file without the setting is refused,
+    but an empty list is accepted.
+  - The world's answer has one more list, `lingers`, after `feels` and before `beyond`, so that the fields before it
+    are written as they were measured, and the world's text has one more point for it there. The list and its line
+    in a request are not called marks, since the world's text calls so what stands after a thing. An entry is
+    `{ of, zone, kind, level, minutes, text }`: `level` may also be `none`, when the feeling is gone, and `minutes`
+    is null or a whole number from 1 to 1440. With null the mark is so from now on, and `none` ends it. With a
+    number it is so until that many minutes after the end of the deed and is then again as it was before the entry,
+    which may be nothing or a mark that itself ends later: a mark is a short pile of layers (`MAX_LAYERS`, 3), the
+    top one being how it is now, and a layer that would have run out before the new one does is dropped. An entry
+    is due for what outlasts the deed or changes a mark that holds; what is felt only during the deed stays in
+    `feels`. A deed done to the very part where a mark sits changes it, at least for a while, and needs an entry:
+    a cream spread on a burn, cold water on it, a rub of an aching muscle, a blow on a bruise.
+    Nothing but an entry or the clock changes or ends a mark: an answer that lists none leaves all as
+    they are, and marks go where their owner goes, asleep or awake.
+  - The rules drop an entry whose `of` is nobody of the place, whose zone, kind or level is none of the list, whose
+    `minutes` is neither null nor a whole number within the bounds, whose text has no word unless its level is
+    `none`, that ends a mark which is not there, that would put a fourth layer on a mark, or that would begin a
+    seventh mark of a person. Of two entries for one person, zone and kind the later is read. An answer with no
+    list `lingers` cannot be used.
+  - No record is put when a layer runs out. The state keeps each layer with its end, and whoever reads the marks
+    reads them at a moment (`marksAt`): a layer whose end has come is gone and the one under it is so since that
+    second. The result's record and event hold `lingers` as read, so everything follows from the journal and the
+    time, and the transcript shows each as a line `private lasting feeling of …`.
+  - The owner is told its marks as they are now on every turn, one line each after the line of the sleep law:
+    `Your <zone> (<kind>, <level>): <text>`, with `Your whole body` for `body`, and nothing of a mark that is gone
+    for a while. No time is in it. Nobody else is told anything of them. The resident's text says in two sentences
+    more, after those about `You feel:` and a touch, what the line is and that it is told again until something
+    done or time changes it. No line of anyone's memory is written for a mark.
+  - The world is told the marks of everyone in the place in every request about a deed there, after the people and
+    the touches: `Feelings that last now:` and one line each, `- of <id>, <zone>: <kind>, <level>, for <time>:
+    <text>`, with `, <time> left` after the time for what is so only for a while, or `Feelings that last now:
+    none.` The times are counted at the start of the deed, in seconds, from two minutes on in whole minutes and
+    from two hours on in whole hours; a mark of the world file that nothing has changed yet has no `for <time>`. A mark gone for a while is listed with `none` and no text. A figure's answer
+    is asked for without them.
 - `beyond` is a string or null: what of the deed is heard in the places next door, one sentence of 20 words at
   most, and null when nothing carries that far, which is most deeds. It says the sound and not who made it, unless
   it is a voice with its words. It is read as a pose is: cut at the limit, and one with no words is null. Everyone
@@ -558,11 +649,50 @@ Things:
 - `pose` and the things start from the world file and then belong to the world's state. A `go` drops the walker's
   pose, and so does falling asleep, by a `sleep` or at the limit: a sleeper is shown as asleep and has no pose until
   a deed gives it one, and keeps that pose when it wakes. The things a person carries go where the person goes.
+- In a world file with `touch` a turn also says the touches that hold between the resident and someone there, and
+  those it sees between others, as the point on touches under the world's answer says; this candidate was played on
+  real models over an earlier engine and still awaits measurement over 0.1.1. Those notes describe the other line;
+  this port onto the main line is played on no model.
+- In a world file with `marks` a turn also says the lasting feelings of the resident's own body, as the point on
+  marks under the world's answer says; this candidate was played on real models over an earlier engine and still
+  awaits measurement over 0.1.1. Those notes describe the other line; this port onto the main line is played on no model.
 - A character's `looks` are part of its own system text. Every turn says its own pose and what it carries, three
   things deep with the counts, and for each person in its place their looks, pose and what they carry, without what
   is inside a thing unless the thing is `open`. It is never sent what is inside a thing that another carries,
   anything of a person in another place, anything hidden, or any `facts`; the things of a place it learns by a deed
   and the world's answer to it.
+- A candidate played on real models over an earlier engine, still awaiting measurement over 0.1.1: a world file may
+  give a character `traces`, a list of texts, each what is seen on the body or the clothes for the time being and
+  exactly where, like `pink pudding on the upper lip and the tip of the nose`: a smear of food, a stain, wet hair,
+  sand, a cream or an oil spread on skin. Those notes describe the other line; this port onto the main line is played
+  on no model. A trace has 12 words at most and a person 8 traces, and a file over either
+  is refused by the field.
+  `looks` never change and a `go`
+  drops a `pose`; a trace is neither. The mechanism is on only in a world whose file gives `traces` to at least one
+  character, and an empty list counts; in any other world no request, record or event differs from what it was,
+  which a comparison of hashes over the three examples on the other line confirmed. When it is on, the rules give
+  every trace a label,
+  `m1`, `m2` and on in the order of the file, the world's own and never used again, and no id of the file may look
+  like one. The run's state keeps each person's traces. A trace stays as it is on its person, wherever that person
+  goes and whatever pose it takes, until an answer of the world takes it off: it does not fade with the clock and
+  does not pass to anyone or anything by itself. The world is told them with the person, `Traces: m1 …; m2 …` or
+  `Traces: none`, and its answer to a deed has `traces`, a list of `{ of, text }` for what the deed leaves on a
+  person there, by accident or because someone puts it there, and `wipes`, the labels of the traces it takes off;
+  a figure's answer has neither. The rules take
+  the wipes first and then the entries. An entry for a person who is not there or with no words, and a label that
+  is on nobody there, are dropped, as with `poses`, `feels` and `finds`; an entry in the very words of a trace the
+  person already has is passed over, as a move to where the thing already is; and an entry that would be a
+  person's ninth refuses the whole answer, as a thirty-first record on a person does, and the world is asked once
+  more with the sentence that says so. An answer without the two fields is unusable. The record keeps both fields
+  and the event `traced` and `wiped`, each trace with its person, label and text, so a journal replays exactly and
+  a run continues from any record; the state file's format is 23 in such a world, since earlier versions ignore
+  traces and must not continue it without keeping them. Every turn says, right after a person's looks and pose,
+  what is on them, `On them: …`, and what is on the
+  resident itself, `On you: …`, with no label, as it stands at that turn: a trace that is gone is told no more, and
+  no line of anyone's past says how someone looked. The line a place keeps for the world names the traces an answer
+  left and took off. Both texts of instructions and the schema gain their sentences only in such a world. Not built:
+  traces on things or on a place, what clothes or a pose hide, and anything that fades with time, so a wet sleeve
+  stays wet until a deed dries it.
 - A character may have `memory`, what it remembers when the story begins, within `longWords`: what it owes and is
   owed today, what it saw, where a thing lies. The sheet says who the person is; a sum or a debt in the sheet would
   stay true in every request whatever happened, while the memory ages by the rules of memory. A place's `about`
@@ -638,8 +768,9 @@ The journal and the state file:
   reason why the answer could not be used, the world's answer to a deed, a figure's answer to a speech, an arrival, a waking or a falling asleep
   at the limit, a change of the weather, a memory rewrite. A drive is one action record, with the driver, vehicle,
   departure, destination and arrival instant; its arrival is one record of the engine at that instant. A state
-  stopped on the way continues to the same arrival. A world without `vehicles` keeps format `18`, so its state
-  files open as before. A world with `vehicles`, even an empty list, takes `19`; one with a `route` takes `20`,
+  stopped on the way continues to the same arrival. With none of the three body candidates below, a world without
+  `vehicles` keeps format `18`, so its state files open as before. A world with `vehicles`, even an empty list,
+  takes `19`; one with a `route` takes `20`,
   since bus positions follow the clock and fares leave the world. A file with another mark is refused as another
   version. Each record is stored with the event the rules made of it. There is no other
   state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
@@ -659,6 +790,13 @@ The journal and the state file:
   is continued keeps those names and a journal begun in another file has others. A run with no state file makes one
   for itself. No name is printed, and none is in the journal. A byte copy of a state file has the names of the original. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
   writes nothing to it.
+- The state file's format mark is `23` in a world with traces, `22` with `marks`, `21` with `touch`, and otherwise
+  `18`, `19` or `20` as above: earlier versions ignore those settings and must not continue such a world without
+  keeping them. The highest mark that applies is taken, so vehicles with touch take `21` too.
+  A state file opens only under the mark of its world file. A file of release 0.1.0 or 0.1.1 for a world with none
+  of the three settings and no `vehicles` still opens and goes on. A file of either release for a world whose file already had
+  `touch: true`, `marks: true` or a character's `traces` has mark `18` and is refused: that release ignored the
+  setting and kept nothing of the mechanism.
 - With `--run <dir>` the run is kept as an experiment that [the lab](#the-lab) reads: the directory holds the world
   file as it was given, `world.json`; the state file, `state.sqlite`, with everything the point above says of one;
   and for every start a stretch of its own, `part1`, `part2` and so on, as two files. `part<N>.events.jsonl` has the
@@ -1200,7 +1338,7 @@ npm run size                    # how large the core is, in tokens
 ```
 
 `npm run size` counts tokens (`o200k_base`) of three things: the core of the live mode without model and disk
-(`src/world.ts`, `time.ts`, `action.ts`, `answer.ts`, `things.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`), `src/live.ts`, and
+(`src/world.ts`, `time.ts`, `action.ts`, `answer.ts`, `things.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`, `touch.ts`, `marks.ts`), `src/live.ts`, and
 all tracked text except `LICENSE` and `package-lock.json`. It reads the working tree, or the Git index with
 `npm run size -- --index`. The core is meant to stay small enough to read whole, and its count falls into one of four bands,
 around the owner's mark of 70,000 tokens, which is there to steer by: up to 56,000 tokens, four fifths of the mark,

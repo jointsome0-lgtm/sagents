@@ -11,6 +11,7 @@ const en = {
   memoryMissing: 'The rewrite failed: what was to stay is forgotten.', cut: '(cut)', heardBy: 'heard by', indoors: 'Under a roof',
   search: 'search', searchText: 'the world took this for a search of the place', found: 'found', moved: 'moved', movedStock: 'moved from stock', as: 'as', state: 'state', pose: 'pose', none: 'none',
   feels: 'feels', wakesList: 'wakes', beyond: 'heard next door', gesture: 'gesture', says: 'says with it',
+  touch: 'touch', ended: 'ended', lingers: 'lasting feeling', gone: 'gone', forMinutes: n => `for ${n} min`, traced: 'trace left', wiped: 'trace taken off',
   noteLabel: 'to oneself', unfold: '▸ unfold', fold: '▾ fold',
   why: { to: 'addressed to', heard: 'hears', body: 'concerns' },
   // The feed and its marks.
@@ -69,6 +70,7 @@ const ru = {
   memoryMissing: 'Переписать не удалось: то, что должно было остаться, забыто.', cut: '(обрезано)', heardBy: 'слышат', indoors: 'Под крышей',
   search: 'поиск', searchText: 'мир счёл это обыском места', found: 'найдено', moved: 'перешло', movedStock: 'перешло из запаса', as: 'как', state: 'состояние', pose: 'поза', none: 'нет',
   feels: 'чувствует', wakesList: 'будит', beyond: 'слышно по соседству', gesture: 'жест', says: 'говорит при этом',
+  touch: 'касание', ended: 'закончилось', lingers: 'длительное ощущение', gone: 'прошло', forMinutes: n => `на ${n} мин`, traced: 'след оставлен', wiped: 'след снят',
   noteLabel: 'про себя', unfold: '▸ раскрыть', fold: '▾ свернуть',
   why: { to: 'обращено к', heard: 'слышит', body: 'касается' },
   onlyStretch: 'только этот отрезок', toChapterTitle: 'Читать главу, в которой пересказан этот отрезок', aloneTitle: 'Открыть этот отрезок отдельно, без остального мира',

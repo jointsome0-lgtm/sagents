@@ -583,3 +583,82 @@ test('a resumed run counts its horizon from a vehicle due before the next person
     assert.deepEqual(replay(town, continued.all), replay(town, structuredClone(continued.all)));
   }
 });
+
+// The world's answer in a world that keeps traces, where its two fields are due.
+const left = (more: object = {}) => came({ traces: [], wipes: [], ...more });
+const CHARCOAL = 'charcoal dust on the left cheek', PAINT = 'blue paint on the right sleeve, at the elbow';
+
+test('a trace of the world file and one an answer leaves stay on their person through a go and a new pose, are told to whoever is there and to their owner, and are told no more once an answer takes them off; the journal replays and continues exactly', async () => {
+  const studio = readWorld({ title: 'A studio', about: 'A studio and its washroom.', clock: '09:00', wordsPerMinute: 60, travelMinutes: 1,
+    places: [{ id: 'studio', name: 'Studio', about: 'An easel.', clock: true }, { id: 'washroom', name: 'Washroom', about: 'A sink.', clock: true }],
+    characters: [{ id: 'nell', name: 'Nell', place: 'studio', sheet: 'S' }, { id: 'ivo', name: 'Ivo', place: 'studio', sheet: 'S', traces: [`${CHARCOAL}.`] },
+      { id: 'mara', name: 'Mara', place: 'washroom', sheet: 'S' }] });
+  const script = () => ({ nell: [act('wait', { seconds: 3000 }), act('wait', { seconds: 3000 })],
+    ivo: [act('do', { text: 'paints the sky', seconds: 60 }), act('go', { place: 'washroom' }), act('do', { text: 'washes the sleeve under the tap', seconds: 30 })],
+    // The second answer also names a label that is on nobody: it is dropped, and the rest is taken.
+    world: [left({ traces: [{ of: 'ivo', text: `${PAINT}.` }], poses: [{ of: 'ivo', text: 'Stands at the easel' }], result: 'Paint splashes.' }), left({ wipes: ['m2', 'm9'], result: 'The sleeve comes clean.' })] });
+  const { sent, respond } = standIn(script()), journal = memoryStore();
+  await runLive({ world: studio, respond, model: 'stand-in', minutes: 600, calls: 11, journal, pause: true });
+  const content = (request: Request) => request.messages[0].content, both = `${CHARCOAL}; ${PAINT}`;
+  // From the first turn: to the one with him, to himself and to the world, which reads it under its label.
+  assert.match(content(sent.nell[0]), /\n- Ivo \(ivo\)\. On them: charcoal dust on the left cheek\.\n/);
+  assert.match(content(sent.ivo[0]), /\nOn you: charcoal dust on the left cheek\.\n/);
+  assert.match(content(sent.world[0]), /\n- Nell \(nell\), awake\. Traces: none\. Carries: nothing\.\n- Ivo \(ivo\), awake\. Traces: m1 charcoal dust on the left cheek\. Carries: nothing\.\n/);
+  assert.match(sent.ivo[0].system ?? '', /After `On them:`/);
+  assert.match(sent.world[0].system ?? '', /\n- wipes: /);
+  // After the answer and a new pose, then after the go, in another place, to someone who was not there.
+  assert.ok(content(sent.ivo[1]).includes(`\nYour pose: Stands at the easel. On you: ${both}.\n`));
+  assert.equal(sent.mara.length, 3);
+  assert.ok(!content(sent.mara[0]).includes('On them'));
+  assert.ok(content(sent.mara[1]).includes(`\n- Ivo (ivo). On them: ${both}.\n`));
+  assert.ok(content(sent.ivo[2]).includes(`\nOn you: ${both}.\n`));
+  assert.ok(content(sent.world[1]).includes(`\n- Ivo (ivo), awake. Traces: m1 ${CHARCOAL}; m2 ${PAINT}. Carries: nothing.\n`));
+  assert.deepEqual((sent.world[1].schema as { properties: { wipes: object } }).properties.wipes, { type: 'array', items: { type: 'string', enum: ['m1', 'm2'] } });
+  // Once it is taken off, nobody is told it, and the other trace stays.
+  assert.ok(content(sent.mara[2]).includes(`\n- Ivo (ivo). On them: ${CHARCOAL}.\n`));
+  assert.ok(!content(sent.mara[2]).includes('blue paint'));
+  const results = journal.all.filter(entry => entry.record.kind === 'result');
+  assert.deepEqual(results.map(entry => [entry.event.traced, entry.event.wiped]), [[[{ of: 'ivo', label: 'm2', text: PAINT }], []], [[], [{ of: 'ivo', label: 'm2', text: PAINT }]]]);
+  assert.deepEqual(results.map(entry => entry.record.kind === 'result' && [entry.record.traces, entry.record.wipes]), [[[{ of: 'ivo', text: PAINT }], []], [[], ['m2']]]);
+  // The journal gives the same traces again, and a run stopped at a record and continued writes the same journal.
+  assert.deepEqual(replay(studio, journal.all).traces, { of: new Map([['nell', []], ['ivo', [{ label: 'm1', text: CHARCOAL }]], ['mara', []]]), next: 3 });
+  assert.deepEqual(replay(studio, journal.all.slice(0, journal.all.indexOf(results[1]))).traces?.of.get('ivo'), [{ label: 'm1', text: CHARCOAL }, { label: 'm2', text: PAINT }]);
+  const again = standIn(script()), parts = memoryStore();
+  await runLive({ world: studio, respond: again.respond, model: 'stand-in', minutes: 600, calls: 5, journal: parts, pause: true });
+  await runLive({ world: studio, respond: again.respond, model: 'stand-in', minutes: 600, calls: 6, journal: parts, pause: true });
+  assert.deepEqual(parts.all, journal.all);
+  assert.throws(() => replay(studio, journal.all.map(entry => entry === results[1] ? { ...entry, record: { ...entry.record, wipes: [] } } : entry)), JournalError);
+});
+
+test('a world file with traces over their limits is refused by the field, and an answer that would give a person one trace too many is refused whole and asked again, while a person or a label that is not here is dropped', async () => {
+  const file = (traces: unknown, id = 'ada') => ({ title: 'T', about: 'A.', clock: '09:00', places: [{ id: 'hall', name: 'Hall', about: 'H.' }, { id: 'yard', name: 'Yard', about: 'Y.' }],
+    characters: [{ id, name: 'Ada', place: 'hall', sheet: 'S', traces }, { id: 'ben', name: 'Ben', place: 'yard', sheet: 'S', traces: ['mud on the left boot'] }] });
+  const eight = Array.from({ length: 8 }, (_, index) => `spot ${index + 1} on the apron`);
+  assert.throws(() => readWorld(file([words(13)])), /`characters\[0\]\.traces\[0\]` must hold 12 words at most/);
+  assert.throws(() => readWorld(file([...eight, 'one more'])), /`characters\[0\]\.traces` must be a list of 8 texts at most/);
+  assert.throws(() => readWorld(file(['a', 'a.'])), /`characters\[0\]\.traces` must not hold one text twice/);
+  assert.throws(() => readWorld(file('mud')), /`characters\[0\]\.traces` must be a list of 8 texts at most/);
+  assert.throws(() => readWorld(file([], 'm3')), /`characters\[0\]\.id` must not be a label of a trace like `m7`/);
+  const full = readWorld(file(eight)), ninth = { traces: [{ of: 'ada', text: 'a ninth spot' }], poses: [{ of: 'ada', text: 'Sits' }], result: 'R' };
+  const { sent, respond } = standIn({ ada: [act('do', { text: 'D1', seconds: 10 }), act('do', { text: 'D2', seconds: 10 })],
+    // The first deed: one trace too many, then a person and two labels that are not here. The second: an answer
+    // without the two fields, then one trace too many again, so that nothing comes of the deed.
+    world: [left(ninth), left({ traces: [{ of: 'ben', text: 'dust' }, { of: 'ada', text: 'spot 1 on the apron.' }], wipes: ['m9', 'm77'], result: 'R1' }), came({ result: 'R' }), left(ninth)] });
+  const journal = memoryStore();
+  const outcome = await runLive({ world: full, respond, model: 'stand-in', minutes: 600, calls: 7, journal, pause: true });
+  assert.deepEqual([outcome.refused, outcome.void, outcome.invalid], [2, 1, 1]);
+  assert.match(sent.world[1].messages[0].content, /\nYour answer to this was not taken and nothing of it happened, because of the entry \{"of":"ada","text":"a ninth spot"\}: a person has 8 traces at most: take one off with `wipes`, or leave this entry out\. Answer again\.$/);
+  const results = journal.all.filter(entry => entry.record.kind === 'result');
+  assert.deepEqual(results.map(entry => entry.record.kind === 'result' && [entry.record.text, entry.record.traces, entry.record.wipes, entry.record.poses]),
+    [['R1', [{ of: 'ada', text: 'spot 1 on the apron' }], [], []], [null, [], [], []]]);
+  assert.deepEqual(results.map(entry => [entry.event.traced, entry.event.wiped]), [[[], []], [[], []]]);
+  const state = replay(full, journal.all);
+  assert.deepEqual([state.traces?.of.get('ada')?.map(trace => trace.label).join(' '), state.traces?.of.get('ben'), state.traces?.next, state.people[0].pose],
+    ['m1 m2 m3 m4 m5 m6 m7 m8', [{ label: 'm9', text: 'mud on the left boot' }], 10, null]);
+  // The journal takes neither an answer without the two fields nor one that the rules refuse.
+  const deed = journal.all.slice(0, journal.all.indexOf(results[0])), record = results[0].record;
+  assert.throws(() => advance(full, replay(full, deed), { ...record, traces: undefined } as Record), JournalError);
+  assert.throws(() => advance(full, replay(full, deed), { ...record, traces: [{ of: 'ada', text: 'a ninth spot' }] } as Record), JournalError);
+  // A world whose file gives nobody `traces` keeps none, and an id like a trace's label is as good as any there.
+  assert.equal(replay(readWorld({ ...file(undefined, 'm3'), characters: [{ id: 'm3', name: 'Ada', place: 'hall', sheet: 'S' }] }), []).traces, null);
+});

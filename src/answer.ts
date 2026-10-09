@@ -5,14 +5,59 @@ import { attend, awakeIn } from './action.ts';
 import { speechSeconds } from './time.ts';
 import { keep, MAX_MOVES, MAX_SETS, settle, sought } from './things.ts';
 import type { Move, Refused, Setting, Things } from './things.ts';
-import { LIMITS, MAX_WORDS, namesOf } from './world.ts';
-import type { Event, Person, World } from './world.ts';
+import { readTouches } from './touch.ts';
+import type { Change, Touch } from './touch.ts';
+import { readLingers } from './marks.ts';
+import type { Change as Lingering, Mark } from './marks.ts';
+import { LIMITS, MAX_TRACES, MAX_WORDS, namesOf, traceOf } from './world.ts';
+import type { Event, Mark as Trace, Person, World } from './world.ts';
 
 // The world's answer to a deed as it was read: what came of it in words, the sleepers it wakes, what it moved and
 // which states it changed, the poses it changed, what it makes a body feel, what of it is heard next door, whether it
-// was a search, and the hidden things it went straight to.
+// was a search, and the hidden things it went straight to. In a world with `touch`, and only there, also the touches
+// it began, changed or ended, and in a world with `marks`, and only there, what it did to the lasting feelings of bodies.
+// In a world that keeps traces it has two fields more, absent in any other so that a record of such a world is what
+// it was: `traces`, what the deed leaves on people, and `wipes`, the labels of the traces it takes off.
 export type Answer = { text: string | null; wakes: string[]; moves: Move[]; sets: Setting[]; poses: { of: string; text: string }[]; feels: { of: string; text: string }[];
-  beyond: string | null; search: boolean; finds: string[] };
+  beyond: string | null; search: boolean; finds: string[]; touches?: Change[]; lingers?: Lingering[]; traces?: { of: string; text: string }[]; wipes?: string[] };
+
+// The traces of a run: what is seen on each person's body or clothes for the time being, each under a label like
+// `m7`, which is the world's own as a thing's is and is never used again; `next` is the number of the next one. A
+// trace is on one person and goes where that person goes. Nothing changes it but the world's answer to a deed.
+export type Traces = { of: Map<string, { label: string; text: string }[]>; next: number };
+// The traces of a run as it begins, labelled in the world file's order, or null for a world that keeps none.
+export function marked(world: World): Traces | null {
+  if (!world.characters.some(character => character.traces)) return null;
+  const traces: Traces = { of: new Map(), next: 1 };
+  for (const character of world.characters) traces.of.set(character.id, (character.traces ?? []).map(text => ({ label: `m${traces.next++}`, text })));
+  return traces;
+}
+// The labels of the traces on some people, which an answer may take off.
+export const labelsOn = (traces: Traces, people: string[]) => people.flatMap(id => traces.of.get(id)!.map(trace => trace.label));
+// Why the rules refuse an answer whole: an entry of things that they cannot take, or a trace that would be one more
+// than a person may have.
+export type Rejected = Refused | { code: 'traces'; entry: { of: string; text: string } };
+
+// What an answer's `wipes` and `traces` make of the traces of the people `present`: first each trace named is taken
+// off, then each entry is put on its person under the next label. An entry in the very words of a trace that the
+// person has then is dropped, so that a trace told again is not there twice. The entry that would give a person more
+// than `MAX_TRACES` refuses the whole answer. Nothing of `traces` is changed here.
+function retraced(traces: Traces, present: string[], { traces: left = [], wipes = [] }: Partial<Answer>): Traces & { traced: Trace[]; wiped: Trace[] } | Rejected {
+  const lists = new Map(present.map(id => [id, [...traces.of.get(id)!]])), traced: Trace[] = [], wiped: Trace[] = [];
+  let next = traces.next;
+  for (const [of, list] of lists) {
+    wiped.push(...list.filter(trace => wipes.includes(trace.label)).map(trace => ({ of, ...trace })));
+    lists.set(of, list.filter(trace => !wipes.includes(trace.label)));
+  }
+  for (const entry of left) {
+    const list = lists.get(entry.of)!;
+    if (list.some(trace => trace.text === entry.text)) continue;
+    if (list.length === MAX_TRACES) return { code: 'traces', entry };
+    list.push({ label: `m${next++}`, text: entry.text });
+    traced.push({ of: entry.of, ...list.at(-1)! });
+  }
+  return { of: lists, next, traced, wiped };
+}
 
 const parsed = (answer: string): unknown => {
   try { return JSON.parse(answer); } catch (error) {
@@ -34,7 +79,15 @@ const movesOf = (value: unknown): Move[] | null => Array.isArray(value) && value
 // told nothing, the one this deed wakes included. `beyond` is read as a pose is: one line cut at its limit, and null
 // when there is nothing in it. `search` is true only when the answer says so. Whether the moves and the states can
 // be taken is not looked at here: `refusal` says that. `sleepers` are those the deed can wake, next door included.
-export function readResult(answer: string, sleepers: string[], present: string[], hidden: string[]): Answer | null {
+// `held` are the touches of the place now, in a world with `touch`: the answer then has `touches`, read by
+// `readTouches`, and is not usable without the list. With no `held` nothing of touches is read. `lasting` is the same
+// for a world with `marks`: the marks of those in the place when the deed begins, and the deed's beginning and end,
+// with which `readLingers` reads the list `lingers`.
+// `labels`, which only a world that keeps traces gives, are those of the traces on the people of the place: the two
+// fields of traces are then read, and an answer without them cannot be used. Of `traces` only those of a person in
+// `present` are kept, each one line cut at its limit and one with no words dropped; of `wipes` only the labels in
+// `labels`, each once, in their order.
+export function readResult(answer: string, sleepers: string[], present: string[], hidden: string[], held?: Touch[], lasting?: { marks: Mark[]; at: number; end: number }, labels?: string[]): Answer | null {
   const value = parsed(answer);
   if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || (value.beyond !== null && typeof value.beyond !== 'string') || !Array.isArray(value.wakes) || !Array.isArray(value.poses) || !Array.isArray(value.feels)
     || !Array.isArray(value.sets) || value.sets.length > MAX_SETS) return null;
@@ -57,8 +110,22 @@ export function readResult(answer: string, sleepers: string[], present: string[]
     feels.delete(of);
     feels.set(of, text);
   }
+  const touches = held && readTouches(value.touches, present, held);
+  const lingers = lasting && readLingers(value.lingers, present, lasting.marks, lasting.at, lasting.end);
+  if (touches === null || lingers === null) return null;
+  const traces: { of: string; text: string }[] = [], wipes: unknown = value.wipes;
+  if (labels) {
+    if (!Array.isArray(value.traces) || !Array.isArray(wipes)) return null;
+    for (const item of value.traces as unknown[]) {
+      if (!isObject(item) || typeof item.text !== 'string') return null;
+      const of = present.find(id => id === item.of), text = traceOf(line(item.text, LIMITS.trace));
+      if (of && text) traces.push({ of, text });
+    }
+  }
   return moves && { text: line(value.result, MAX_WORDS) || null, wakes: sleepers.filter(id => named.includes(id)), moves, sets,
-    poses: [...poses].map(([of, text]) => ({ of, text })), feels: [...feels].map(([of, text]) => ({ of, text })), beyond: line(value.beyond, LIMITS.beyond) || null, search: value.search === true, finds: hidden.filter(id => Array.isArray(value.finds) && value.finds.includes(id)) };
+    poses: [...poses].map(([of, text]) => ({ of, text })), feels: [...feels].map(([of, text]) => ({ of, text })), beyond: line(value.beyond, LIMITS.beyond) || null, search: value.search === true, finds: hidden.filter(id => Array.isArray(value.finds) && value.finds.includes(id)),
+    ...(touches ? { touches } : {}), ...(lingers ? { lingers } : {}),
+    ...(labels ? { traces, wipes: labels.filter(label => (wipes as unknown[]).includes(label)) } : {}) };
 }
 
 // The world's answer for a figure as it can be taken, or null when it cannot be used: `reply` becomes one line of
@@ -78,10 +145,12 @@ const settled = (world: World, people: Person[], things: Things, deed: Event, { 
   settle(things, deed.place, people.filter(person => person.place === deed.place).map(person => person.id),
     new Map([...namesOf(world), ...world.places].map(item => [item.id, item.name])),
     [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do');
+const hereAt = (people: Person[], deed: Event) => people.filter(person => person.place === deed.place).map(person => person.id);
 // Why an answer to `deed` cannot be taken as it was read, or null when it can. Nothing is changed by asking.
-export function refusal(world: World, people: Person[], things: Things, deed: Event, answer: Partial<Answer> & { moves: Move[] }): Refused | null {
-  const made = settled(world, people, things, deed, answer);
-  return 'code' in made ? made : null;
+// `traces` are those of a run that keeps them, for a deed's answer.
+export function refusal(world: World, people: Person[], things: Things, deed: Event, answer: Partial<Answer> & { moves: Move[] }, traces: Traces | null = null): Rejected | null {
+  const made = settled(world, people, things, deed, answer), marks = traces && retraced(traces, hereAt(people, deed), answer);
+  return 'code' in made ? made : marks && 'code' in marks ? marks : null;
 }
 
 // A figure's answer to a `say` takes effect. Its words begin when the speech ends and hold the speaker and everyone
@@ -110,11 +179,21 @@ export function reply(world: World, people: Person[], things: Things, said: Even
 // What a body feels is not perceived in that way: the event holds it for its owner, and `heard` is as without it.
 // What is heard next door reaches everyone awake in a place next door, `nearby`, and ends their waiting as speech
 // near them does; a sleeper there whom the answer does not wake, and someone on the way, hear nothing.
+// The touches it began, changed or ended, and its entries about marks, go into the event as they were read, and `advance` keeps them.
+// In a run that keeps `traces`, the traces the answer takes off are gone and those it leaves are on their people from
+// now on, whole or not at all as the things are; the event holds both, and nobody is told them as something that
+// happened: a turn says what is on whom as it then stands.
 // An answer that the rules refuse changes nothing and gives the refusal.
-export function result(world: World, people: Person[], things: Things, deed: Event, answer: Answer): Event | Refused {
+export function result(world: World, people: Person[], things: Things, deed: Event, answer: Answer, traces: Traces | null = null): Event | Rejected {
   const made = settled(world, people, things, deed, answer), { text, wakes, poses, feels, beyond, search, finds } = answer;
+  const marks = traces && retraced(traces, hereAt(people, deed), answer);
   if ('code' in made) return made;
+  if (marks && 'code' in marks) return marks;
   keep(things, deed.place, made);
+  if (traces && marks) {
+    for (const [id, list] of marks.of) traces.of.set(id, list);
+    traces.next = marks.next;
+  }
   const doer = people.find(person => person.id === deed.who)!, { moved, set, found } = made;
   if (search) things.searched.set(`${deed.who} ${deed.place}`, (things.searched.get(`${deed.who} ${deed.place}`) ?? 0) + deed.seconds);
   for (const pose of poses) people.find(person => person.id === pose.of)!.pose = pose.text || null;
@@ -124,5 +203,6 @@ export function result(world: World, people: Person[], things: Things, deed: Eve
   for (const hearer of nearby) attend(hearer, deed.at);
   return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
     heard: text === null && !moved.length && !set.length && !found.length ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null,
-    wakes, search, finds, moved, set, poses, feels, beyond, nearby: nearby.map(person => person.id), found };
+    wakes, search, finds, moved, set, poses, feels, beyond, nearby: nearby.map(person => person.id), found, ...(answer.touches ? { touches: answer.touches } : {}), ...(answer.lingers ? { lingers: answer.lingers } : {}),
+    ...(marks ? { traced: marks.traced, wiped: marks.wiped } : {}) };
 }

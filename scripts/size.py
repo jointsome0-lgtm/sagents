@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 # The core of the live mode: the rules, with no model and no disk in them.
-CORE = ['src/world.ts', 'src/time.ts', 'src/action.ts', 'src/answer.ts', 'src/things.ts', 'src/journal.ts', 'src/laws.ts', 'src/sleep.ts', 'src/weather.ts', 'src/memory.ts', 'src/reading.ts']
+CORE = ['src/world.ts', 'src/time.ts', 'src/action.ts', 'src/answer.ts', 'src/things.ts', 'src/journal.ts', 'src/laws.ts', 'src/sleep.ts', 'src/weather.ts', 'src/memory.ts', 'src/reading.ts', 'src/touch.ts', 'src/marks.ts']
 # The bands of the core's size in tokens: up to the first bound nothing is said, and above each bound its line.
 # 70,000 is the owner's mark for the core's size, to steer by and not a ban; the other two are four fifths and six
 # fifths of it.

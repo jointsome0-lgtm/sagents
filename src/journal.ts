@@ -10,13 +10,17 @@ import type { Line, Mind } from './memory.ts';
 import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
 import { apply, arrive, attend, isRefusal, next, readAction, sleepersNear, start, wake } from './action.ts';
-import { readReply, reply, readResult, result } from './answer.ts';
+import { labelsOn, marked as traced, readReply, reply, readResult, result } from './answer.ts';
 import { all, pay, stocked } from './things.ts';
+import { touched } from './touch.ts';
+import type { Touch } from './touch.ts';
+import { marked, marksAt } from './marks.ts';
+import type { Mark } from './marks.ts';
 import { busAt, busRound, clockAt, driveSeconds, hasClock, timeFor } from './time.ts';
 import { secondsOfDay, closed } from './reading.ts';
 import { namesOf, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, sizeOf } from './world.ts';
 import type { Action, Refusal } from './action.ts';
-import type { Answer } from './answer.ts';
+import type { Answer, Traces } from './answer.ts';
 import type { Move, Things } from './things.ts';
 import type { Event, Person, Place, World } from './world.ts';
 
@@ -28,7 +32,7 @@ export class JournalError extends Error {}
 // short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
 // `at`: what came of the deed, or null, the sleepers it wakes, what it moved by label and where to, the states and
 // the poses it changed, what it makes a body feel, each line with its owner, what of it is heard next door, whether the deed was a search of its
-// place, and the labels of the hidden things it went straight to. `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`:
+// place, the labels of the hidden things it went straight to, in a world with `touch` the touches it began, changed or ended, and in a world with `marks` its entries about the lasting feelings of bodies, `lingers`, and in a world that keeps traces what it leaves on people and the labels of the traces it takes off. `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`:
 // its words, or null, and what changed hands with them. Neither is ever an answer that the rules of things refuse.
 // A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
 // no answer is behind it.
@@ -47,9 +51,13 @@ export type Entry = { seq: number; record: Record; event: Event; by: string | nu
 // can come next. `results` holds, for each place, the latest of what came of the deeds done there, in the world's
 // words and in what the rules moved, set and found, which the world is shown when it answers the next, and `said` the latest of what was said to the figures of the place and answered.
 // `things` is what each place and each person holds now, with how long each person has searched each place, and `laws`
-// holds the parts of the state that the laws of `laws.ts` keep.
+// holds the parts of the state that the laws of `laws.ts` keep. `touches` are the touches that hold now, of every place, in the
+// order they began: the two of a touch are always in one place, since a touch ends when either of them leaves it.
+// `marks` are the lasting feelings of everyone's bodies, in the order they began, as they stood at the latest result
+// of a world with `marks`: what the clock has done to them since is not kept and is read with `marksAt` (`marks.ts`).
+// `traces` is what is on each person's body or clothes for the time being, or null in a world that keeps none.
 export type State = { places: Place[]; vehicleLines?: Map<string, Map<string, string>>; people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
-  said: Map<string, Line[]>; things: Things; laws: Parts; buses?: { at: number; passed: string[]; waiting: Set<string>; doors: Map<string, { place: string; at: number }> } };
+  said: Map<string, Line[]>; things: Things; laws: Parts; touches: Touch[]; marks: Mark[]; traces: Traces | null; buses?: { at: number; passed: string[]; waiting: Set<string>; doors: Map<string, { place: string; at: number }> } };
 // How many words of earlier results a place keeps. The newest one stays whatever its size.
 export const RESULT_WORDS = 400;
 // How many words of earlier speeches to its figures and their answers a place keeps, the newest whatever its size.
@@ -108,7 +116,9 @@ const listed = (world: World, things: Things, event: Event, doer: string) => {
   return [...(event.moved ?? []).map(({ what, name, n, to, as }) => `${as ?? what} ${name}${n === null ? '' : ` ×${n}`} ${
     to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went to ${holder(to)}`}.`),
   ...(event.set ?? []).map(({ what, name, state }) => `${what} ${name} is now ${state}.`),
-  ...(event.found ?? []).map(({ what, name, spot }) => `${what} ${name} was found: ${spot}.`)].join(' ');
+  ...(event.found ?? []).map(({ what, name, spot }) => `${what} ${name} was found: ${spot}.`),
+  ...(event.traced ?? []).map(({ of, label, text }) => `${holder(of)} now has the trace ${label} ${text}.`),
+  ...(event.wiped ?? []).map(({ of, label, text }) => `${holder(of)} no longer has the trace ${label} ${text}.`)].join(' ');
 };
 // A speech as it opens when it is addressed to a figure of the place.
 const toFigure = (world: World, event: Event) => event.kind === 'say' && event.to !== null ? ` to ${named(namesOf(world), event.to)}` : '';
@@ -200,7 +210,8 @@ export function vehicleView(world: World, state: State, actor: Person, now: numb
 export function begin(world: World): State {
   if (world.vehicles?.length) world = { ...world, places: doorsOf([...world.places, ...structuredClone(world.vehicles)]) };
   const state: State = { places: world.places, people: start(world), minds: new Map(world.characters.map(character => [character.id, { ...blank(), long: character.memory ?? '' }])), seq: 0, deed: null,
-    results: new Map(world.places.map(place => [place.id, []])), said: new Map(world.places.map(place => [place.id, []])), things: stocked(world), laws: beginLaws(world),
+    results: new Map(world.places.map(place => [place.id, []])), said: new Map(world.places.map(place => [place.id, []])), things: stocked(world), laws: beginLaws(world), touches: [], traces: traced(world),
+    marks: world.characters.flatMap(({ id, marks }) => marks.map(({ zone, kind, level, text }) => ({ of: id, zone, kind, layers: [{ level, text, since: null, until: null }] }))),
     ...(world.vehicles?.length ? { vehicleLines: new Map(world.characters.map(character => [character.id, new Map()])) } : {}),
     ...(world.vehicles?.some(place => place.vehicle?.route) ? { buses: { at: 0, passed: [], waiting: new Set(), doors: new Map() } } : {}) };
   if (state.buses) state.places = worldOf(world, state).places;
@@ -268,15 +279,24 @@ function applied(world: World, state: State, record: Record): Event {
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
     const spot = world.places.find(place => place.id === deed.place)!, sleepers = sleepersNear(people, spot).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
-    const { text, wakes, moves, sets, poses, feels, beyond, search, finds } = record, answer = { text, wakes, moves, sets, poses, feels, beyond, search, finds };
+    // In a world with `touch` the record holds the touches as they were read against those of the place, and in no other world.
+    const held = world.touch ? state.touches.filter(touch => present.includes(touch.of)) : undefined;
+    // The same for a world with `marks`: its entries about marks, read against the marks of those in the place as the clock has left them.
+    const end = deed.at + deed.seconds, lasting = world.marks ? { marks: marksAt(state.marks, deed.at).filter(mark => present.includes(mark.of)), at: deed.at, end } : undefined;
+    // The two fields of traces belong to the answer only in a world that keeps traces.
+    const extra = state.traces ? { traces: record.traces, wipes: record.wipes } : {};
+    const { text, wakes, moves, sets, poses, feels, beyond, search, finds, touches, lingers } = record,
+      answer = { text, wakes, moves, sets, poses, feels, beyond, search, finds, ...(touches === undefined ? {} : { touches }), ...(lingers === undefined ? {} : { lingers }), ...extra };
     const hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
     // Nothing is heard next door of a deed in a place that has no place next door.
-    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, beyond, search, finds }), sleepers, present, hidden), answer)
+    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, beyond, search, finds, touches, lingers, ...extra }), sleepers, present, hidden, held, lasting, state.traces ? labelsOn(state.traces, present) : undefined), answer)
       || (beyond !== null && !spot.nextDoor.length)) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
-    const event = result(world, people, state.things, deed, answer);
+    const event = result(world, people, state.things, deed, answer, state.traces);
     if ('code' in event) return refuse('holds an answer that the rules of things refuse');
+    if (touches) state.touches = touched(state.touches, touches, deed.at);
+    if (lingers) state.marks = marked(state.marks, lingers, deed.at, end);
     const doer = named(world.characters, deed.who), moved = told(event, doer);
     // What the answer says came of the deed, and after it what the rules say went where, for the doer and for those there.
     // What a body feels is told to its owner alone, last, and also when nothing came of the deed for anyone else:
@@ -400,6 +420,8 @@ function applied(world: World, state: State, record: Record): Event {
     if (fare) event.moved = pay(state.things, actor.id, fare.name, fare.n, named(world.characters, actor.id));
     if (drive) state.places = doorsOf(world.places.map(place => place.id === drive.vehicle ? { ...place,
       vehicle: { ...place.vehicle!, at: null, heading: { from: drive.from, to: drive.to, at: drive.at } } } : place));
+    // Whoever leaves a place touches nobody there and is touched by nobody; a sleep ends no touch.
+    if (event.kind === 'go') state.touches = state.touches.filter(touch => touch.of !== actor.id && touch.to !== actor.id);
     // The actor may have left: its own lines are of the place where it acted. An action `until` a time of day is
     // remembered by its seconds only with a clock at hand; otherwise by the time it aimed at, which it may miss.
     const told = timeFor(world, actor.id, event.place, event.at);

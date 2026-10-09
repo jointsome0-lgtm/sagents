@@ -18,7 +18,8 @@ export const timeOf = (event, before = 0) => secondsOf(event.clock) ?? (Number.i
 // (a) it is the event's `who`: what it said, did, where it went, its memory, and the world's answer to its deed;
 // (b) it is the `to` of a `say`, a `call` or a `reply`;
 // (c) the event's `heard` holds it;
-// (d) `feels` or `poses` of the event has an entry of it, or `wakes` holds it.
+// (d) `feels`, `poses`, `lingers`, `traced` or `wiped` of the event has an entry of it, `touches` has it as `of` or
+// `to`, or `wakes` holds it.
 // `focusOf` gives null for an event that does not stay, and else `{ own, why, ids }`: `own` for (a); for the others
 // `why` is `to`, `heard` or `body` (the first that holds, in that order) and `ids` the chosen characters it holds for.
 export const focusOf = (event, chosen) => {
@@ -26,7 +27,8 @@ export const focusOf = (event, chosen) => {
   if (['say', 'call', 'reply'].includes(event.kind) && chosen.has(event.to)) return { own: false, why: 'to', ids: [event.to] };
   const heard = list(event.heard).filter(id => chosen.has(id));
   if (heard.length) return { own: false, why: 'heard', ids: [...new Set(heard)] };
-  const body = [...list(event.feels).map(item => item?.of), ...list(event.poses).map(item => item?.of), ...list(event.wakes)].filter(id => chosen.has(id));
+  const body = [...['feels', 'poses', 'lingers', 'traced', 'wiped'].flatMap(key => list(event[key]).map(item => item?.of)),
+    ...list(event.touches).flatMap(item => [item?.of, item?.to]), ...list(event.wakes)].filter(id => chosen.has(id));
   return body.length ? { own: false, why: 'body', ids: [...new Set(body)] } : null;
 };
 // The filter by place: an event stays when its `place` is one of the chosen places.
