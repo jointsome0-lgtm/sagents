@@ -19,13 +19,15 @@ form, `src/memory.ts` for what a character remembers, `src/journal.ts` for the r
 no model call and no disk access, and of the live mode only `state.ts` touches the disk; `src/cli.ts` reads the world
 file and its environment from `environments/`. `src/eval.ts` reads a saved journal with log, show and diff for a judge,
 checks quotes by their words and keeps its report with findings and bounded refusal details, with no disk access.
-Beside the live mode, `src/kept.ts` writes the directory of
+`src/numbers.ts` counts the story's time, actions and requests from kept event and usage files, with no model
+and no writes; it uses the lab's file reader and never opens SQLite. Beside the live mode,
+`src/kept.ts` writes the directory of
 `live --run`: it only makes files where there are none and adds lines to them. `lab/` is `sagents lab`: `data.ts`
 reads the experiments under the directories it is given and writes nothing, `server.ts` serves them on `127.0.0.1`
 under a token, `open.ts` writes the one temporary file that takes the browser there, and the page is the plain
 `page.html`, `app.css`, `app.js`, `strings.js`, `map.js` and `core.js`, which `npm run check` does not check.
-Nothing in `src/` but the command line and the test of `kept.ts` imports from `lab/`, and `lab/` asks no model. What
-may leave the lab is listed in [README.md](README.md#the-lab); keep that list true.
+Nothing in `src/` but the command line, `numbers.ts` and the test of `kept.ts` imports from `lab/`, and `lab/` asks
+no model. What may leave the lab is listed in [README.md](README.md#the-lab); keep that list true.
 
 On the ChatGPT plan connection, a message the service marks as interim (`commentary`) is left out where the service
 gives the pieces of text with the place of their message in the answer; a piece without that place is kept as text

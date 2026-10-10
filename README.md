@@ -1238,6 +1238,51 @@ changed, was the first to ask for no change. A checked quote
 is evidence that its folded words occur together as whole words in a named record's printed text or the memory
 a named rewrite replaced. It does not establish that the finding is right.
 
+### Numbers of kept runs
+
+```sh
+sagents numbers <dir>... [--json]
+```
+
+`numbers` reads directories kept by `live --run` and prints one table, a column under each directory's name.
+It joins every stretch in numbered order, asks no model, sends nothing and writes nothing; SQLite is never
+opened. `--json` gives one object keyed by those names, with the same row names and numbers, and null for `-`.
+Repeated directory names get ` (2)`, ` (3)` and so on. A directory that is not a kept run is named on standard
+error; the others are still printed, and the command ends with a code that is not 0.
+
+The rows are:
+
+- Requests, all and by the kinds of the usage rows, in their first appearance's order.
+- Story minutes from the first event to the end of the last, and story minutes for 100 requests, both to one
+  decimal.
+- Actions of residents, all and by kind: `say`, `call`, `go`, `do`, `wait`, `sleep`. Driving counts as going.
+- Actions that led somewhere, and their share of all actions as a whole percent: a speech or call somebody
+  heard, a going that set out, or a deed with a result. Waiting and sleeping never count.
+- Deeds without a result and their share of deeds as a whole percent, the longest row of them by one resident,
+  and how many rows of two or more there were. A result has null text, nothing moved, set or found, and is no
+  search for the deed to count as without a result. Another action of that resident or a deed with a result
+  ends its row; another resident's action does not.
+- Places residents were in, including their starting places and door crossings, and how many the world has,
+  including vehicles. Setting out alone does not count the destination as visited.
+- Input tokens, cached input tokens and their share of input as a whole percent, output tokens, and mean input
+  tokens per request as a whole number, all and for each run's two commonest kinds. A tie keeps the first
+  appearance's order.
+- Answers that could not be used, memory rewrites lost, and answers of the world refused by the rules, when
+  the files hold them. Null text in a memory event counts a lost rewrite. The other two need `invalid` and
+  `refused` in one total row without `kind` in each stretch's usage file; `live --run` does not write those totals.
+
+Nothing is estimated: `-` means a missing number. A gap in the numbered stretches leaves their totals unknown.
+Missing, unreadable, unfinished or damaged event files leave
+the event counts unknown; a deed at the very end, cut before its result, is left out of the deed counts and of
+the two shares; any other deed without its following result, or without the result's counted fields, leaves
+the deed counts and actions that led somewhere unknown. Missing or damaged usage files leave requests and
+tokens unknown. A token total or mean is missing when any request in it has no count, including a failed
+request; a zero denominator leaves a rate or share missing. A mean for a kind outside a run's two commonest is
+missing in that column. A run with only its state file has no event or request counts here. To give those numbers
+without opening SQLite it would need the kept event and usage files too. These numbers compare what a change of
+wording or a rule did before a transcript is read; they cannot judge a scene, and a quiet good scene counts as
+standing still.
+
 ### The lab
 
 ```sh

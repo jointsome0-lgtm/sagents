@@ -27,6 +27,8 @@ sagents live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-m
 sagents eval <dir> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
 sagents eval --state <file> --world <world.json> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
                                a judge reads a finished live journal with log, show and diff, and gives a report
+sagents numbers <dir>... [--json]
+                               the story's time, actions and requests counted from kept files, with no model
 sagents lab [<dir>...] [--port <n>] [--lang <en|ru>] [--no-open]
                                the lab in the browser: the experiments under the directories, or under those that
                                SAGENTS_LAB names (separated as in PATH), or under the current one; it prints its address
@@ -103,7 +105,26 @@ function argumentsOf(options: { [name: string]: { type: 'boolean' | 'string'; mu
 }
 
 if (command === 'help' || command === '--help' || command === '-h') console.log(USAGE);
-else if (command === 'lab') {
+else if (command === 'numbers') {
+  const given = argumentsOf({ json: { type: 'boolean' } }, Infinity);
+  if (!given || !given.positionals.length) { console.error(USAGE); process.exitCode = 1; }
+  else {
+    const { NumbersError, numbersOf, numbersTable, numbersJSON } = await import('./numbers.ts');
+    const runs: ReturnType<typeof numbersOf>[] = [];
+    for (const dir of given.positionals) {
+      try {
+        const run = numbersOf(dir), name = run.name;
+        for (let n = 2; runs.some(other => other.name === run.name); n += 1) run.name = `${name} (${n})`;
+        runs.push(run);
+      } catch (error) {
+        if (!(error instanceof NumbersError)) throw error;
+        console.error(`${JSON.stringify(dir)}: ${error.message}`);
+        process.exitCode = 1;
+      }
+    }
+    console.log(given.values.json === true ? JSON.stringify(numbersJSON(runs)) : numbersTable(runs));
+  }
+} else if (command === 'lab') {
   // The lab reads files and asks no model. Its modules are loaded only for this command.
   const given = argumentsOf({ port: { type: 'string' }, lang: { type: 'string' }, 'no-open': { type: 'boolean' } }, Infinity);
   const port = Number(given?.values.port ?? 0);
