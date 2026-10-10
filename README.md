@@ -256,8 +256,7 @@ The rules of time and hearing:
   refused with `You need 30 rubles for the fare.` and takes nothing. Only the payer reads `You pay 30 rubles.`,
   after the line of getting in. A free seat is still needed.
   A fare is not given back to someone who gets out before the bus leaves.
-  Whoever stays inside for another round pays nothing more. These bus rules are a candidate checked with stand-ins,
-  not yet played on any model. Those checks describe the other line; this port onto the main line is played on no model.
+  Whoever stays inside for another round pays nothing more. These bus rules were checked with stand-ins on the other line; this port onto the main line was played in two runs with a bus, 38 requests by the smaller hosted model at low effort and 40 by the open model, and in both a pair paid the fare at boarding and rode.
 - The bus's fixed opening gives its round, times and fare instead of drivers. The vehicle rule stays one line,
   with a clause about a vehicle that goes its round by itself only in worlds with a bus, saying the fare is taken
   by itself only when a bus has one. Someone awake at a stop
@@ -297,7 +296,7 @@ The rules of time and hearing:
   and where, on waking if asleep in a driven vehicle. No arrival or departure line tells outsiders who is inside. The engine records
   an arrival before all people's arrivals and turns at that instant, after a change of the weather that falls
   on it and before a sleep that the main line's tiredness brings at it, as it does for someone who arrives on foot.
-  Those rules were checked with a stand-in on the other line; this port onto the main line was played in four runs of 79 requests each in a world with a car, one by the smaller hosted model at low effort and three by the open model, each with one drive and one parking, and in a line of 150 requests by the smaller model in a world with `ways`.
+  Those rules were checked with a stand-in on the other line; this port onto the main line was played in four runs of 79 requests each in a world with a car, one by the smaller hosted model at low effort and three by the open model, each with one drive and one parking, and in a line of 150 requests by the smaller model in a world with `ways`. Before those, two runs with a car, 38 and 40 requests, were played by the same two models, each with one drive and one parking.
   Worlds without vehicles keep their requests and journals unchanged. Turns keep the main line's rebuilt form,
   with the transport lines in the candidate's words. Opening hours and places on demand are absent here, so their
   closed-place refusals and go by words are absent too.
