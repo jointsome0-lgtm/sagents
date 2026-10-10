@@ -257,6 +257,10 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   const metered = standIn({});
   const capped = await runLive({ world, respond: metered.respond, model: 'stand-in', minutes: 600, tokens: 150 });
   assert.deepEqual([capped.status, capped.reason, capped.calls, capped.inputTokens + capped.outputTokens, Object.values(metered.sent).flat().length], ['done', 'tokens', 2, 220, 2]);
+  // A ceiling cannot be kept without the counts: the first answer that reports none is read as any other, and no request follows it.
+  const silent: string[] = [];
+  const unmetered = await runLive({ world, respond: async () => ({ text: act('wait', { seconds: 60 }), usage: null }), model: 'stand-in', minutes: 600, tokens: 150, onEvent: event => { silent.push(`${event.kind} ${event.seconds}`); } });
+  assert.deepEqual([unmetered.status, unmetered.reason, unmetered.calls, unmetered.invalid, unmetered.unreported, silent], ['done', 'unreported', 1, 0, 1, ['wait 60']]);
   let asked = 0;
   const invalid = await runLive({ world, respond: async () => { asked += 1; return { text: 'not an action', usage: null }; }, model: 'stand-in', minutes: 600, calls: 20 });
   assert.deepEqual([invalid.status, invalid.reason, invalid.calls, invalid.invalid, asked], ['failed', 'invalid', 5, 5, 5]);

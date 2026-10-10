@@ -19,6 +19,7 @@
     "test": "node --test src/*.test.ts lab/*.test.ts",
     "check": "tsc -p tsconfig.json",
     "bench": "node src/bench.ts",
+    "pointers": "node scripts/pointers.mjs",
     "size": "python3 scripts/size.py"
   },
   "devDependencies": {

@@ -157,7 +157,7 @@ test('a stream is an answer only when it came whole: its text and usage, and a f
   };
   const streaming = { ...env, SAGENTS_API_STREAM: '1' };
   const calls: { url: string; init: RequestInit }[] = [];
-  const whole = `: a comment\r\n\r\n${chunk({ role: 'assistant', content: '' })}${chunk({ reasoning_content: WORDS })}${chunk({ reasoning: WORDS })}${chunk({ content: '{"ok":' }).replaceAll('\n', '\r\n')}${chunk({ content: 'true}  \u2014' })}${chunk({}, 'stop')}${usage}data: [DONE]\n\n`;
+  const whole = `: a comment\r\n\r\n${chunk({ role: 'assistant', content: '' })}${chunk({ reasoning_content: WORDS })}${chunk({ reasoning: WORDS })}${chunk({ content: '{"ok":' }).replaceAll('\n', '\r\n')}${chunk({ content: 'true}  \u2014' })}${chunk({}, 'stop').replace('\n\n', '\ndata:\n\n')}${usage}data: [DONE]\n\n`;
   const { respond } = createCompatible({ env: streaming, fetch: async (url: string, init: RequestInit) => { calls.push({ url, init }); return stream(whole)(); } });
   const parts: string[] = [];
   assert.deepEqual(await respond(request, { onText: (part: string) => { parts.push(part); } }),

@@ -1,4 +1,3 @@
-// A judge reads the stored journal from outside the story. Nothing is replayed, and nothing here touches the disk.
 import { createHash, randomUUID } from 'node:crypto';
 import { ModelError } from './chatgpt.ts';
 import type { Message } from './chatgpt.ts';
@@ -258,8 +257,7 @@ export async function runEval({ entries, world, questions: given, respond, model
     if (report.dropped.length < 50) report.dropped.push({ ...finding, call: report.calls });
     return `Finding #${n} taken back.`;
   });
-  // Made anew only when answers leave the window or a finding is taken back: a first message that changed with
-  // every answer would be read afresh by a service that keeps what it has read.
+  // Changing the first message with every answer would make the service read it afresh.
   const carriedText = () => [ 'Earlier answers have left the window.', `Notes: ${report.notes}`, 'Kept findings:',
     ...report.findings.map(found => `#${found.n} ${found.kind} [${found.at.join(', ')}]: ${found.says}`) ].join('\n');
   const compact = () => {

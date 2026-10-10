@@ -1,6 +1,3 @@
-// The world of the `live` mode as its file gives it and as a run holds it, with no model in it: named places, who is
-// where, and the events of a run. The rules are next to it: the clock and the distances in `time.ts`, what a
-// resident does in `action.ts`, and what the world answers to a deed or for a figure in `answer.ts`.
 import { boundedOf, amountOf, countOf, durationOf, isObject, listOf, MAX_FACTS, refuse, secondsOfDay, textOf, TIME, wordsOf } from './reading.ts';
 import { all, MAX_IN_PLACE, MAX_ON_PERSON, readThings, SINKS } from './things.ts';
 import type { Posting, Thing } from './things.ts';
@@ -14,33 +11,11 @@ import type { Given, Change as Lingering } from './marks.ts';
 export { CHARS_PER_WORD, cut, MAX_FACTS, sizeOf, wordsOf, WorldError } from './reading.ts';
 
 export const MAX_WORDS = 65;
-// The most words of what a speaker's body does meanwhile, and of the words said aloud with a deed.
 export const GESTURE_WORDS = 12, SAYS_WORDS = 20;
 export const MAX_SECONDS = 3600;
 export const MAX_SLEEP = 43_200;
-// What an answer that cannot be used becomes: a wait of this many seconds.
 export const LOST_SECONDS = 30;
 
-// `facts` is what is true of the world, of a place, of a person or of a thing and is not seen at once. It is for the
-// world's own answers to what people do and never for a character: no character is sent any of it.
-// `things` are the records of what stands and lies in a place, and `carries` those of what a person has in hand or
-// wears, each with all that it holds (`things.ts`). Of a person, `looks` is what anyone near sees and never changes,
-// the body and the face and no clothes, and `pose` how and where in the place it is. The world file gives how these
-// begin; the things and the pose then belong to the run's state and change only by the world's answer. A thing of a
-// place that is `hidden` is not found without a search of its minutes, or by a deed that goes straight to its spot.
-// `memory` is what a person remembers when the story begins: what it owes and is owed today, where things lie. The
-// sheet says who the person is, and this text ages as a memory does. A place that is `open` lies under the open sky.
-// `crowd` is the people of a place whom nobody plays, as anyone there sees them, and `figures` those of them who
-// have a name: each with `looks` and `facts` as a character has them, and with no sheet, memory or turn. A figure
-// stays in its place and does nothing but answer a `say` addressed to it, in the words the world gives it.
-// `at` is where a place lies, in metres east and north of any point the world file likes, or null. `nextDoor` holds
-// the ids of the places that share a door or a thin wall with it, whichever of the two the world file lists it at.
-// A place with a `clock` shows the time to everyone in it, and a character with one, a watch or a phone, reads it
-// anywhere. Neither changes in a run: a clock is not yet a thing that can be handed over.
-// `traces` is what is seen on a person's body or clothes for the time being, each text what it is and exactly where:
-// a smear of food, a stain, wet hair. The world file gives how they begin, and they then belong to the run's state
-// (`answer.ts`): one stays on its person, wherever that person goes, until the world's answer to a deed takes it off.
-// A world in which no character has the field, null here, keeps no traces at all; an empty list turns them on.
 export type Figure = { id: string; name: string; looks: string | null; facts: string | null; wordsPerMinute?: number };
 export type Vehicle = { at: string | null; heading: { from: string; to: string; at: number } | null; faster: number; seats: number; drivers: string[] | null; reach: string[];
   route?: string[]; leaves?: string[]; stands?: number; fare?: { name: string; n: number }; departure?: { to: string; at: number } };
@@ -49,58 +24,23 @@ export type Place = { id: string; name: string; about: string; facts: string | n
   at: [number, number] | null; minutesTo: { [place: string]: number }; nextDoor: string[]; vehicle?: Vehicle };
 export type Character = { id: string; name: string; place: string; sheet: string; memory: string | null; facts: string | null; looks: string | null; pose: string | null;
   carries: Thing[]; clock: boolean; marks: Given[]; traces: string[] | null; wordsPerMinute?: number };
-// The most words each of these texts may hold, in the world file and in the world's answer alike; `feels` is of one
-// line of what a deed makes a body feel, `beyond` of what of a deed is heard next door and `touch` of with what and
-// where one person touches another, which only an answer holds.
-// `trace` is of one trace, and a person has `MAX_TRACES` of them at most.
 export const LIMITS = { looks: 60, pose: 20, feels: 20, beyond: 20, crowd: 60, touch: 15, trace: 12 };
 export const MAX_TRACES = 8;
-// A trace as it is kept: one line, with no stop at its end, since a request lists several in one sentence.
+// Requests list traces in one sentence, so a trace must not end with a stop.
 export const traceOf = (text: string) => wordsOf(text).join(' ').replace(/[.;]+$/, '');
-// `remote` names the means by which people reach each other from afar; a world with null has none.
-// `walkMetresPerMinute` is the pace at which everyone walks between places that say where they lie.
-// `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `sleep` and
-// `weather` are the settings of the laws the clock drives (`laws.ts`), as the world file and its environment give them.
-// `hunger` is the world file's setting for both hunger and thirst, kept from the things its deeds eat and drink.
-// `touch` says that a touch between two people is kept as state (`touch.ts`); a world without it has none.
-// `marks` says that a lasting feeling of a part of a body is kept as state (`marks.ts`), and only in such a world may
-// a character begin with some, its own `marks`. A `result` there also has `lingers`, the entries about them as read.
-// `ways` lets the world name where a deed leads, which a result keeps as `goes`; the rules take its go at the doer's next free moment.
 export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null; touch: boolean; marks: boolean; ways?: true; hunger?: true;
   vehicles?: Place[]; travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
-// `place` is where it happened; `to` is the character called, the figure spoken to, or the place a `go` leads to; `heard` holds the ids of
-// those who perceived it when it happened, without the one who did it. A `memory` is a character's long-term text
-// written anew, which nobody else perceives: `text` is the new text, or null when the rewrite was lost.
-// `gesture`, which only a `say` may have, is what the speaker's face, hands or body did meanwhile, as those in `heard` saw it; `says`, which only a
-// `do` may have, the words said aloud with the deed, which those in `heard` heard as a speech of that moment, and `cut` then says that they were cut at the turn's limit.
-// A `result` is the world's answer to the `do` before it, of the same `who`: `text` is what came of the deed, or null
-// when nothing did that could be noticed, `wakes` the sleepers the deed wakes, `poses` the poses it changed and
-// `feels` what the deed makes a body feel, each line for its owner alone and never part of what those in `heard`
-// perceive. `beyond` is what of the deed is heard in the places next door, or null, and `nearby` those awake there, who
-// are told it and nothing else of the deed. It says whether the world called the deed a `search` of the place and which hidden things it says the deed went
-// straight to, `finds`. What the rules made of the answer is in `moved`, one posting for each thing that went from
-// one holder to another or out of the world, where an `eaten` one is eaten by `who`; in `set`, the things put into
-// another state; and in `found`, the hidden things found either way. A `reply` is what a figure answers to the `say`
-// before it: `who` is the figure, `to` the speaker, `text` its words, or null when it says nothing, `seconds` how
-// long they take from the end of that `say`, and `moved` what changed hands with them. In a world with `touch` a
-// `result` also has `touches`, the touches that the deed began, changed or ended, as they were read. In a world that keeps traces a
-// `result` also has `traced`, the traces the answer left, each under its new label, and `wiped`, those it took off. A `weather` is a change of the
-// weather, which nobody does and which has no place: `who` and `place` are empty, `text` is the new weather under the
-// open sky and `indoors`, which only this kind has, what of it reaches someone under a roof, or null.
-// In a world with `ways`, a result has `goes`, its doer's way or null, and the action it brings has `fromDeed`,
-// the result record's number, also when that action is refused. Neither adds a line that anyone reads.
+// journal.ts relies on a result following its do, with the same who.
+// fromDeed links even a refused way to its result; it must not add a memory line.
 export type Event = { at: number; clock: string; kind: Kind | 'drive' | 'park' | 'arrive' | 'wake' | 'memory' | 'result' | 'reply' | 'weather'; who: string; place: string; to: string | null;
   text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; gesture?: string; says?: string; wakes?: string[];
   transfer?: true; from?: string; arrival?: number; indoors?: string | null; search?: boolean; finds?: string[]; moved?: Posting[]; set?: { what: string; name: string; state: string }[];
   poses?: { of: string; text: string }[]; feels?: { of: string; text: string }[]; beyond?: string | null; nearby?: string[]; found?: { what: string; name: string; spot: string }[]; touches?: Change[]; lingers?: Lingering[];
   traced?: Mark[]; wiped?: Mark[]; goes?: string | null; fromDeed?: number };
-// A trace with its label and the person it is on.
 export type Mark = { of: string; label: string; text: string };
-// A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
-// its place. `speaking` and `listening` are the ends of its own last speech and of the latest speech it heard; `began`
-// is the start of its own last action. `pose` is how it is placed now.
+// speaking and listening are end times, not durations.
 export type Person = { id: string; place: string | null; heading: string | null; asleep: boolean; freeAt: number; began: number | null;
   speaking: number; listening: number; passageUntil?: number; pose: string | null };
 
@@ -111,10 +51,8 @@ const rateOf = (value: unknown, field: string, absent: number) => {
   durationOf(Math.max(2, Math.ceil(MAX_WORDS / rate * 60)), field);
   return rate;
 };
-// An id names one thing: a place's, a character's and a figure's are all different, since the rules keep the things
-// of a place and of a person, and take the `to` of a move, under them alike. None is what the rules themselves name
-// there: a way out of the world, a thing's label, or a name that every object of the language has. In a world that
-// keeps traces, `traced`, none is a label of a trace either.
+// A move's `to` takes a place's id, a person's, a thing's label or a way out of the world alike, and figures are
+// named beside people, so an id is none of the others and none of the rules' own names.
 function idOf(value: unknown, field: string, taken: string[], traced: boolean): string {
   if (typeof value !== 'string' || !ID.test(value)) return refuse(field, 'must be a short id of Latin letters, digits, `_` and `-`');
   if (traced && /^m\d+$/.test(value)) return refuse(field, 'must not be a label of a trace like `m7`, in a world whose characters have `traces`');
@@ -124,8 +62,7 @@ function idOf(value: unknown, field: string, taken: string[], traced: boolean): 
   return value;
 }
 
-// A world file as it was parsed from JSON, without the settings of the laws, which `readWorld` of `laws.ts` adds.
-// The first thing wrong is one sentence that names the field.
+// laws.ts adds the law settings after this check.
 export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hunger'> {
   if (!isObject(value)) return refuse('the file', 'must be a JSON object');
   if (typeof value.clock !== 'string' || !TIME.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
@@ -147,7 +84,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
     if (place.clock !== undefined && typeof place.clock !== 'boolean') return refuse(`${field}.clock`, 'must be true or false');
     if (place.minutesTo !== undefined && !isObject(place.minutesTo)) return refuse(`${field}.minutesTo`, 'must be an object');
     if (place.nextDoor !== undefined && !Array.isArray(place.nextDoor)) return refuse(`${field}.nextDoor`, 'must be a list');
-    // What the rules read as texts before they kept things as records is refused, so that no thing is lost unseen.
+    // Refuse the old text form rather than silently lose a thing.
     if (place.hidden !== undefined) return refuse(`${field}.hidden`, 'is no longer read: a hidden thing is one of `things` with `hidden`');
     if (place.figures !== undefined && !Array.isArray(place.figures)) return refuse(`${field}.figures`, 'must be a list');
     const figures = ((place.figures ?? []) as unknown[]).map((figure, at): Figure => {
@@ -185,7 +122,6 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
     const stray = place.nextDoor.findIndex(to => to === place.id || !places.some(known => known.id === to));
     if (stray !== -1) return refuse(`places[${index}].nextDoor[${stray}]`, 'must name another place of the list');
   }
-  // Two places are next door to each other whichever of them lists the other.
   const doors = places.map(place => places.filter(other => place.nextDoor.includes(other.id) || other.nextDoor.includes(place.id)).map(other => other.id));
   for (const [index, place] of places.entries()) place.nextDoor = doors[index];
   const characters: Character[] = [];
@@ -274,6 +210,5 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
   return core;
 }
 
-// Everyone with a name whom nobody plays, and everyone a line may name: the characters and those.
 export const figuresOf = (world: World) => world.places.flatMap(place => place.figures);
 export const namesOf = (world: World) => [...world.characters, ...figuresOf(world)];

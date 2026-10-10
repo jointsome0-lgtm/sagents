@@ -1,24 +1,18 @@
 import { CACHE, ENDPOINT, ModelError, OTHER_ENDPOINT, untilStopped } from './chatgpt.ts';
 import type { Controls, Request, Result } from './chatgpt.ts';
 
-// Any server that speaks the OpenAI chat completions protocol: vLLM or llama.cpp on a rented card, OpenRouter. The
-// address, the key and the output limit come from the environment. A request goes to the server the address names and
-// nowhere else, and holds what the caller gave, the output limit and the fields of SAGENTS_API_EXTRA. The caller's
-// name for a player, `cache`, goes out only under the field that SAGENTS_API_CACHE_FIELD names: servers call it by
-// different names, and one that checks its fields refuses a name it does not know. With SAGENTS_API_STREAM the answer
-// is asked for as a stream, for a server that gives no other, and is an answer only when the stream came whole. Every
-// call can cost money, so nothing is sent a second time: a failure is a code, and the caller decides what to do next.
+// A retry can cost money, so the caller must choose whether to send another request.
 const DEFAULT_MAX_TOKENS = 2048;
 const MAX_ANSWER = 4_000_000;
 const MAX_TEXT = 100_000;
-// What this module sets itself, and what would change the shape or the number of the answers it reads.
+// Extra fields must not change the shape or number of answers we can read.
 const FIXED = ['model', 'messages', 'max_tokens', 'max_completion_tokens', 'response_format', 'stream', 'stream_options', 'n'];
-// A key is one header value; anything else in it would be a second header or a failure that quotes it.
+// Other characters could inject a header or make an error quote the key.
 const KEY = /^[\x21-\x7e]+$/;
 const FIELD = /^[a-z][a-z0-9_]{0,39}$/;
 const LOOPBACK = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])$/;
-// How servers name a prompt that does not fit: OpenAI and vLLM by code, llama.cpp by type, OpenRouter in its sentence
-// only. The sentence is looked at for this and never carried.
+// OpenAI and vLLM name context overflow by code, llama.cpp by type, OpenRouter only in its sentence.
+// The sentence must not leave this check.
 const CONTEXT_CODES = ['context_length_exceeded', 'exceed_context_size_error'];
 const CONTEXT_TEXT = /context (?:length|size|window)|maximum context/i;
 
@@ -27,17 +21,16 @@ export type Env = { readonly [name: string]: string | undefined };
 
 const isObject = (value: unknown): value is { readonly [field: string]: unknown } => !!value && typeof value === 'object' && !Array.isArray(value);
 const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
-// A setting or a field that cannot be used, by its name. The name is this module's own and says nothing of the value.
+// Report setting names alone; their values may contain secrets.
 const refused = (name: string) => new ModelError('invalid_request', undefined, undefined, name);
 
 function settingsOf(env: Env) {
   const key = env.SAGENTS_API_KEY || undefined;
   let base: URL | undefined;
   try { base = new URL(env.SAGENTS_API_URL ?? ''); } catch (error) {
-    // A TypeError is how URL says that this is no address.
     if (!(error instanceof TypeError)) throw error;
   }
-  // The key and the text travel encrypted or do not leave this computer: plain http is for a loopback address only.
+  // Keep keys and text encrypted whenever they leave this computer.
   if (!base || !(base.protocol === 'https:' || (base.protocol === 'http:' && LOOPBACK.test(base.hostname)))
     || base.username || base.password || base.search || base.hash) throw refused('SAGENTS_API_URL');
   if (key && !KEY.test(key)) throw refused('SAGENTS_API_KEY');
@@ -51,17 +44,16 @@ function settingsOf(env: Env) {
     }
   }
   if (!isObject(extra) || FIXED.some(name => Object.hasOwn(extra, name))) throw refused('SAGENTS_API_EXTRA');
-  // The field a player's name goes under is one of its own: not one this module sets, and not one of the extra fields.
+  // Servers disagree on cache-field names and may refuse an unfamiliar one.
   const cacheField = env.SAGENTS_API_CACHE_FIELD || undefined;
   if (cacheField && (!FIELD.test(cacheField) || FIXED.includes(cacheField) || Object.hasOwn(extra, cacheField))) throw refused('SAGENTS_API_CACHE_FIELD');
   if (env.SAGENTS_API_STREAM && env.SAGENTS_API_STREAM !== '1') throw refused('SAGENTS_API_STREAM');
   return { url: `${base.origin}${base.pathname.replace(/\/+$/, '')}/chat/completions`, key, maxTokens, extra, cacheField, stream: !!env.SAGENTS_API_STREAM };
 }
 
-// The body of one request, whole: a caller that stores its hash can say exactly what the model saw.
 export function completionsBody(request: Request, env: Env = process.env) {
   const { maxTokens, extra, cacheField, stream } = settingsOf(env);
-  // A reasoning effort after `@` belongs to the ChatGPT connection; here the server's own switch goes in SAGENTS_API_EXTRA.
+  // The @ effort syntax belongs to chatgpt.ts; servers need their own extra field.
   if (!request.model || request.model.includes('@')) throw refused('model');
   if (request.cache !== undefined && !CACHE.test(request.cache)) throw refused('cache');
   return {
@@ -70,12 +62,11 @@ export function completionsBody(request: Request, env: Env = process.env) {
     max_tokens: maxTokens,
     ...(request.schema ? { response_format: { type: 'json_schema', json_schema: { name: 'reply', strict: true, schema: request.schema } } } : {}),
     ...(request.cache && cacheField ? { [cacheField]: request.cache } : {}),
-    // The usage of a stream comes only when it is asked for, in a chunk of its own before the end.
+    // A stream reports usage only if we ask for it.
     ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
   };
 }
 
-// An answer of the server, or null when it is too long or is not JSON. Only named fields of it are ever read.
 async function jsonOf(response: Response): Promise<unknown> {
   if (!response.body) return null;
   const chunks: Buffer[] = [];
@@ -91,9 +82,7 @@ async function jsonOf(response: Response): Promise<unknown> {
   }
 }
 
-// A failure the server names, by the HTTP status or inside an answer that came with 200 (OpenRouter passes its
-// provider's failure on that way, with the status as a number in `code`). A balance that is used up is
-// `budget_exceeded`: the caller stops, and nothing here asks for more.
+// OpenRouter may send its provider's failure with HTTP 200 and the status in code.
 function failure(httpStatus: number | undefined, error: unknown) {
   const named = isObject(error) ? error : {};
   const status = httpStatus ?? (typeof named.code === 'number' && Number.isInteger(named.code) && named.code >= 400 && named.code <= 599 ? named.code : undefined);
@@ -107,23 +96,16 @@ function failure(httpStatus: number | undefined, error: unknown) {
     status, code, named.param);
 }
 
-// A streamed answer in the shape of one that came whole, so that one set of checks reads both. Events are lines
-// `data: <json>`; a line that is not yet JSON is held with the next data lines and read once at the event's blank line.
-// A blank line ends the event; a comment and other fields end nothing and are skipped. Reasoning is never read.
-// Only `[DONE]` makes an answer: a stream that ends without it, or that holds an error at any point, is a failure,
-// whatever text came by then. The caller is handed each piece as it arrives, before any of that is known.
+// onText may see pieces before the stream is known to be complete.
 async function streamOf(body: Response['body'], onText: (delta: string) => unknown, stopped: () => ModelError | null): Promise<unknown> {
   if (!body) throw new ModelError('invalid_stream');
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let bytes = 0, text = '', finish: unknown, usage: unknown, provider: unknown;
-  // The pieces of a line that has not ended yet, joined once when its line feed comes: a long line that arrives in
-  // small pieces is read once, not once for every piece.
+  // Join once per line to avoid rereading a long line for every arriving piece.
   let rest: string[] = [];
   let held: string[] | null = null, pieces = 0;
   for await (const part of body) {
-    // Pieces that are ready at once leave no timer room to fire. So now and then the loop steps aside, and the clock
-    // is read at every piece, after that step: a deadline and a cancellation are seen while a stream is read, text
-    // or none, and nothing of a piece is read once one of them has come.
+    // Ready pieces can starve timers; yield occasionally so cancellation and deadlines can fire.
     if ((pieces += 1) % 256 === 0) await new Promise<void>(resolve => { setImmediate(resolve); });
     const reason = stopped();
     if (reason) throw reason;
@@ -131,7 +113,6 @@ async function streamOf(body: Response['body'], onText: (delta: string) => unkno
     if (bytes > MAX_ANSWER) throw new ModelError('output_limit');
     let piece: string;
     try { piece = decoder.decode(part, { stream: true }); } catch (error) {
-      // A TypeError is how the decoder says that the bytes are not UTF-8.
       if (error instanceof TypeError) throw new ModelError('invalid_stream');
       throw error;
     }
@@ -149,7 +130,9 @@ async function streamOf(body: Response['body'], onText: (delta: string) => unkno
         if (!line.startsWith('data:')) continue;
         data = line.slice(5).trim();
         if (held !== null) { held.push(data); continue; }
-        // Leaving the loop cancels the body: a connection left open after the end is not waited for.
+        // An empty data line adds only a line feed to its event, which a JSON value does not need.
+        if (!data) continue;
+        // Returning cancels the body so an open connection cannot delay a completed answer.
         if (data === '[DONE]') return { choices: [{ finish_reason: finish, message: { content: text } }], usage, provider };
       }
       let chunk: unknown;
@@ -165,7 +148,7 @@ async function streamOf(body: Response['body'], onText: (delta: string) => unkno
       if (chunk.error) throw failure(undefined, chunk.error);
       if (isObject(chunk.usage)) usage = chunk.usage;
       if (typeof chunk.provider === 'string') provider = chunk.provider;
-      // The chunk of the usage has no choice; no chunk has two.
+      // The usage-only chunk has no choice.
       const choices = chunk.choices ?? [];
       if (!Array.isArray(choices) || choices.length > 1) throw new ModelError('invalid_stream');
       const choice: unknown = choices[0];
@@ -207,16 +190,15 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       if (signal?.aborted) throw new ModelError('cancelled');
       let response: Response | undefined, answer: unknown, streamed = false;
       try {
-        // One request and no other. A redirect is a failure: it would carry the key and the text to another server.
+        // A redirect could carry the key and request text to another server.
         response = await untilStopped(() => fetcher(url, { method: 'POST', redirect: 'error', signal: current, body,
           headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json' } }), current, until);
         if (response.status === 402) {
-          // The balance is already known to be used up. No broken or unfinished body can change that.
+          // A broken body must not hide an exhausted balance.
           if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
           throw failure(402, undefined);
         }
-        // A refusal by the status is one JSON body also when a stream was asked for, and so is the answer of a server
-        // that gave it whole all the same.
+        // A server may return JSON even when a stream was requested.
         streamed = stream && response.ok && !response.headers.get('content-type')?.includes('application/json');
         answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until), stopped), current, until)
           : await untilStopped(() => jsonOf(response!).catch(error => {
@@ -226,7 +208,6 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       } catch (error) {
         const reason = stopped();
         if (reason) throw reason;
-        // A TypeError is fetch's own: no connection, a redirect, or an answer that broke off.
         if (error instanceof TypeError) throw new ModelError('provider_failed', response?.status);
         throw error;
       }
@@ -239,15 +220,12 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       if (!isObject(choice)) throw new ModelError('invalid_response');
       if (choice.error) throw failure(undefined, choice.error);
       const message = isObject(choice.message) ? choice.message : {};
-      // No tools are sent, so a call of one is not an answer.
+      // No tools were sent, so a tool call cannot be an answer.
       if (choice.finish_reason === 'tool_calls' || (Array.isArray(message.tool_calls) && message.tool_calls.length)) throw new ModelError('unexpected_tools');
-      // The server declined to write: its content filter stopped the answer, or the message holds a refusal in place
-      // of content. Its words are never kept.
       if (choice.finish_reason === 'content_filter' || (typeof message.refusal === 'string' && message.refusal.trim())) throw new ModelError('declined');
-      // An answer that stopped short is no answer, whatever was written by then.
       if (choice.finish_reason === 'length') throw new ModelError('output_limit');
       if (choice.finish_reason !== 'stop') throw new ModelError('incomplete_stream');
-      // A model that spent its turn on reasoning leaves no content at all.
+      // Reasoning may use the whole turn and leave no content.
       const text = message.content ?? '';
       if (typeof text !== 'string') throw new ModelError('invalid_response');
       if (text.length > MAX_TEXT) throw new ModelError('output_limit');
@@ -257,13 +235,12 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       }
       const ended = stopped();
       if (ended) throw ended;
-      // prompt_tokens includes the cached part, completion_tokens the reasoning.
+      // prompt_tokens includes cached tokens; completion_tokens includes reasoning.
       const usage = isObject(answer.usage) ? answer.usage : {};
       const input = isObject(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
       const output = isObject(usage.completion_tokens_details) ? usage.completion_tokens_details : {};
       const inputTokens = count(usage.prompt_tokens), outputTokens = count(usage.completion_tokens);
-      // A router says in `provider` which of a model's endpoints answered: two answers of one model may come from two.
-      // Only a short plain name is kept, and nothing else of what the server wrote there.
+      // A router may send two requests for one model to different providers.
       const endpoint = typeof answer.provider !== 'string' ? {} : { endpoint: ENDPOINT.test(answer.provider) ? answer.provider : OTHER_ENDPOINT };
       return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
         cachedInputTokens: count(input.cached_tokens), outputTokens, reasoningTokens: count(output.reasoning_tokens) }, ...endpoint };

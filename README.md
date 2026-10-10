@@ -46,7 +46,7 @@ sagents needs Node 24.9 or newer and nothing else. It has no dependencies, and N
 It is run from a checkout of this repository: it is not on npm, and `"private": true` in `package.json` guards against
 publishing it there by mistake. `npm link`, run once in the checkout, makes `sagents` a command of this computer: a
 link to `src/cli.ts`, so the command is always the checkout as it stands. Without it `node src/cli.ts` takes the same
-arguments, and `sagents help` lists them.
+arguments, and `sagents help` lists them. `sagents --help` and `sagents -h` give the same text.
 
 With a server that speaks the OpenAI chat completions protocol, vLLM or llama.cpp on a card or OpenRouter, an example
 world is played from a clone like this:
@@ -61,46 +61,14 @@ node src/cli.ts live examples/seaside-cafe.json --model api:google/gemma-4-31b-i
 After `api:` stands the id that your server knows the model by. `live` has that model play the two residents of
 `examples/seaside-cafe.json`, a café by the sea with a waitress whom nobody plays, and stops after 12 requests. It
 prints each event as it happens, one line with the story's clock, the place, who and what, with the resident's
-private note under it, and then the totals:
+private note under it, and then the totals.
 
-```
-12:50:00 [Café «Anchor»] Nina to Raya (a small smile and a wave of the hand): "Could I have a coffee, please?"
-         private note of Nina: I'm early, but the wind is quite strong. I should get a drink before Oleg arrives so I'm settled.
-12:50:00 [Café «Anchor»] Raya answers Nina: "Of course, dear. I'll bring it right over."
-12:50:00 [Beach] Oleg leaves for Café «Anchor» (192 s)
-         private note of Oleg: I should head to the cafe now so I'm not late for Nina. I'm really looking forward to that fish.
-...
-done (calls): 3.9 story minutes, 12 calls, 0 invalid, 0 of them cut at the output limit, 0 of them declined by the service, 0 memory rewrites, 0 lost, 0 answers of the world refused, 0 deeds left with nothing, 24134 input tokens, 3520 of them cached, 1281 output tokens
-  api:google/gemma-4-31b-it: 12 calls, 0 invalid, 0 of them cut at the output limit, 0 of them declined by the service, 24134 input tokens, 3520 of them cached, 1281 output tokens, answered by CoreWeave 8, ModelRun 1, Venice 1, DeepInfra 2
-  turns: 10 calls, 20383 input tokens, 3520 of them cached, 1173 output tokens
-  memory rewrites: 0 calls, 0 input tokens, 0 of them cached, 0 output tokens
-  answers of the world: 2 calls, 3751 input tokens, 0 of them cached, 108 output tokens
-```
+[The first command was played for release 0.1.0](docs/measured.md#release-010-first-command).
 
-These are the first lines and the totals of a real run: the check of release 0.1.0 ran the last command as it stands
-on OpenRouter with Gemma 4 31B, with nothing set but the address and the key, from a copy of the repository with
-nothing installed. The clone and the line of the key were not run in that check, and a model writes something else
-every time. The model's own line is there because that router names the endpoint that answered. The four endpoints
-are its choice for a run that is told nothing: [A server of your own](#a-server-of-your-own) says how one is named
-and what share of a request was then read from a cache.
-
-- The server must hold an answer to a schema: every request of `live` carries one as a strict `json_schema`
-  `response_format`. A server that refuses the field ends the run at its first request, and one that ignores it and
-  answers in plain text fails nothing. Both were played against a stand-in for such a server on the same computer.
-  When it answered HTTP 400, the totals began `failed (invalid_request 400 unsupported_parameter response_format)`,
-  the server's own code and field name after the status. When it answered in plain text, no answer could be used and
-  each counted as a wait of 30 seconds, which prints no line, so that check printed only its totals, `done (calls)` with
-  as many `invalid` as `calls`. Today five unusable answers of one model in a row end it as `failed (invalid)`,
-  unless the same answer reaches the cut or decline limit, whose reason wins, as described below.
-- `--calls` is the most requests one run sends, 60 when it is not given, and every request counts, whatever it is
-  for: a resident's turn, the world's answer to a deed, a memory rewrite. `--tokens <n>` also ends the run before
-  another request when the reported input and output tokens reach that ceiling, with reason `tokens`. An answer
-  with no usage adds nothing; the request that crosses the ceiling is the last, so it can go over by one request.
-  Without `--tokens` there is no token ceiling. The run also ends after `--minutes` of the story, 30 by default.
-- Without `--model` the residents are played through the ChatGPT plan, which needs the `login` below.
-- The address is `https`, or plain `http` to this computer only; a card elsewhere is reached through an SSH tunnel to
-  a local port or over `https`. This, the other settings and what is sent to whom are under
-  [A server of your own](#a-server-of-your-own).
+Every `live` request carries a strict `json_schema` `response_format`. A server refusing that field ends the run
+at its first request; plain-text answers cannot be used. [The two server checks](docs/measured.md#servers-with-no-schema)
+show those failures. The [live command reference](#the-commands-and-a-run) gives the limits and defaults;
+[the connection reference](#a-server-of-your-own) gives the server settings and what is sent.
 
 With a ChatGPT plan in place of a server, `login` signs this computer in once. `ask` sends one request by either
 connection:
@@ -112,15 +80,20 @@ echo '{"model":"gpt-6.1-sol@low","messages":[{"role":"user","content":"Say hi"}]
 ```
 
 `login` prints an address. Open it in a browser on the same computer, sign in with ChatGPT and approve. sagents listens
-on `127.0.0.1` for the browser's way back, checks the answer and saves the tokens. `login --new` registers sagents
+on `127.0.0.1` for the browser's way back, checks the answer and saves the tokens. `sagents login --new`, the `login --new` form, registers sagents
 again, for another account or when signing in with the saved registration no longer works.
+Sign-in has a ten-minute limit. After it succeeds, `login` prints the same status and model-list check as `status`;
+without plan permission it also asks you to run it again and allow that permission.
 
-`status` says whether this computer is signed in. For a signed-in account it also asks OpenAI for the plan's list of
-models and says whether the name is in it. The list is not the set of names a request takes: a name that is not in it
+`status`, as `sagents status [<model>]`, says whether this computer is signed in and checks the given model name,
+`gpt-6.1-sol` by default. It prints whether this computer is signed in, whether plan use is allowed and the access
+token's minutes left. Only when signed in with plan use allowed does it ask OpenAI for the plan's list of
+models and check the name before any `@` effort suffix. The list is not the set of names a request takes: a name that is not in it
 may be served all the same.
 
-`ask` reads one request as JSON from stdin and prints one JSON line. `--timeout <seconds>` limits the call, the reading
-of the request included, and is 180 by default. It does not cut short a renewal of the ChatGPT plan's access token,
+`sagents ask [--timeout <seconds>]` reads one request as JSON from stdin, at most 16,000,000 bytes, with a nonempty list of messages,
+and prints one JSON line. `--timeout <seconds>` limits the call, the reading
+of the request included, and is 180 by default; it accepts a finite number from 1 to 3600. It does not cut short a renewal of the ChatGPT plan's access token,
 which a call begins with when the token is about to expire: the renewal runs to its own end, at most 90 seconds of
 waiting for another sagents process that is renewing and then 30 seconds for the sign-in service, so that a new pair
 of tokens is never lost unsaved, and a call whose limit passed meanwhile ends with `timeout` right after it.
@@ -159,868 +132,803 @@ call that ends in a failure, `wrong_model` included, may have handed over a part
 | `storage_failed` | The account file or its lock could not be read or written. An account file that cannot be read or understood is left as it is; repair or remove it by hand in `~/.config/sagents/`. |
 | `internal_error` | sagents itself failed in a way that has no code of its own. |
 
-In its own checks this code talks to stand-ins for both services and to nothing else. Beyond them it has been used
-with one account of a ChatGPT plan and with two chat completions servers, a router (OpenRouter) and vLLM behind a
-gateway on a rented card, so what another account or server does differently is not known.
+The [connection checks](docs/measured.md#connections-used) cover only the accounts and servers used there.
 
 ### A live world
+
+`live` reads a world file and has a model play each of its characters, one request and one action per turn.
+The world answers deeds and speaks for named people whom nobody plays. The rules keep time, things and memory.
+`examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning,
+where memory after the night matters; `examples/seaside-cafe.json` is a café with a crowd and a waitress in a
+mapped town. They are synthetic and in English, translated from Russian. The instructions are in English. Residents and memory rewrites use the sheet's language; world results
+and figure replies use the world's description's language. [The example checks](docs/measured.md#translated-examples) cover
+these translations; every other measurement here used the Russian texts.
+
+#### The world file
+
+The reader is `readWorld` in `src/laws.ts`, with `readCore` in `src/world.ts`. The file is a JSON object.
+The tables below list the fields the reader uses. Unknown fields of a world object are ignored; an environment
+refuses unknown fields. Required fields have no default. Text must be nonempty unless its entry allows null.
+Boolean settings use forms such as `"clock": true`, `"open": true`, `"touch": true`, `"marks": true`
+and `"ways": true`; hunger uses `hunger: true`. All numeric settings must be finite. Durations derived from them must fit whole seconds from 1 to
+1,000,000,000,000; this excludes worlds of 0.1.0 with longer durations, over thirty thousand years.
+The check covers settings and derived durations, not seconds accumulated over a long story.
+
+A word limit also limits characters to ten per word, so a text without spaces cannot evade it.
+Optional bounded texts accept absence or null; an empty or overlong text is refused, rather than cut.
+The texts are in the world's language. The public descriptions should name only what does not move.
+Private `facts` belong to the world model alone. They never reach residents and do not change during a run.
+`boundedOf`, `sizeOf` and `durationOf` in `src/reading.ts` hold these checks.
+
+An `id` of a place, character, figure or vehicle is a string of 1 to 40 Latin letters, digits, `_` and `-`,
+beginning with a letter, unique across those four lists. It cannot be `eaten`, `burned`, a thing label such as
+`t7`, or an inherited JavaScript name such as `constructor`. When traces are on it cannot look like `m7` either.
+`idOf` in `src/world.ts` holds this rule. Things and traces receive labels from the rules, not ids from the author.
+
+##### World
+
+`World` in `src/world.ts` describes what the core keeps. The law fields are read separately.
+
+| Field | Type, default and bounds | What it means |
+| --- | --- | --- |
+| `title` | Required text. | The world's name, known to everyone. |
+| `about` | Required text. | The description everyone knows. |
+| `facts` | Text or null, absent for none; at most 300 words. | What is true but not public. |
+| `clock` | Required `HH:MM`, from `00:00` to `23:59`. | The starting time on day 1. It does not give everyone a clock. |
+| `places` | Required nonempty list of place objects. | The places anyone can go to. |
+| `characters` | Required nonempty list of character objects. | The people whom models play, in their starting order. |
+| `wordsPerMinute` | Number above zero, default 130. A 65-word speech, rounded up with a two-second minimum, must fit the duration bound. | The speech rate when a character or figure has no rate of its own. |
+| `travelMinutes` | Number above zero, default 5; rounded seconds with a one-second minimum must fit the duration bound. | The walk time when neither a listed time nor coordinates give one. |
+| `walkMetresPerMinute` | Number above zero, default 80. | The pace used with coordinates. Every unlisted pair's distance must be finite and its walk fit the duration bound. |
+| `remote` | Nonempty text or null, absent for none. | The means of remote contact, such as a telephone. Without it there is no `call`. |
+| `shortWords` | Positive safe whole number, default 2000. | The recent-memory limit that starts a rewrite; waiting calls may require several rewrites. |
+| `longWords` | Positive safe whole number, default 400. | The limit of a character's first memory and each rewrite. |
+| `vehicles` | List of at most 6 vehicle objects, absent or empty for none. | Moving places. An empty list still selects the vehicle state format. |
+| `touch` | Boolean, default false. | Keeps touches between two people as state. Sleep does not end them; crossing a place's boundary does. |
+| `marks` | Boolean, default false. | Keeps lasting feelings of a body, including temporary relief. It changes no body or ability. |
+| `ways` | Boolean, default false. | Lets the world name a deed's way to another place; the rules then take an ordinary `go`. |
+| `hunger` | Only true or absent, default off. | Turns on hunger and thirst together. The world must contain a thing with `food` above zero and a thing with `drink: true`, anywhere in its lists. It causes no fainting, illness or death. |
+| `environment` | Name or null, absent for none; 1 to 40 lower-case letters, digits and `-`, first a letter or digit. | `"environment": "<name>"` reads `environments/<name>.json`. The command's choice wins over this name. |
+| `dayStart` | `HH:MM`, default `07:00`; null uses the default. | The daily start from which the first sleep debt is counted. |
+| `tiredHours` | Number above zero, default 16; rounded-up seconds must fit the duration bound. | When tiredness is named to the character and others nearby. |
+| `spentHours` | Number above zero, default 24; at least `tiredHours`, with the same duration bound. | At this debt a turn becomes eight hours of sleep, without a request. |
+| `weather` | Weather object or null, absent for none. | A schedule or a seeded series of perceptions. It does not slow, chill or wake anyone. |
+
+##### Place
+
+`Place` in `src/world.ts` is an ordinary place, with no hours or door state.
+
+| Field | Type, default and bounds | What it means |
+| --- | --- | --- |
+| `id` | Required id. | The destination of a walk and holder of its things. |
+| `name` | Required text. | Its public name. |
+| `about` | Required text. | What everyone knows of it; use only what does not move. |
+| `facts` | Text or null, absent for none; 300 words at most. | Truth for the world model alone. |
+| `things` | List of things, default empty; at most 60 records including all contents. | What the rules can find, move, eat, burn and change here. |
+| `open` | Boolean, default false. | True for open sky, otherwise a roof; selects weather and cues to time. |
+| `clock` | Boolean, default false. | A clock at hand for anyone here. It is not a movable thing. |
+| `crowd` | Text or null, absent for none; 60 words at most. | Who is around as anyone sees them. The crowd answers nobody. |
+| `figures` | List of figure objects, default empty. | Named people who answer a speech addressed to them. |
+| `at` | Two finite numbers `[x, y]`, east and north in metres, or null; absent for none. | When both ends have coordinates and neither lists a time, the straight-line walk at the world's pace, in whole minutes above ten or tenths up to ten, with a one-second minimum. |
+| `minutesTo` | Object from another place's id to a number above zero, default empty; rounded seconds with a one-second minimum must fit the duration bound. | Overrides coordinates and the world's fallback time. The departing place's value wins if both ends list the pair. This can make the two directions differ. |
+| `nextDoor` | List of other ordinary place ids, default empty. | A door or thin wall that can carry a deed's sound. Either end listing the pair makes it mutual. Speech itself never passes it. |
+
+##### Character
+
+`Character` in `src/world.ts` separates a sheet, which stays true, from a memory, which ages.
+Put today's debt, a sum owed or where something was put in memory, rather than in the sheet.
+
+| Field | Type, default and bounds | What it means |
+| --- | --- | --- |
+| `id` | Required id. | The person whom the model plays; also a holder and a call's recipient. |
+| `name` | Required text. | Its public name. |
+| `place` | Required ordinary place id. | Where it starts, awake. A character cannot start inside a vehicle. |
+| `sheet` | Required text. | Who it is. No other resident or world model receives it. |
+| `memory` | Text or null, absent for none; at most `longWords` words. | What it remembers at the start: what it saw, owes or knows. |
+| `facts` | Text or null, absent for none; 300 words at most. | Unchanging truth for the world model alone. |
+| `looks` | Text or null, absent for none; 60 words at most. | The body and face, which never change. Clothes belong among things that can be taken off. The owner has it in its system text; people nearby see it. |
+| `pose` | Text or null, absent for none; 20 words at most. | How and where within its place it is. Going and falling asleep clear it; waking keeps a pose given during sleep. |
+| `carries` | List of things, default empty; 30 records at most including all contents. | What it carries or wears, which goes with it. |
+| `clock` | Boolean, default false. | A watch or phone at hand, not a thing that can be handed over. |
+| `wordsPerMinute` | Number above zero, absent for the world's rate; same speech-duration bound. | The rate for this person's `say`, `call`, words with a deed, and turn's speech limit. |
+| `traces` | List of at most 8 different nonempty texts, 12 words each, absent for none. Whitespace is joined and trailing `.` or `;` removed before checking for repeats. | Temporary visible marks on body or clothes, such as `pink pudding on the upper lip and the tip of the nose` or wet hair. Even an empty list turns traces on for the world. They do not fade or pass to anything by themselves. |
+| `marks` | List of at most 6 initial mark objects (`MAX_MARKS`), default empty; no repeated zone and kind. | Lasting feelings from the start, permanent until changed. A nonempty list needs the world's `marks: true`; an empty list does not. |
+
+##### Figure
+
+`Figure` in `src/world.ts` is a named person of one place whom no model plays.
+Each figure is `{ id, name, looks, facts, wordsPerMinute }`. It has no sheet, memory, turn or carried things, never speaks first, wakes nobody and follows nobody.
+A call cannot reach it. Asking it to answer costs a request even when it says nothing.
+
+| Field | Type, default and bounds | What it means |
+| --- | --- | --- |
+| `id` | Required id. | A `say` with this `to` addresses it when it is in the speaker's place. |
+| `name` | Required text. | Its public name. |
+| `looks` | Text or null, absent for none; 60 words at most. | What anyone in the place sees. |
+| `facts` | Text or null, absent for none; 300 words at most. | What the world knows when speaking for it, never sent to residents. |
+| `wordsPerMinute` | Number above zero, absent for the world's rate; same speech-duration bound. | The rate of its answer. |
+
+##### Thing
+
+`readThings` and `Thing` in `src/things.ts` hold this form, whether in `things`, `carries` or another thing's `holds`.
+The first level is 1; there are at most four levels. A thing has one holder, a place, a person or another thing.
+Each thing is `{ name, … }`. A count holds nothing, so four mugs with contents need four records.
+
+| Field | Type, default and bounds | What it means |
+| --- | --- | --- |
+| `name` | Required text, 8 words at most; none of `, ; [ ] ×`. | The name used in lists and postings. |
+| `facts` | Text or null, absent for none; 300 words at most. | Truth of the thing itself, such as what a notebook says or what a bag does not hold. It goes with the thing; write sentences naming it, since the world reads them among the place's facts without labels, and word two like things so that their facts tell them apart. |
+| `n` | Whole number from 1 to 1,000,000,000, absent for one uncounted record. | A count of things alike, such as money, cigarettes or logs. |
+| `holds` | List of things, absent for no container. | A table, bag or coat with pockets. Even an empty list makes a container; it cannot also be counted, a stock, food or something that burns. |
+| `open` | Boolean, default false; true needs `holds`. | Its contents are in plain sight. It does not open a door between places. |
+| `fixed` | Boolean, default false; allowed only at a place's top level or inside a fixed thing. | A part of the place that cannot move. Never allowed on a character or inside something movable. |
+| `stock` | Boolean, default false; cannot have `n` or be money. | A supply with no count; taking from it does not use it up. |
+| `food` | Finite number, zero or above, absent for none. | Calories of one, and permission to eat it. Only hunger accounts for the calories. |
+| `drink` | Boolean, default false; true needs `food`, zero for water. | Each one is a drink, including what comes from a stock. Read but does nothing without hunger; never shown in requests or thing notation. |
+| `burns` | Boolean, default false. | Permission to burn it up, when there is fire. |
+| `states` | 2 to 4 different strings, default none; each 1 to 30 characters with no whitespace, `/`, `(`, `)` or the signs forbidden in a name. | The states it can be in. Not allowed on a count or stock. |
+| `state` | One of `states`, default the first; absent when there are no states. | Its starting state. Needs `states`. |
+| `fire` | Boolean, default false, or one of `states`. | True can set things alight; a named state can do so only while it is current. |
+| `money` | Boolean, default false; true needs `n`. | Counted money, which a deed neither creates nor uses up. A bus fare can use it up. |
+| `hidden` | Object `{ spot, minutes }`, absent for visible; only on a place's or vehicle's top-level thing. | What lies unfound, with its contents. Finding makes it visible to everyone. |
+
+##### Hidden thing
+
+`readThings` in `src/things.ts` reads these required fields of `hidden`, with no defaults.
+
+| Field | Type and bounds | What it means |
+| --- | --- | --- |
+| `spot` | Nonempty text, at most 20 words. | The exact spot a deed may go straight to. |
+| `minutes` | Number above zero; rounded-up seconds fit the duration bound. | A person's accumulated search time here. A short deed straight to the spot can find it sooner. |
+The earlier text forms of a character's `holds` or `has`, a text of `things`, and a place-level list `hidden`
+are refused. They are not silently lost.
+
+##### Vehicle and fare
+
+`Vehicle` and the vehicle part of `readCore` in `src/world.ts` describe a moving place.
+It has no hours, figures, crowd, clock or coordinates. People and things stay inside its place throughout a drive,
+with speech, deeds, sleep and the weather as in an ordinary place. The world's weather holds on the way.
+A standing vehicle and its stop are next door; a driving one has no neighbour.
+
+| Field | Type, default and bounds | What it means |
+| --- | --- | --- |
+| `id` | Required id. | Its place id, named in a `go` to get in. |
+| `name` | Required text. | Its public name. |
+| `about` | Required text, 60 words at most. | Its unchanging description. |
+| `at` | Required ordinary place id; for a bus the first route stop. | Where a driven vehicle starts. A bus's position follows its timetable and the starting clock. |
+| `faster` | Required whole number from 2 to 30. | Divides the walk time, rounded up to seconds with a thirty-second minimum. |
+| `seats` | Required whole number, 1 to 12; for a bus 1 to 60. | The number of people allowed inside. |
+| `drivers` | List of distinct character ids, absent for anyone, empty for nobody. | Who may drive. Refused with a route. |
+| `reach` | List of distinct ordinary place ids, absent for all, empty for none. | Where it may drive. Refused with a route. |
+| `open` | Boolean, default false. | An inside under open sky, rather than a roof. |
+| `things` | A place's list of things, default empty; 60 records including contents. | What is inside, which goes with the vehicle. |
+| `route` | List of 2 to 12 ordinary place ids, absent for a driven vehicle; no consecutive repeat, including last to first. | A bus that nobody drives, going around these stops. It takes the place of `drivers` and `reach`. |
+| `leaves` | Required with a route, 1 to 48 `HH:MM` times in strictly rising order. | Daily departures from the first stop. The round must finish strictly before the next, including over midnight. Ignored without a route. |
+| `stands` | Whole seconds from 30 to 1800, default 60 with a route. | The pause at each stop after the first. At the first it waits for the next departure. Ignored without a route. |
+| `fare` | Object `{ name, n }`, absent for free. | The price of boarding a bus; ignored without a route. |
+
+##### Fare
+
+`readCore` in `src/world.ts` reads these required fields of `fare`, with no defaults.
+
+| Field | Type and bounds | What it means |
+| --- | --- | --- |
+| `name` | Nonempty text. | Names a counted thing of money in the world file. |
+| `n` | Whole number from 1 to 1,000,000,000. | The price of one ride. |
+
+For example, a synthetic bus is:
+
+`{ "id": "bus4", "name": "Bus 4", "about": "A yellow town bus.", "at": "pier", "faster": 4,
+  "seats": 20, "route": ["pier", "market", "hill"], "leaves": ["08:00", "08:30"],
+  "stands": 60, "fare": { "name": "rubles", "n": 30 } }`
+
+A driven car could instead have `{ "id": "blue", "name": "Blue car", "about": "A small blue car.",
+"at": "pier", "faster": 4, "seats": 3 }`.
+
+##### Initial mark
+
+`readGiven` and `Given` in `src/marks.ts` read each entry of a character's `marks`.
+Each is `{ zone, kind, level, text }`. Every field is required, with no default.
+
+| Field | Type and bounds | What it means |
+| --- | --- | --- |
+| `zone` | `head`, `face`, `neck`, `shoulders`, `chest`, `back`, `belly`, `hips`, `arms`, `hands`, `legs`, `feet` or `body`. | The part of the body; `body` is the whole of it. |
+| `kind` | `itch`, `burn`, `ache`, `pain` or `numb`. | The kind of feeling. |
+| `level` | `faint`, `clear` or `strong`. | Its strength. |
+| `text` | Nonempty text, 15 words at most. | Where exactly and what it feels like. |
+
+##### Environment and weather
+
+An environment holds only `dayStart`, `tiredHours`, `spentHours` and `weather`, in the forms above and below.
+The world file's explicit value of any of these wins over the environment's, including null where allowed.
+The environment is checked on its own, so an override cannot hide an invalid setting. Hunger belongs to the world
+file alone. `environmentOf` and `readWorld` in `src/laws.ts` hold the choice and the merge.
+The CLI reads the files; the core reads none. The three supplied environments are `mountain-winter`, for
+«A Night on the Pass», `sea-summer` and `village-summer`, synthetic texts in English.
+
+`readWeather` and `skyOf` in `src/weather.ts` read either of these weather forms.
+A seeded series takes precedence when `seed` is present; otherwise a schedule needs `start`.
+
+| Object | Field | Type, default and bounds | Meaning |
+| --- | --- | --- | --- |
+| Weather schedule | `start` | Required sky object. | Weather at the story's start. |
+| Weather schedule | `changes` | List of change objects, default empty. | Changes strictly after the start and one another, each elapsed time fitting the duration bound. |
+| Weather series | `seed` | Required nonnegative safe whole number. | Determines state and duration by seed and change number alone; no state comes twice running. |
+| Weather series | `states` | Required list of at least 2 sky objects. | States that must read true at any hour; the series knows no season or time of day. |
+| Weather series | `minutes` | Required pair of positive safe whole numbers `[least, most]`, most at least least; both times in seconds fit the duration bound. | The shortest and longest span of one state. |
+| Sky, or change | `text` | Required nonempty text, 40 words at most. | What is seen and felt under open sky. |
+| Sky, or change | `indoors` | Text or null, absent for none; 40 words at most. | What reaches under a roof, or nothing. |
+| Change | `day` | Required positive safe whole number. | Day 1 begins at the starting clock, later days at midnight as the clock counts them. |
+| Change | `at` | Required `HH:MM`. | The time of day of the change. |
+
+#### The commands and a run
 
 ```sh
 sagents live examples/night-station.json [--model <id>] [--cast <character>=<id>]... [--world-model <id>] \
   [--minutes <n>] [--calls <n>] [--tokens <n>] [--state <file> | --run <dir>] [--environment <name>] [--json]
 ```
 
-`live` reads a world file: a description everyone in the world knows, a starting clock, named places and characters,
-each with a place and a sheet. Every character is played by the model that `--model` names: `--model api:<id>` plays
-them on [a server of your own](#a-server-of-your-own), and without `--model` it is `gpt-6.1-sol@low` of the ChatGPT
-plan. One turn is one request
-and one action: `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private note. A `say` may come with a `gesture`, what the speaker's face, hands or body do meanwhile, which those in the place are told in the line of the speech and which never reaches the world; a `do` may come with `says`, words said aloud while doing it, which everyone in the place hears as a speech of that moment before the deed goes to the world as any deed does. Both were measured together with the note's place in a rain scene of two, 160 requests: Gemma 4 31B gave a gesture with 11 speeches of 11 and words with 10 deeds of 13, GPT-6 Luna at low effort a gesture with 18 speeches of 18 and words with none of 7 deeds. The note is the first field of an answer, so that it is written before the action is chosen: in that measurement it was the first field written in 28 answers of 28 on Gemma and in 32 of 32 on Luna, where the action had been first before; whether an action now follows from its note was not counted. The rules ask a note to be no plan but what is going on in the character at that moment: what it notices in those with it, what its body feels, what it wants and what holds it back, so that no sheet has to say what a note is for.
-`examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning, where
-what each one remembers after the night decides what happens; `examples/seaside-cafe.json` is a café with a
-crowd and a waitress whom nobody plays, in a town whose places lie on a map. The three examples are written in
-English, translated from Russian. What the models are told is in English and asks for answers in the language of the
-world's description; every other measurement reported here was made on the Russian texts. The translated examples
-were played for release 0.1.0 on Gemma 4 31B through OpenRouter, 132 requests in all: each example for 36, with the
-model's reasoning off and one endpoint of the router named as the only one that may answer, and the station and the
-café for 12 more each by the command of the start above, with nothing set but the address and the key. Every request
-was answered, every answer could be used, and nothing was written in Russian. `examples/night-station.json` lists no
-things, so in its two runs the world answered all 7 deeds, 6 of them searches, with nothing found; the other two
-examples list theirs. Earlier that day, on the engine before its last two changes, the café was played once on a
-rented card, by a small Gemma (E2B) under vLLM behind a gateway, as a stream: 16 requests, of which 15 were answered
-before a failure of the connection ended the run, and 9 of the 15 answers could not be used.
+`argumentsOf` in `src/cli.ts` reads the flags. A bad world or option fails before asking a model.
 
-The rules of time and hearing:
+| Flag | Default, bounds and effect |
+| --- | --- |
+| `--model <id>` | `gpt-6.1-sol@low` of the ChatGPT plan. Plays residents not named in the cast. `--model api:<id>` uses [your server](#a-server-of-your-own). |
+| `--cast <character id>=<model name>` | Repeatable, absent for no overrides. Names a character id exactly once and a model name in the same form as `--model`. Both turns and rewrites go to that model. An unknown character, repeated id or missing half is refused. |
+| `--world-model <id>` | The `--model` name. `--world-model` answers deeds and speaks for figures. |
+| `--minutes <n>` | 30 story minutes; a number above zero and at most 1440. Ends at the story horizon, or pauses a kept world. |
+| `--calls <n>` | 60; a whole number at least 1. Counts every request, including retries, rewrites, cuts and declines. |
+| `--tokens <n>` | No ceiling; a positive safe whole number when given. `--tokens` stops with reason `tokens` before another request once reported input plus output reach it; the last request can cross it. An answer that reports no usage is read under the usual rules and no further request is sent: the ceiling cannot be kept without the counts, and `--calls` is the limit for a server that reports none. The reason is then `unreported`, unless the horizon, the call limit or the limit of unusable answers ends the run first. An answer cut at the output limit or declined adds nothing. |
+| `--state <file>` | None. Opens or creates a SQLite journal and continues it. |
+| `--run <dir>` | None. Keeps an experiment directory and continues it as another stretch. Cannot be given with `--state`. |
+| `--environment <name>` | The world file's choice, or none. Same name bounds as the field; reads `environments/<name>.json`. |
+| `--json` | Off. Prints one JSON object per event, including silent waits, followed by JSON totals. |
 
-- Every numeric setting must be finite, and each duration derived from the settings must be a whole number of
-  seconds from 1 to 10^12; a world of 0.1.0 with a longer derived duration, over thirty thousand years, is refused
-  on purpose. These checks cover settings and their derived durations, not seconds accumulated over a long story.
-- The clock counts seconds of the story, displayed as whole seconds, and from the second day on a time names its day. The character who
-  is free first plays next. Of those free at one instant, whoever arrives comes first and whoever wakes after them,
-  so everyone who comes or wakes at an instant has done so before anyone takes a turn at it: two who walk to a place
-  together are both there when either looks around. On GPT-6 Luna, in a scene where two leave together, 81 requests, both were in the place before anyone took a turn in 4 leavings of 4, against a turn between the two arrivals in 4 of 4 on the engine before; the rule changes no text that a model reads, so it was played on no second model. A state file
-  written under the earlier order, where a turn could come between two arrivals of one instant, is of another
-  version and is refused.
-- Speech lasts as long as its words take at the speaker's own `wordsPerMinute`, or the world's rate when it has none,
-  130 by default. A character or a figure may have the field, a number above zero with the same bounds as the world's:
-  the longest speech must fit a whole number of seconds from 1 to 1000000000000. A `say`, a `call`, the `says` of a deed
-  and a figure's answer use the rate of whoever speaks; a turn's word limit uses its character's rate.
-  It is checked with stand-ins only and played on no model: no text that a model reads changes with it. A `say` or a `call` holds at
-  most 65 words. A longer one is cut. So are a note and the text of a `do`, a `gesture` at 12 words, and the `says` of a `do` at 20 and at the turn's limit. A deed lasts at least as long as its `says` take, and they hold those who hear them as a speech does.
-- Everyone in the speaker's place hears a `say` and is held until it ends, so people in one place take turns.
-- A place of a world file may list `nextDoor`, the ids of the places that share a door or a thin wall with it. Two
-  places are next door to each other whichever of them lists the other; the place itself or an id that is no place
-  of the list is refused. The list of places that every resident is sent says which places are next door to each.
-  Speech does not pass a door. What of a deed is heard next door is the world's to say, as the point on `beyond`
-  below describes.
-- A `call` goes through the world's `remote`, a telephone for example. The one called hears it wherever they are, and
-  those next to the caller hear the caller's half. A world without `remote` has no calls.
-- A `go` leads to another place of the list and takes the minutes between the two: those a `minutesTo` of either
-  place gives for the pair; else, when both places have `at`, `[x, y]` in metres, the straight line between them at
-  the world's `walkMetresPerMinute`, 80 by default, as whole minutes above ten and tenths of a minute up to there;
-  else the world's `travelMinutes`. A walk of some kilometres is one action, and the clock stands at its end when the walker arrives. On the way a character hears
-  nothing and does not act. A call to it is delivered when it arrives.
-- A world file may give `vehicles`, at most six, absent or empty for none. A vehicle is a small place that moves.
-  For example, a seaside town may have `{ "id": "blue", "name": "Blue car", "about": "A small blue car.",
-  "at": "pier", "faster": 4, "seats": 3 }`. Its id differs from every place, character, figure and other vehicle;
-  `about` holds at most 60 words. `at` names a place of the world file, `faster` is a whole number from 2 to 30,
-  and `seats` from 1 to 12. Optional `drivers` lists the character ids allowed to drive, absent for anyone;
-  optional `reach` lists the world file's places it may drive to, absent for all of them. Either may be empty.
-  Optional `open` is true for an inside under the open sky, false otherwise, and `things` has a place's form.
-  It has no hours, figures, crowd, clock or coordinates. A standing vehicle and its place are next door to each
-  other; a driving vehicle has no neighbour. Things and people inside stay in that place throughout a drive,
-  hearing, seeing, talking, doing things and sleeping as in any place. The weather reaches the inside under its
-  roof, or under the open sky with `open`, just as it reaches other places; the world's weather holds on the way.
-- A `go` from the place where a vehicle stands to its id gets in when a seat is free; a `go` from inside to that
-  place gets out. Each crosses the door at once and holds the person's next turn for ten
-  seconds. From inside, a `go` to another place drives there when the character may drive and the place is within reach. The vehicle
-  leaves at once and takes the walk's time divided by `faster`, rounded up to a whole second and at least
-  thirty seconds. The driver's action takes ten seconds; everyone inside then takes turns throughout the drive.
-  An unavailable or full vehicle, any `go` while driving, an unauthorised driver or a destination out of reach is refused with one fixed sentence after
-  the usual sentence about a wait of thirty seconds. A `go` between ordinary places stays a walk.
-  Nobody gets out, turns back or changes the destination on the way. There is no fuel or key.
-- A bus is a vehicle with a `route` instead of `drivers` and `reach`: 2 to 12 ids of listed places in stop order,
-  with no consecutive stop repeated, including the return to the first. Its `at` is the first stop. For example,
-  `{ "id": "bus4", "name": "Bus 4", "about": "A yellow town bus.", "at": "pier", "faster": 4,
-  "seats": 20, "route": ["pier", "market", "hill"], "leaves": ["08:00", "08:30"],
-  "stands": 60, "fare": { "name": "rubles", "n": 30 } }` is an invented town bus. `leaves` lists 1 to 48
-  times of day in rising order, the same every day; `stands` is 30 to 1800 whole seconds at each stop other than
-  the first, 60 when absent. A bus has up to 60 seats. Its round takes the same drives as a driven vehicle,
-  with those stands, and must finish strictly before the next leaving, including the gap over midnight.
-  It stands at the first stop until then. Its position at the start and afterwards follows from the clock alone.
-  Nobody drives it: a `go` inside to another place is refused with `This vehicle goes its round by itself.`
-- A bus without `fare` takes none. With one, its `name` names counted money and its whole `n`, from 1 to
-  1,000,000,000, is the price of one ride. The name must belong to counted money in the world file. Getting in
-  takes exactly that much, nearest to hand first: from the money the person carries directly, then from what their things hold, then from what those hold, each in the order of its list, and it is
-  gone. The boarding event keeps the postings with `to` `fare` and `sink` `fare`, so an ordinary move to a person
-  or place whose id is `fare` stays a move to that holder; a deed still cannot use up money. Too little is
-  refused with `You need 30 rubles for the fare.` and takes nothing. Only the payer reads `You pay 30 rubles.`,
-  after the line of getting in. A free seat is still needed.
-  A fare is not given back to someone who gets out before the bus leaves.
-  Whoever stays inside for another round pays nothing more. These bus rules were checked with stand-ins on the other line; this port onto the main line was played in two runs with a bus, 38 requests by the smaller hosted model at low effort and 40 by the open model, and in both a pair paid the fare at boarding and rode.
-- The bus's fixed opening gives its round, times and fare instead of drivers. The vehicle rule stays one line,
-  with a clause about a vehicle that goes its round by itself only in worlds with a bus, saying the fare is taken
-  by itself only when a bus has one. Someone awake at a stop
-  reads `Bus 4 has pulled up.`, then `Here stands: Bus 4 (bus4), 19 of 20 seats free, leaving for Hill in 1 min 0 s.`
-  Someone who walks in reads the same standing line on arriving, and someone who gets out at their own next turn if
-  the bus still stands there then, and `Bus 4 has driven off.` if it has left. A standing line is written when someone first sees
-  the vehicle there, comes there, it pulls up or the number of free seats changes, with the time left then; the passing
-  of time alone never writes another.
-  A pull-up at a stop is a record and the line `Bus 4 has pulled up.` for everyone awake there, and a turn only for
-  those who wait: they read the standing line at once, and anyone else at their own next turn if the vehicle still
-  stands there, with the time left then.
-  A wait may name seconds or a time of day; a long deed continues until its own end. Those awake inside are freed
-  as before. A departure does not end a wait, and
-  `Bus 4 has driven off.` is appended at their own next turn. Inside, an arrival ends the wait and is told in
-  the vehicle's words. Departure appears only in the next `Now` line, which gives the standing stop and time to
-  leaving, or the destination and time left of the drive. Sleepers receive no bus notices, however they fell asleep,
-  including on waking;
-  someone waking inside reads its position from `Now`. People and things inside stay in that vehicle place.
-  The world reads it as a vehicle. Each bus arrival has one engine record only if someone awake is at the stop
-  or inside before it arrives. It comes after a change of the weather at that instant and before people's arrivals
-  and turns, as a driven vehicle's arrival does.
-  No other bus instant has a record or holds up the run or its horizon. With everyone asleep or away from the stops,
-  the bus adds no record and asks nobody. Its timetable still gives its position after a pause. A replay refuses a
-  `round` refusal in a world with no round.
-- Only worlds with a vehicle add one rule line to a resident's instructions. The fixed opening lists the world
-  file's vehicles after its places, under `Vehicles:`, each with its name, id, description, number of seats and
-  who may drive it, by name, or that anyone may; a bus gives its round, times and fare instead. It never says where a vehicle is and stays the same throughout
-  the run. The resident's schema names all vehicles from the first turn and does not change when one moves.
-  At the start and on arrival, the lines of the place list each vehicle standing there: `Here stands:
-  Blue car (car), 1 of 2 seats free.` Getting in and out are told as that, to the person moving and by name to
-  those at the place and those inside. The `Now` line of someone inside says where the vehicle stands, by
-  name and id, or where it is going, by name and id, with the minutes and seconds left of the drive. No resident
-  reads a clock time of arrival, or where a vehicle is that neither stands at their place nor holds them.
-  For a deed the world reads only the vehicles standing at its place, in the same `Here stands:` lines; inside,
-  it reads the vehicle's description and where it stands or the two places between which it drives.
-  Those outside hear that the vehicle has driven off or pulled up, by name; those inside hear that it has arrived
-  and where, on waking if asleep in a driven vehicle. No arrival or departure line tells outsiders who is inside. The engine records
-  an arrival before all people's arrivals and turns at that instant, after a change of the weather that falls
-  on it and before a sleep that the main line's tiredness brings at it, as it does for someone who arrives on foot.
-  Those rules were checked with a stand-in on the other line; this port onto the main line was played in four runs of 79 requests each in a world with a car, one by the smaller hosted model at low effort and three by the open model, each with one drive and one parking, and in a line of 150 requests by the smaller model in a world with `ways`. Before those, two runs with a car, 38 and 40 requests, were played by the same two models, each with one drive and one parking.
-  Worlds without vehicles keep their requests and journals unchanged. Turns keep the main line's rebuilt form,
-  with the transport lines in the candidate's words. Opening hours and places on demand are absent here, so their
-  closed-place refusals and go by words are absent too.
-- A `do`, a `wait` and a `sleep` last the `seconds` the character chose, or `until` a time of day like `06:30`: the
-  next moment the story's clock shows it. A `do` or a `wait` is an hour at most, a `sleep` 12 hours: an answer that asks for
-  more, in `seconds` or to a time of day further off, lasts that most in seconds and is no lost turn, the character reads the seconds it lasts and is not told of the cut, and the record's
-  action is marked `capped`, which no request holds. A known limit:
-  a `do` ends early as a `wait` does, when someone speaks, comes or leaves nearby, something is heard from next door
-  or the weather changes, and its
-  doer is free again then, yet the deed is credited whole at once: the world answers for all its seconds, and a
-  search counts them all.
-- A place of a world file may have `"clock": true`, and so may a character, for a watch or a phone. A resident knows
-  the clock only with one at hand, its own or its place's: then a turn opens with `Now 21:04:10.` and the lines of
-  its memory open with the clock. With none the turn says the part of the day, `Now evening, as far as you can tell:
-  no clock is at hand.`, a line opens with `[evening]`, and nothing the rules send it holds a time of the clock. A
-  time that someone says aloud is speech and stays. A line keeps the time as its owner could tell it when it
-  happened, so what was seen by a clock is remembered by the clock.
-- The parts of the day are, under the open sky: early morning from 05:00, morning from 07:00, late morning from
-  10:00, around midday from 12:00, afternoon from 14:00, late afternoon from 16:00, early evening from 18:00, late
-  evening from 20:00 and night from 23:00; under a roof and on the way: morning from 05:00, the middle of the day
-  from 11:00, afternoon from 15:00, evening from 18:00 and night from 23:00. From the second day on the day is
-  named, as the clock names it.
-- With a clock at hand an action `until` a time of day ends at that time: the clock is the alarm. With none it ends
-  early or late by a number of seconds that follows from who acts, when and until what time, so a replay gives it
-  again: at most a tenth of the span and half an hour for a `sleep`, a twentieth of the span and three minutes for a
-  `do` or a `wait`, and never outside the span the action allows. The resident's own line then says `until about
-  06:00` in place of the seconds. The world is always told the clock.
-- A sleeper hears and sees nothing and interrupts nobody. Only a deed that the world says wakes it ends its sleep
-  early. A call to it is delivered when it wakes. The others see it fall asleep and wake,
-  and are told that it is asleep when they are told who is with them.
-- Everyone has a sleep debt. It grows by a second for each second awake, on the way included, and falls by two for
-  each second asleep, never below zero. At the story's start it is the time since the world's `dayStart`, `07:00`
-  unless the world file or its environment says otherwise. A turn never says the count. It says how the body feels, in four steps:
-  rested; awake a long while, from half of `tiredHours`; tired, with the warning that the character will fall asleep
-  where it is, from `tiredHours`, 16 by default; hardly able to stay awake, in the last quarter of the way from there
-  to `spentHours`. From the tired step on the others in the place are told so with who is with them. At `spentHours`,
-  24 by default, the rules put the character to sleep at its turn, where it is, for 8 hours: no model is asked, the
-  journal keeps it as a record of its own, and the others there see it fall asleep.
-- A world file with `hunger: true` turns on hunger and thirst together (`src/hunger.ts`). The setting is absent or
-  true, belongs to the world file alone and changes nothing in worlds without it. In its first
-  form, with the body's line always there, `You are not hungry.` and `You are not thirsty.` among its sentences,
-  and a meal lifting a lower count to minus 2 hours, it was played in two lines of one synthetic week: 141 requests
-  by the smaller model at low effort and 685 by an open model of 31B. In both, residents who were awake drank and
-  ate within minutes to an hour and a half of a sentence that named a need, and had breakfast soon after waking
-  hungry; and in both a resident took `You are not hungry.` for a reason to refuse an agreed supper, which is why
-  the line now says only what is not fine. The form described here was played in the same week: 162 requests by
-  the smaller model, and three starts of 450, 257 and 250 requests by the open model. Three of the four reached a
-  supper, and all six residents ate at it; one start reached the next morning, where both had breakfast within
-  twenty minutes of waking. One start of the open model spent its 250 requests on a single story hour and reached no meal.
-  Everyone starts fed for 3 hours and not thirsty for 2 hours. Both counts fall by one second for each second
-  awake, on the way included, and by half a second for each second asleep;
-  either may go below zero. Only a deed's accepted moves to `eaten` feed its doer, never its words or a figure's
-  answer. The calories in one deed's accepted moves to `eaten` count together. At 100 calories or more, the fed
-  count first rises to zero if lower, then gains 36 seconds for each calorie, up to 10 hours. Fewer than 100 calories
-  only add their seconds and lift nothing. Thus a waking hour takes 100 calories, 600 calories hold for 6 hours
-  from zero or below, and a breakfast of 400 calories after waking hungry holds for 4 hours. Zero-calorie water
-  does not change hunger. Each one drunk first raises a negative thirst count to zero, then adds 3 hours, up to
-  6 hours. A drink with calories counts for hunger too. The counts are rebuilt from the journal, including sleep
-  and waking, so a kept run continues with the same counts. Nutrition takes effect at the deed's recorded moment.
-  The law puts no record of its own, and nobody faints, falls ill or dies of it.
-  A resident's turn adds a line right after sleep debt only when hungry or thirsty. The hunger sentence is
-  `You are getting hungry.` at zero down to above minus 2 hours;
-  `You are hungry.` at minus 2 hours down to above minus 8 hours;
-  `You are very hungry and feel weak.` at minus 8 hours or below. The thirst sentence is
-  `You are thirsty.` at zero down to above minus 6 hours;
-  `You are very thirsty.` at minus 6 hours or below. Above zero the count adds no sentence. When both sentences
-  apply they make one line with one space between them; when neither applies there is no line, as in a world
-  without the setting. These are the only new texts a model reads. The world and figures are asked as before,
-  and nobody is told another person's hunger or thirst.
-  A world with `hunger` is refused if no thing in its file has `food` above zero, or if no thing is a drink.
-- A leaving and an arrival are seen by everyone awake in the place and end their waiting. A `do`, a falling asleep
-  and a waking are seen too, and a witness learns of them at its own next turn.
-- A turn's answer follows a schema made for the world: `action` is one of the actions, without `call` where there is
-  no `remote`, and `place` is the id of one of the world's places or null. A server that holds an answer to its
-  schema therefore cannot write a `go` to a place that is not there, which cost a resident played by a weak model
-  14 turns of 28 in one run and 3 of 23 in another. From a server that does not hold to schemas such an answer is
-  read and refused as before. The other fields are a text or null, or a whole number or null for `seconds`.
-- An answer that cannot be used counts as a wait of 30 seconds. The journal keeps the reason, one of nine: it was
-  not a JSON object, named no action, lacked its text, called nobody who can be called, led to the place the
-  character is already in or to no place of the list, lasted no time the action allows, was cut short at the
-  model's limit of one answer, or the service declined to write it (`declined`). The character's next turn
-  says which, and what to do instead; after a declined turn it reads the sentence of an answer that was no JSON
-  object, since no sentence for it was measured, and only the journal tells the two apart. Five answers of one
-  model's name that could not be used, with none of its answers used in between, end the run as `failed (invalid)`,
-  unless the same answer reaches the cut or decline limit, when `output_limit` or `declined` wins respectively.
-  This counts turns, world answers and memory rewrites, including cut and declined answers. An answer that the
-  rules of things refuse is neither used nor unusable: it is counted under `refused` and neither adds to that row
-  nor ends it. The answer that ends the run is counted but is not put in the journal. `invalidRun` of `runLive()`
-  sets this limit, with no command flag.
-- A request that the service declined to answer is not sent again: the same words would be declined again. A turn
-  goes as the wait above, nothing comes of a deed whose answer the world's model declined, and a memory rewrite is
-  lost as after two answers that could not be used, unless a readable first answer was set aside by the script
-  check, when that first answer is kept. Each counts as a request and as an unusable answer, with no
-  tokens known for it. The third in a run, whoever was asked and for what, ends the run as `failed (declined)`.
-  The row of unusable answers can end it before then as `failed (invalid)`; when one decline reaches both limits,
-  `declined` wins. A service that keeps declining is not asked on. No refusal of a real service was seen: the shapes
-  that are read as one are those of the table of reasons above.
+Without a state file the journal ends with the run. A resident is told how much story time is left and its speech
+limit shortens towards the end. With state, the end is a pause, no resident is told a horizon, and `--minutes`
+counts from an unfinished deed's moment, else the next due clock law or vehicle arrival, else the next person's turn.
+The library's `runLive()` given a journal without `pause` still tells the horizon; the CLI always uses pause with state.
 
-The world answers a deed:
+The run stops at the first model-connection failure and switches nobody to another model. Two failures have their
+own limits. An `output_limit` loses that turn or takes one of the world's or memory's two tries, with no usage
+known; three cuts of one model in a row, with no whole answer in between, end as `failed (output_limit)`.
+A `declined` request is never sent again with the same words: its turn becomes a wait, its deed has no result,
+and its rewrite is lost unless a readable first answer was set aside. The third decline in the run, for any model
+or purpose, ends as `failed (declined)`. Both count as calls and unusable answers.
+Five unusable answers of one model name with none used in between end as `failed (invalid)`, across turns,
+world answers and rewrites. A refusal by the rules of things is counted as `refused`, neither adding to nor ending
+that row. A cut or decline limit wins if that answer also reaches the invalid limit. The answer that ends the run
+is counted but not journalled, except a readable memory set aside is saved even when its retry stops the run.
+`cutRun`, `declinedRun` and `invalidRun` of the library's `runLive()` have no CLI flags.
+`runLive` in `src/live.ts` holds these stops. No real service refusal was seen; the documented shapes that count
+as `declined` are in the [table of reasons](#what-works-today).
 
-- A world file may give `facts` to the world, to a place, to a character and to a thing: what is true there and is
-  not seen at once, 300 words each at most. No resident is ever sent any of it.
-- The `facts` of a thing are what is true of the thing itself: what is written in a notebook, what a bag does not
-  hold. Any thing may have them, wherever it stands: in a place, inside another thing, on a character. They go with
-  the thing. The world is told the facts of every thing that its request lists, for a deed and for a figure's answer
-  alike: lying in the place, in the hands or the pockets of someone there, inside another thing, or hidden. They
-  stand in the first line of the request, the place's, after the place's own facts, as sentences with no label
-  and no heading: `The place: Red room (red), under a roof. Red walls. Facts: FACT-RED. FACT-KEY.` A text stands
-  once, at the first record that has it, however many parts of one stock or count are listed. So a thing's fact is
-  written as a sentence that names its thing, since the world reads it among the facts of the place with nothing
-  that says whose it is, and two like things need wording that tells them apart. A block of these facts under
-  labels, after the lists, was tried first: next to the `In the lists:` tails of the earlier lines a weak model then
-  moved things to where no deed had put them. This layout as the engine writes it was then measured on a set of
-  62 deeds, 25 with things, 14 with facts of things, 8 with clothes and 15 after a line gone stale: Gemma 4 31B
-  gave exactly the due entries in 54 answers of the 60 that arrived and GPT-6 Luna at low effort in 49 of 62. A part taken off a counted thing or out of a
-  stock has the facts of what it was taken from, and two counts become one record only when their facts are the
-  same. In `examples/night-pass.json` what the guest register, the backpack, the map and the notebook say is with
-  those things, so it is still known when one of them is carried to another place.
-- After every `do` the world is asked once what came of it, through the model of `--world-model`, which is
-  `--model`'s unless given. It is sent the world's description and facts, the place with its facts and its things, what is hidden in it, the names
-  of the other places, for each place next door who is there, by name and id and awake or asleep, or that nobody
-  is, who is in the deed's place, awake or asleep, each with looks, pose, what it carries and its facts, the facts
-  of the things listed, what
-  came of the latest earlier deeds in that place, in the world's words and in what the rules moved (400 words of
-  them), the clock, and the doer's name with the deed
-  and its span. It is sent no sheet, note, memory or speech, and of those next door no looks, pose or things.
-  A candidate played on real models over an earlier engine, still awaiting measurement over 0.1.1: in a world that
-  keeps traces it is also told, after each person's looks and pose, that person's traces under their labels, as
-  «Things» says. Those notes describe the other line; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
-- It answers with `search`, whether the deed was a search of the place; `finds`, the labels of the hidden things
-  the deed went straight to; `moves`, `sets` and `poses`, described under «Things» below; `wakes`, the sleepers of
-  that place or of a place next door whom the deed wakes; `feels`, what the deed makes a body feel, and `beyond`,
-  what of the deed is heard next door, described in the next two points; and
-  `result`, one or two sentences of what anyone there could see, hear or smell, 65 words at most, or null when
-  there is nothing to notice. A world file with `touch` adds `touches` after `poses`, as the point on touches
-  below says, and one with `marks` adds `lingers` after `feels`, as the point after it says. Except for traces,
-  the fields stand in this order, the entries before the words, so that the
-  words are written after the entries and cannot lead them; both orders passed the check of 2026-10-05 on the weak
-  local model. The schema is made for each
-  request and lists the labels, ids and states that the answer may name, so a model held to its schema names
-  nothing else where a list has entries. A list that is empty takes any string, since a strict schema may refuse an
-  empty list, and the states of all the things there stand in one list, so the schema does not hold a state to its
-  own thing. The rules do the rest: an id of `finds`, `poses` or `feels` that is not of the place, or of `wakes` that is of
-  no sleeper of the place or of a place next door, is
-  dropped, and an entry of `moves` or `sets` that cannot be taken refuses the answer, as «Things» says.
-  In a world that keeps traces the answer has two fields more, `traces` and `wipes`, last, after `result`, in that
-  order, described under «Things». This order was played on two models on the other line and is the one taken
-  here; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
-- `feels` is a list of `{ of, text }`: what the deed makes the body of a person there feel, such as weight, cold,
-  pain or taste, and never a thought or a wish. A deed that does something to a body gives entries, for the one
-  touched and for the one who touches; a deed that only looks, listens or speaks gives none, and one who only
-  watches gets none. An entry is one line of 20 words at most for one person, the later of two, and only its owner
-  is told it, as a line `You feel: …` after what came of the deed, also when nothing else came of it. Nobody else in
-  the place is told it and no figure is. A sleeper gets none, the one whom that deed wakes included, and so does
-  someone elsewhere; an entry with no words is dropped. It is not kept for the world: what a place keeps of its
-  earlier deeds holds the `result`, what the rules moved and no feeling, so no later request to the world has it. The transcript of
-  `live` shows it as a `private feeling of …` line, like a note. The text of the field passed the check of
-  2026-10-05 on a strong model and on two weak ones. In two whole runs of that day with the weak local model as the
-  world, 120 requests each, 9 deeds of 52 got a feeling and each was told to its doer alone: three where one was
-  due, cold, smoke and the heat of a stove, and six for the ordinary handling of a thing, such as keys taken into
-  the hand or boots pulled on. Nobody touched anybody in those runs, so entries for two bodies have been seen only
-  in single requests. The sentence of the field is narrower since those runs: it says that an entry is read right
-  after `You feel:`, so that it begins with what is felt and names nobody, that the touch is of another body, and
-  that the ordinary handling of a thing gives no entry. This wording has stood in the world's requests of every measurement since, but what it changed by itself was not counted. This is the first of three planned layers of sensation. The
-  other two are not built: what a body feels from its own state over time, such as an arm tired by an hour of
-  carrying, and a body that changes and is kept as a record.
-- A touch between two people is kept as state only in a world whose file says `"touch": true` at its top level
-  (`src/touch.ts`). **This candidate was played on real models over an earlier engine and still awaits
-  measurement over 0.1.1**. Those notes describe the other line; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model. In them 20 touches began, 74 answers told what a body felt, 2 lasting feelings were set, 4 traces were written and 6 wiped: the mechanisms run, and what they change in a story is what still awaits measurement.
-  Without the setting a world is asked, answered and kept as before, to the letter, and a journal written before
-  the setting existed replays. With it:
-  - The world's answer has one more list, `touches`, after `poses` and before `wakes`, so that the fields before it
-    are written as they were measured and `wakes` and `feels` are written after the touches they should agree with.
-    The world's text has one more point for it, between those on `poses` and on `wakes`; `WORLD_INSTRUCTIONS` itself
-    is the measured text. An entry is `{ of, to, kind, force, text }`: `of` touches `to`, two different people of the
-    place, a sleeper too; `kind` is `touch`, `press`, `squeeze`, `hold`, `embrace`, `rub` or `lean`, or `none` when
-    the deed ended the touch of `of` on `to`; `force` is `light`, `firm` or `hard`; `text` says with what of their
-    body the one touches and where on the other's, 15 words at most, naming neither. An entry is due for a touch
-    that goes on after the deed, and a touch that already holds needs none unless the deed changes or ends it.
-  - A touch is one record for the ordered pair, so two people can each have a touch on the other, and a new entry
-    for a pair takes the place of the old one. The rules drop an entry whose `of` and `to` are not two different
-    people of the place, whose kind or force is none of the list, whose text has no word, or that ends a touch
-    which is not there; of two entries for one pair the later is read. A place holds 8 touches at most
-    (`MAX_TOUCHES`): the entries are taken in their order, an ending first makes room, and an entry that would
-    begin a ninth is dropped. An answer with no list `touches` cannot be used, like one with no `poses`.
-  - A touch knows when it began. An entry with the same kind and force changes its text and keeps that moment;
-    another kind or force begins the count anew, at the start of the deed that changed it. A touch ends by an entry
-    with `none`, and by the rules alone when either of the two leaves the place by a `go`. Sleep ends none. Two
-    who walk to another place do not keep their touch, and someone who is held can walk away: neither is built.
-    Two people inside one vehicle keep their touch when it drives or arrives, since they stay in one place;
-    getting in or out ends it. Someone outside and someone inside are in different places and cannot hold a touch.
-    The standing vehicle's door carries only what `beyond` says is heard, as on the main line.
-  - The result's record and event hold `touches` as they were read, so everything follows from the journal, and the
-    transcript shows each as a line `touch of … on …`. A `go` that ended a touch holds nothing of it: the next turns
-    simply lack the line.
-  - The world is told the touches of the place in every request about a deed there, after the people: `Touches that
-    hold now:` and one line each, `- of <id> to <id>: <kind>, <force>, for <time>: <text>`, or `Touches that hold
-    now: none.` The time is how long the touch has lasted when the deed begins, in seconds and from two minutes on
-    in whole minutes. A figure's answer is asked for without them.
-  - Each of the two is told it on every turn while it lasts, under the line of their own pose: `You touch <name>
-    (<kind>, <force>, for <time>): <text>` or `<name> touches you (…): <text>`. Anyone else awake in the place reads
-    `<name> touches <name> (<kind>): <text>` after the lines of the others, without the force and the time. Nobody
-    elsewhere is told anything. The resident's text says in two sentences more, after the one about `You feel:`,
-    what the line is and that a touch lasts until one of the two lets go, by a do, or leaves, so that nobody has to
-    renew it. No line of anyone's memory is written for a touch: the result and `feels` tell of its beginning.
-- A lasting feeling of a part of a body, a mark, is kept as state only in a world whose file says `"marks": true`
-  at its top level (`src/marks.ts`). **This candidate was played on real models over an earlier engine and still awaits
-  measurement over 0.1.1**. Those notes describe the other line; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
-  Without the setting a world is asked, answered and kept as before, to the letter. With it:
-  - A mark is one feeling of one person: `of`; `zone`, one of `head`, `face`, `neck`, `shoulders`, `chest`, `back`,
-    `belly`, `hips`, `arms`, `hands`, `legs`, `feet`, or `body` for the whole of it; `kind`, one of `itch`, `burn`,
-    `ache`, `pain`, `numb`; `level`, one of `faint`, `clear`, `strong`; and `text`, where exactly and what it is
-    like, 15 words at most. There is one mark for a person, a zone and a kind, and a person has 6 at most
-    (`MAX_MARKS`). A character of the world file may begin with some, the list `marks` on the character, each
-    `{ zone, kind, level, text }` and so for good; a list with an entry in a world file without the setting is refused,
-    but an empty list is accepted.
-  - The world's answer has one more list, `lingers`, after `feels` and before `beyond`, so that the fields before it
-    are written as they were measured, and the world's text has one more point for it there. The list and its line
-    in a request are not called marks, since the world's text calls so what stands after a thing. An entry is
-    `{ of, zone, kind, level, minutes, text }`: `level` may also be `none`, when the feeling is gone, and `minutes`
-    is null or a whole number from 1 to 1440. With null the mark is so from now on, and `none` ends it. With a
-    number it is so until that many minutes after the end of the deed and is then again as it was before the entry,
-    which may be nothing or a mark that itself ends later: a mark is a short pile of layers (`MAX_LAYERS`, 3), the
-    top one being how it is now, and a layer that would have run out before the new one does is dropped. An entry
-    is due for what outlasts the deed or changes a mark that holds; what is felt only during the deed stays in
-    `feels`. A deed done to the very part where a mark sits changes it, at least for a while, and needs an entry:
-    a cream spread on a burn, cold water on it, a rub of an aching muscle, a blow on a bruise.
-    Nothing but an entry or the clock changes or ends a mark: an answer that lists none leaves all as
-    they are, and marks go where their owner goes, asleep or awake.
-  - The rules drop an entry whose `of` is nobody of the place, whose zone, kind or level is none of the list, whose
-    `minutes` is neither null nor a whole number within the bounds, whose text has no word unless its level is
-    `none`, that ends a mark which is not there, that would put a fourth layer on a mark, or that would begin a
-    seventh mark of a person. Of two entries for one person, zone and kind the later is read. An answer with no
-    list `lingers` cannot be used.
-  - No record is put when a layer runs out. The state keeps each layer with its end, and whoever reads the marks
-    reads them at a moment (`marksAt`): a layer whose end has come is gone and the one under it is so since that
-    second. The result's record and event hold `lingers` as read, so everything follows from the journal and the
-    time, and the transcript shows each as a line `private lasting feeling of …`.
-  - The owner is told its marks as they are now on every turn, one line each after the line of the sleep law:
-    `Your <zone> (<kind>, <level>): <text>`, with `Your whole body` for `body`, and nothing of a mark that is gone
-    for a while. No time is in it. Nobody else is told anything of them. The resident's text says in two sentences
-    more, after those about `You feel:` and a touch, what the line is and that it is told again until something
-    done or time changes it. No line of anyone's memory is written for a mark.
-  - The world is told the marks of everyone in the place in every request about a deed there, after the people and
-    the touches: `Feelings that last now:` and one line each, `- of <id>, <zone>: <kind>, <level>, for <time>:
-    <text>`, with `, <time> left` after the time for what is so only for a while, or `Feelings that last now:
-    none.` The times are counted at the start of the deed, in seconds, from two minutes on in whole minutes and
-    from two hours on in whole hours; a mark of the world file that nothing has changed yet has no `for <time>`. A mark gone for a while is listed with `none` and no text. A figure's answer
-    is asked for without them.
-- `beyond` is a string or null: what of the deed is heard in the places next door, one sentence of 20 words at
-  most, and null when nothing carries that far, which is most deeds. It says the sound and not who made it, unless
-  it is a voice with its words. It is read as a pose is: cut at the limit, and one with no words is null. Everyone
-  awake in a place next door, and not on the way, is told one line, `From <place name>, next door: <text>`, and it
-  ends a wait as speech nearby does. The line has the name of the deed's place and that text, and never the doer's
-  name, the deed, its result, a pose, a move or a feeling. A sleeper next door whom `wakes` names is woken as a
-  sleeper of the place is, and wakes with the line `Something from <place name>, next door, woke you: <text>`, or
-  with `… woke you.` when `beyond` is null: a weak world fills the old field sooner than the new one, so the
-  waking is taken without the text. A sleeper next door whom `wakes` does not name is told nothing, and so is
-  someone on the way. Nobody in the deed's own place is told the text, the doer included, and it is not kept for
-  the world: what a place keeps of its earlier deeds has none of it. The world is told to answer null when it
-  is told of no place next door, and a text for a deed in such a place is read as null all the same: the record
-  holds none, nobody is told, nothing is printed, and the answer is neither refused nor asked for again. The transcript of `live` shows it as a `heard next door: …` line under
-  the result. The world's text with the facts of things, the places next door and this field was measured as a
-  whole on the set of 62 deeds named above; what is heard next door was not counted by itself.
-- A hidden thing is found in two ways. The first is by time and not by the world's judgement. The rules keep, for
-  each person and place, the seconds of that person's deeds there that the world called a search. A thing is found
-  by the search with which they reach its `minutes`: ten minutes for the backpack in the shed of «A Night on the
-  Pass», in one deed or in several. The rules know how long a deed lasts before the world is asked, so the
-  request lists the hidden things of the place in two kinds, those this deed finds if it is a search and those no
-  search finds yet, and the world counts nothing.
-- The second way is a deed that goes straight to the very spot named for the hidden thing, however short: someone who
-  knows that the backpack lies under the workbench behind the canisters reaches there and has it. That is a reading
-  of the deed, so the world judges it: every hidden thing is sent under its label with its spot, and the answer's
-  `finds` names the labels the deed went straight to. A label that was not sent is dropped.
-  The world is told that a deed which names another spot, or the thing and not where it lies, is not one.
-- The world is told that nobody sees a hidden thing and that no result speaks of one until it is found. What is
-  found either way is hidden no longer, for anyone: it lies in the place in sight, with all that it holds. Only an
-  answer that finds a hidden thing can move it or what it holds. The time one person searched does not count for
-  another, and it is kept when the person leaves.
-- Without `ways`, nobody gets to another place by a deed, and the world is told so: whoever tries is still where it was, by the
-  way out, and a pose never names another place. Only a `go` moves anyone. The world is told the weather so that it
-  knows it, and to speak of it only when the deed meets it. Nothing checks that it kept to either.
-- A world file may give `"ways": true`. It was read in probes of one deed, where a scripted
-  resident does a deed and the world answers it, and played in one line of 300 requests by the smaller model at
-  low effort with the fourth of its wordings: the line's 52 deeds sent nobody on a way they did not take, and
-  only one of them was a way, whose answer the rules refused. Six wordings were tried over 75 deeds: ways to
-  another place on foot, by a stair, through a door and by car, gestures towards another place, moves within a
-  place, and one drive that the rules bar. The smaller model at low effort read all six, in 906 requests over
-  their rounds. In one round each: the first, with `goes` and null, read 69 of the 75 as meant and sent four on a
-  way they did not take; the second, which added the places a told refusal would name, 72 and two; the third,
-  which asked where the doer is when the deed is done, 67 and none, for a driver was then still in the car and a
-  walker still on the way; the fourth, which is the wording below without the request's last sentence, 74 and
-  none, and over three rounds of the 25 oldest deeds 74 of the 75 trials. An open model of 31B read
-  the fourth as well, in one round: every way and every move within a place as meant, and two gestures of 25, a
-  hand on a rail and a door held open, as the way out of a place named "Inside the lighthouse" to its neighbour
-  named "Lighthouse", whose id it took for the id of the place it stood in. The fifth wording says this place's
-  id in the request's last sentence. With it the open model sent nobody away and missed one way of 33, in one
-  round, and the smaller model in three rounds sent nobody away and missed six ways of 99, five of them a seat
-  taken in a car that stood by, which the request does not list among the other places. The sixth, below, adds
-  the vehicle to that sentence where one stands by: in two rounds and 62 deeds of a third, which a failure of
-  the service cut, the smaller model sent nobody away and missed three ways of 94, none of them a seat taken in
-  the car. The open model read the sixth in two rounds, 150 deeds: every one of the 66 ways as meant, and nobody
-  sent away. Of the fourth and the fifth wording it read one round each: its two gestures against none are too
-  few to prove the sentence. A line of 150 requests by the smaller model in a world with a car had 14 deeds, one
-  of them a seat taken in the car, which was read as the way; nobody else was sent anywhere.
-  Without the setting, requests, records, events, stored rows and the format mark stay as before. The world's
-  answer to a deed has `leads` first, before `search`: the id of the place where the deed takes its doer. The
-  schema admits the id of the deed's own place, which says that the deed takes them nowhere else, and the ids of
-  the other places that a `go` of the doer would take now or would be refused for a reason the doer is then told:
-  a full vehicle, a fare, a driver, a reach or a round. A vehicle standing here is among them, and inside a
-  vehicle the deed's own place is the vehicle and the place it stands at is among them, whose id the existing
-  `This vehicle stands at ...` line gives.
-  Only the fourth paragraph of the world's instructions, the first field's point, the request's line of other
-  places and its last line change. The paragraph reads:
+In text output each event has a line with clock, place, who and what. Further lines show found, moved and changed
+things, poses, touches, private feelings, lasting feelings, traces left or wiped, sound next door, words with a
+deed and a private note. A gesture stands in brackets before speech. A wait without a note prints nothing.
+A rewrite is shown whole, across all its lines, marked private like a note. `linesOf` in `src/live.ts` holds this
+transcript. The totals give status and reason; HTTP status, provider code and field name when present, never the
+service's words (`failed (provider_failed 502 bad_gateway)`; `httpStatus`, `providerCode` and `param` in JSON).
+`provider_failed` without a status means the service could not be reached. A failed run exits with code 1.
 
-  > You are told which place this is and which other places there are. A deed never ends in another place by itself: you say in `leads` where the deed takes the one who does it, and the rules do the rest. Mostly it takes them nowhere else, and `leads` is the id of this place. A part of this place that is not one of the other places, such as a room upstairs, a yard or the ground in front of the door, is this place still, and the pose may say where in the place they now are. When the deed is the way to one of the other places, such as setting off for it on foot, climbing the stairs that lead to it, going in or out through its door, getting into a vehicle that stands here or out of the one they are in, or driving off to it, `leads` is the id of that place, however long the way is: the rules then take the one who does the deed there, in the time the way takes, and the result says only what happens here before they leave. A pose never names another place.
+The totals count story minutes, calls, `invalid`, `overlong` cuts, `declined`, memory `rewrites` and `lost`,
+world answers `refused`, deeds and speeches left `void`, input tokens, `cachedInputTokens` and output tokens.
+They sum only reported usage: `unreported` names how many answers reported none, rather than calling them zero;
+an absent cached count adds nothing. `kinds` divides requests and tokens into turns, rewrites and world answers,
+including figure replies and retries. Text prints one line for each kind. `models` also divides calls, unusable
+answers and tokens by model name, with text lines when several models played. Endpoint names can add that line
+for a single model too, as [the connection](#a-server-of-your-own) says.
+Each journal entry's `by` is the model name, or null for an engine record; JSON events print it. The rules do not
+read it: records give the same world whoever answered. Every perception goes to the service playing its owner.
 
-  The first field's point reads:
+##### Files and continuation
 
-  > - leads: the id of the place where this deed takes the one who does it. The id of this place when it takes them to no other place: they stay in it, in whatever part of it. The id of another place when the deed is their way there, even when the way lasts longer than the deed: name where it leads, and the rules count its time. Inside a vehicle, this place is the vehicle: its own id when they stay in it and it stays where it stands, the id of the place they drive it to, or the id of the place where it stands when they get out. It is for the one who does the deed alone. When the deed heads somewhere that has no id, it is the id of this place, and never the id of some other place. A step towards a door, a look up the stairs, a hand on the gate, a walk about the place: the id of this place.
+`openState` and `formatOf` in `src/state.ts` hold the saved format and opening checks.
+A new or empty file becomes a state file; an unrelated SQLite database is refused without writing to it.
+Each record is saved with its event, one at a time. Opening replays every record and requires the same event.
+The hash of the world file's content and its environment's content binds the file to both; editing or exchanging
+either refuses continuation. A second run on a file in use is refused. A state stopped on the way arrives at the
+same destination and instant when continued. An unfinished deed or addressed speech asks the world first.
 
-  The request says ``Other places, which a deed reaches only through `leads`: ...`` instead of
-  `Other places, which nobody reaches by a deed: ...`, and it ends
-  ``What comes of it? This place is `cafe`, and `leads` is `cafe` unless the deed is the way to another place or into a vehicle that stands here.``,
-  with the id of the deed's place; the words about a vehicle are there only when a vehicle is among the ids that
-  the schema admits. The record of the result and its event keep the answer as
-  `goes`, the id of another place or null, whatever the field was called when the world was asked.
-  When `goes` names a place, the rest of the answer takes
-  effect as before except that the doer's entry in `poses` is dropped. At the doer's next free moment, the deed's
-  end or earlier if it is interrupted, the rules check that `go` again and take it without asking a model. Its
-  seconds, leaving and arrival, what others perceive, seats, drivers, fares and the ending of touches are those
-  of any `go`. The action record and its event have `fromDeed`, the sequence number of the result record that
-  named the way; its `by` is null. The pending way is rebuilt from that result, so a pause before departure or
-  on the way replays and continues exactly. The doer reads the ordinary lines of its own `go`.
-  If that `go` is refused at departure, no `go` is made: the deed stays as it is, and the action is the ordinary
-  refused action's thirty-second wait, with its existing refusal sentence at the doer's next turn. The pending
-  way is used up in either case. The clock's laws and due vehicle arrivals still come before an action.
-  No resident's text or request for a figure's answer changes. Such a world takes state format `30`, before
-  every other mark; a state with that mark opens only for a world with `ways`.
-- The doer and everyone awake in the place read what came of it at their own next turn; it interrupts nobody. A
-  sleeper it wakes has its sleep end when the deed ends, and one of the deed's own place reads who woke it and by
-  what deed.
-- A place keeps for the world what came of the deeds done in it, the latest 400 words of lines and the newest line
-  whatever its size. A line is the clock, the doer, the deed and its span, then `Result:` with the world's words
-  when there were any, then `In the lists:` with what the rules say went where, was eaten or burned, is in another
-  state or was found, when there was any of that. It says what those in the place are told, in the world's own
-  words for things: each thing under its label, every move, also one into a pocket of the same person, and where
-  the thing went as the answer's `to` named it and as a request writes that holder (`t38 camera went to t1
-  long table.`, `t15 key to the shed went to t33 hiking jacket.`), with no word of where it came from. Told with names
-  alone, a key that went into a jacket reads as gone to the person, and a weak model then answered with the person
-  where it had answered with the jacket. So a deed
-  whose answer had entries and no words leaves a line too, and a deed that left neither leaves none. The line is
-  written from the postings and not from the answer's words, and every later request to the world in that place
-  has it, for a deed and for a figure's answer alike. In two whole runs of 2026-10-05, when a place kept only the
-  deeds whose result had words, a weak model twice answered by an earlier line against the lists: money still on
-  a counter after it had been pocketed, and keys gone from a box after they had been put back. Whether a weak
-  model reads the lists better with the new lines has not been seen in a whole run.
-- The answer is a record of its own, right after its deed: the journal takes nothing else there, so a run that
-  stopped between the two asks the world first when it continues. An answer that cannot be used is asked for once
-  more; after that nothing came of the deed, and the answer counts as unusable. An answer that the rules of things
-  refuse is asked for once more too, as «Things» says. The count of two asks is a run's own and no record keeps it:
-  a run that stops between the two, at its `--calls`, starts the count again when it continues. The explanation
-  of a refused answer is not kept either, so the next ask after continuing has none of it.
-- What a model tells in a `do` does not by itself make anything true: the deed is what was tried, and what came of
-  it is what the world answered from the facts.
+The format is the first applicable row below. A state opens only with its world's mark, since earlier versions
+would ignore settings and lose their state.
 
-People of a place whom nobody plays:
+| Condition | Format |
+| --- | --- |
+| `hunger` | `31` |
+| `ways` | `30` |
+| Any character or figure has `wordsPerMinute` | `29` |
+| Any character has `traces`, even empty | `23` |
+| `marks` | `22` |
+| `touch` | `21` |
+| Any vehicle has a `route` | `20` |
+| `vehicles` is present, even empty | `19` |
+| Otherwise | `18` |
 
-- A place of a world file may have `crowd`, a text of who is around as anyone there sees them (60 words at most), and
-  `figures`, a list of `{ id, name, looks, facts, wordsPerMinute }`: those of them who have a name, with `wordsPerMinute`
-  optional for the figure's own speech rate, otherwise the world's. A figure has no sheet, no memory
-  and no turn, so it costs nothing until someone speaks to it. It stays in its place, never speaks first, wakes
-  nobody and follows nobody, and a `call` does not reach it.
-- An id names one thing: the ids of the places, the characters and the figures are all different, and none is
-  `eaten` or `burned`, has the shape of a thing's label (`t7`) or is a name every object of JavaScript has, like
-  `constructor`. A world file that gives such an id is refused.
-- A turn lists the figures of the resident's place with their looks, under `People of this place, who answer when
-  you say with \`to\`:`, and then the crowd as `Around you: …`. A figure's `facts` are for the world alone.
-- A `say` may have `to`, the id of a figure of the speaker's place; any other `to` of a `say` is dropped. Everyone
-  in the place hears the speech as any other. Then the world is asked once, through the model of `--world-model`,
-  what the figure answers: it is sent what a deed's request holds of the place and of those in it, without what is
-  hidden and without the places next door, with the crowd and every figure of the place with looks and facts, with what came of the latest earlier
-  deeds there, and with what was said to the figures of that place before and answered (300 words of it).
-- It answers with `reply`, the figure's words, 65 at most, or null when the figure says nothing, and with `moves`
-  as a deed's answer has them, for a thing handed over while speaking: a figure carries nothing of its own, what it
-  has at hand is among the things of its place, and nothing is eaten or burned by its answer. The answer begins when the speech ends and
-  holds the speaker and everyone who heard the speech as speech does. A sleeper is not woken by it.
-- The answer is a record of its own, right after its speech, and the journal takes nothing else there. An answer
-  that cannot be used, or one cut at the model's limit, is asked for once more; after that the figure says nothing.
-  So a speech to a figure costs one request more than a speech, and a null answer costs it too.
-- The world's request about a deed also holds the crowd and the figures of the deed's place, and what was said to
-  them before and answered, so that a deed is judged with what a figure promised.
+Thus vehicles with touch take `21`; a speaker's rate wins over those and loses to ways and hunger.
+The earlier README reports that files of releases 0.1.0 and 0.1.1 with none of these settings and no `vehicles` still open. Their worlds that
+already had hunger, touch, marks, traces or a speaker's rate have mark `18` and are refused, because those
+releases ignored the setting. It also reports that files written under the earlier order that allowed a turn between simultaneous
+arrivals are another version and are refused. These historical format claims are unconfirmed here; the current
+opening and replay checks above are the code's rules.
 
-Things:
+A state file also holds its own random name. Requests derive one `cache` name for each resident and one for the
+world, so continuation keeps them and a new journal has others. An unsaved run makes one for itself. They are
+not printed or journalled; a byte copy of a state file keeps the original's names. Each connection says how it
+sends them. This groups requests without putting story text or ids in the names.
 
-- A world file may give a character `looks`, what anyone near sees and what never changes: the body and the face,
-  and no clothes, which can be taken off (60 words at most), and `pose`, how and where in its place it is (20).
-  `facts` are for what does not change. All are optional and in the world's language. A character may also have
-  `wordsPerMinute` for its own speech rate, otherwise the world's.
-- Things are records that the rules keep and count (`src/things.ts`). A place has `things` and a character
-  `carries`, each a list of `{ name, … }`, and a thing has one holder: a person, a place or another thing. `holds`,
-  a list, makes it a thing that holds others, like a table, a coat with pockets or a bag; `open` says that what it
-  holds is in plain sight. `n`, a whole number from 1 to 1,000,000,000, makes it a count of things that are alike,
-  like money, cigarettes or logs; a count holds nothing, so four mugs are four records. `fixed` is a part of the
-  place that never moves: a thing of the place itself or a thing inside a fixed one, and never something a character
-  carries or that lies in a thing which can move. `stock` is a
-  supply with no count, which taking does not use up. `food` is the calories of one and makes it something to eat
-  or drink. `drink: true` marks each one as a drink and needs `food`, zero for water; what is taken out of a stock
-  that is a drink is a drink too. The field is read but does nothing without `hunger`, and is never shown in a
-  request or in the notation of things. Only a world with `hunger` keeps calories and the drink flag in an `eaten`
-  posting. `burns` says that it can burn up. `states` is the list of states it can be in and `state` the one it is
-  in, the first when not given; `fire` is true for what can set things alight, or names the state in which it can.
-  `money` marks a count that no deed uses up or makes. `hidden`, `{ spot, minutes }` on a thing of a place itself,
-  says where it lies unfound and how long a search finds it. `facts` is what is true of the thing and is not seen
-  at once, for the world alone, as «The world answers a deed» says. A name has eight words at most and none of `, ; [ ] ×`.
-  The examples show all of these. A file that still has the texts `holds`, `has`, a text of `things` or a list
-  `hidden` is refused.
-- The rules give every record a label, `t1`, `t2` and on in the order of the file. A label is the world's own, is
-  never used again, and no resident is sent one. The world is told of things in one notation,
-  `t8 parka [t9 cigarettes ×17, burns; t10 lighter, fire]`: under `Things here` what stands or lies in the place,
-  after `Carries` what a person has in hand or wears, and in square brackets what a thing holds.
-- The world keeps no count and rewrites no list. Its answer says which things the deed moved: `moves` is a list of
-  `{ what, n, to }`, the label, how many, and where they end up: the id of a person there, the id of the place, the
-  label of a thing that holds others, `eaten` or `burned`. There is no «from»: the rules know where the thing was.
-  `sets` is a list of `{ what, state }` and puts a thing into one of its states; `poses` is a list of `{ of, text }`.
-- The rules take the moves in their order and the whole answer or none of it. A whole record keeps its label and
-  all that it holds, so a coat goes with what is in its pockets. A part of a count leaves the rest under the old
-  label and is a new record where it went. What is taken from a stock is a new record, and the stock is as it was.
-  Counts of one name and kind at one holder become one record. A move to where the thing already is does nothing.
-- An answer is refused whole for the first entry that names no thing of the place, a hidden thing that the answer
-  does not find, a `fixed` thing, more than there is or more than 20 from a stock, a `to` that is none of the above,
-  a thing put into itself or deeper than four, something eaten that is not `food` or burned that does not burn or
-  with no fire there, money eaten or burned, more than 30 records on a person or 60 in a place, or a state the
-  thing does not have. It is refused too when it lists moves and every one of them is to where its thing already
-  is, so that nothing moved and its words would tell of a move that the lists never took. Next to a move that changes something, such an entry is passed over as before. More than 12 moves or 6 states make the answer unusable. A refused answer changes nothing
-  and never reaches the journal: the world is asked once more with the same request and one sentence that names
-  the entry and the cause in the words of its instructions. After the second nothing came of the deed. The totals
-  count the answers `refused` and the deeds and speeches left `void`. A refused answer is neither used nor unusable
-  and neither adds to the row of unusable answers nor ends it.
-- A thing appears only out of a stock and leaves the world only by being eaten or burned, or as a bus fare. For
-  every name what there is and what was eaten or burned or paid as fare, less what came from a stock, add up to what the
-  world file gave, and the sum of money together with fares paid never changes. The event of an answer holds
-  `moved`, a posting for each thing with how many went from which holder to which, and an `eaten` posting says who ate what; `set`; and `found`. The laws of the random run
-  count by these postings.
-- The rules read no prose, and no words of a model change a count. Whoever perceives an answer reads after it one
-  line that the rules wrote from the postings: what went from whom or from what to whom, what was eaten or burned,
-  what is in another state now and what was found where. It names things and people, and no label.
-- `pose` and the things start from the world file and then belong to the world's state. A `go` drops the walker's
-  pose, and so does falling asleep, by a `sleep` or at the limit: a sleeper is shown as asleep and has no pose until
-  a deed gives it one, and keeps that pose when it wakes. The things a person carries go where the person goes.
-- In a world file with `touch` a turn also says the touches that hold between the resident and someone there, and
-  those it sees between others, as the point on touches under the world's answer says; this candidate was played on
-  real models over an earlier engine and still awaits measurement over 0.1.1. Those notes describe the other line;
-  this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
-- In a world file with `marks` a turn also says the lasting feelings of the resident's own body, as the point on
-  marks under the world's answer says; this candidate was played on real models over an earlier engine and still
-  awaits measurement over 0.1.1. Those notes describe the other line; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
-- A character's `looks` are part of its own system text. Every turn says its own pose and what it carries, three
-  things deep with the counts, and for each person in its place their looks, pose and what they carry, without what
-  is inside a thing unless the thing is `open`. It is never sent what is inside a thing that another carries,
-  anything of a person in another place, anything hidden, or any `facts`; the things of a place it learns by a deed
-  and the world's answer to it.
-- A candidate played on real models over an earlier engine, still awaiting measurement over 0.1.1: a world file may
-  give a character `traces`, a list of texts, each what is seen on the body or the clothes for the time being and
-  exactly where, like `pink pudding on the upper lip and the tip of the nose`: a smear of food, a stain, wet hair,
-  sand, a cream or an oil spread on skin. Those notes describe the other line; this port onto the main line is played
-  on no model. A trace has 12 words at most and a person 8 traces, and a file over either
-  is refused by the field.
-  `looks` never change and a `go`
-  drops a `pose`; a trace is neither. The mechanism is on only in a world whose file gives `traces` to at least one
-  character, and an empty list counts; in any other world no request, record or event differs from what it was,
-  which a comparison of hashes over the three examples on the other line confirmed. When it is on, the rules give
-  every trace a label,
-  `m1`, `m2` and on in the order of the file, the world's own and never used again, and no id of the file may look
-  like one. The run's state keeps each person's traces. A trace stays as it is on its person, wherever that person
-  goes and whatever pose it takes, until an answer of the world takes it off: it does not fade with the clock and
-  does not pass to anyone or anything by itself. The world is told them with the person, `Traces: m1 …; m2 …` or
-  `Traces: none`, and its answer to a deed has `traces`, a list of `{ of, text }` for what the deed leaves on a
-  person there, by accident or because someone puts it there, and `wipes`, the labels of the traces it takes off;
-  a figure's answer has neither. The rules take
-  the wipes first and then the entries. An entry for a person who is not there or with no words, and a label that
-  is on nobody there, are dropped, as with `poses`, `feels` and `finds`; an entry in the very words of a trace the
-  person already has is passed over, as a move to where the thing already is; and an entry that would be a
-  person's ninth refuses the whole answer, as a thirty-first record on a person does, and the world is asked once
-  more with the sentence that says so. An answer without the two fields is unusable. The record keeps both fields
-  and the event `traced` and `wiped`, each trace with its person, label and text, so a journal replays exactly and
-  a run continues from any record; the state file's format is 23 in such a world, or 29 when a speaker has
-  `wordsPerMinute`, since earlier versions ignore
-  traces and must not continue it without keeping them. Every turn says, right after a person's looks and pose,
-  what is on them, `On them: …`, and what is on the
-  resident itself, `On you: …`, with no label, as it stands at that turn: a trace that is gone is told no more, and
-  no line of anyone's past says how someone looked. The line a place keeps for the world names the traces an answer
-  left and took off. Both texts of instructions and the schema gain their sentences only in such a world. Not built:
-  traces on things or on a place, what clothes or a pose hide, and anything that fades with time, so a wet sleeve
-  stays wet until a deed dries it.
-- A character may have `memory`, what it remembers when the story begins, within `longWords`: what it owes and is
-  owed today, what it saw, where a thing lies. The sheet says who the person is; a sum or a debt in the sheet would
-  stay true in every request whatever happened, while the memory ages by the rules of memory. A place's `about`
-  names only what does not move.
-- Not built yet: a shop and prices, things made of other things, residents who take, give and eat without the
-  world, calories that count, and doors that stop a `go`. A clock is still a mark of a place or a person and not a
-  thing that can be handed over.
+`keepRun` in `src/kept.ts` keeps `--run` as files the [lab](#the-lab) reads:
 
-The weather:
+| File | Contents |
+| --- | --- |
+| `world.json` | The world file as given. A directory with another world file is refused. |
+| `state.sqlite` | The state described above. |
+| `part<N>.events.jsonl` | One event per line for that start, beginning with `part1`, then `part2` and so on. |
+| `usage-part<N>.jsonl` | One row per request: when sent, purpose (`turn`, `memory`, `world`, `reply`), owner, model, milliseconds, reported input, cached, output and reasoning tokens, and failure code. No request, answer or failure text. |
+| `about.txt` | Your description of the experiment, when you add one; the lab shows it. |
 
-- A place of a world file with `"open": true` lies under the open sky; any other is under a roof.
-- A world file or its environment may give `weather`, in one of two forms. A schedule is `start`, the weather when the story starts,
-  and `changes`, each with a `day`, counted as the clock counts days, and a time of day `at`. A seeded series is a
-  `seed`, a list of `states`, two at least, and `minutes`, the least and the most minutes a state lasts: which
-  state comes n-th and how long it lasts follow from the seed and n alone, and no state comes twice running. A
-  state, and a change of a schedule, has `text`, what is seen and felt under the open sky, and `indoors`, what of it
-  reaches someone under a roof, or null when nothing does; 40 words each at most.
-- A change is a record of its own kind. The rules put it when the clock reaches its moment, before anyone acts at
-  that moment, and no model is asked. The journal refuses one that is not due or is not the one the world file gives.
-- Everyone awake in an open place perceives a change as a line, and it ends their waiting as an arrival does.
-  Everyone awake under a roof perceives the `indoors` text in the same way when there is one. A sleeper or a
-  traveller perceives nothing of it and is not told later.
-- A turn says the weather as the character's place gives it: `text` in an open place, `indoors` under a roof, and
-  nothing when that is null. The world's request always holds the weather and says whether the deed's place is
-  under the open sky or under a roof.
-- The weather changes no other rule yet: nobody is slowed, chilled or woken by it.
+A second start adds the next stretch. Files are made only where absent, lines only appended; nothing is
+overwritten or shortened. The state event is saved before the event line, so a killed run can have it in its
+world but absent from that stretch. The state does not keep earlier starts' totals. Node warns that SQLite is
+experimental.
 
-Environments, and the form of a law:
+#### What a model is sent
 
-- Sleep debt and the weather are laws that the clock drives, each in a module of its own, `src/sleep.ts` and
-  `src/weather.ts`, behind one form (`src/laws.ts`): its settings and their check; its part of the world's state;
-  the record the rules put when the clock reaches its moment, which a journal holds there and nowhere else; the line
-  it adds to a resident's turn; and the most characters it adds to a request. Three more parts of the form are used
-  by one law each: the weather adds a line to the world's request, and sleep adds its mark to what others are told
-  of a person and keeps its count when someone falls asleep or wakes.
-- `environments/<name>.json` holds settings of the laws and nothing else: `dayStart`, `tiredHours` and `spentHours`
-  for sleep, and `weather`. A world file names one with `"environment": "<name>"` and may give any of these
-  settings itself, which then takes the place of the environment's. `--environment <name>` takes the place of the
-  world file's choice. A world file that names none and gives none has the defaults and no weather.
-- There are three: `mountain-winter`, which «A Night on the Pass» lives in, `sea-summer` and `village-summer`. Their
-  texts are synthetic and in English, as the example worlds are.
-- The core reads no file: the command line reads the environment and hands it over with the world file.
+`sharedOf`, `systemOf` and `runLive` in `src/live.ts` build a resident's request anew: its fixed instructions,
+name and sheet, and one message of memory, perceived lines and current surroundings. No earlier request or
+answer is resent, and no resident receives another's sheet, note or memory, or an unperceived event.
+The fixed opening gives the world's title and public description, the ordinary places with ids, descriptions
+and neighbours, the played people's names and the means of remote contact. With vehicles it lists their name,
+id, description, seats and allowed drivers by name, or anyone; a bus instead gives route, times and fare.
+The list opens `Vehicles:`. It never gives their position and stays fixed; the action schema names vehicles from the first turn, even as they move.
+Only worlds with vehicles add the vehicle rule line, with the round and automatic fare clauses only when relevant.
 
-What a character knows:
+A turn lists figures under ``People of this place, who answer when you say with `to`:`` and the crowd as
+`Around you: …`. It gives its owner its pose, traces and carried things three levels deep with counts. For people in its place
+it gives looks, pose, traces and visibly carried things. Open containers show contents; closed ones conceal them.
+It gives figures' names and looks, the crowd, sleep debt, its owner's hunger and thirst when needed, local weather,
+its own lasting feelings and touches it holds or sees. It gives current place and walking times to ordinary places
+when outside a vehicle. Inside it gives the stop or destination and minutes and seconds to departure or arrival,
+never an arrival clock time. A vehicle elsewhere is not revealed. A place's things are learned by a deed and its
+answer; hidden things and all facts are withheld. Its own looks are in the system text.
 
-- A request is built anew at every turn: the system text, which is the same for all characters up to the character's
-  own name and sheet, and one message with what the character remembers, what happened since, and where it is now.
-  No earlier request or answer is sent again. A character is never sent another character's sheet, note or memory,
-  or an event it did not perceive.
-- The short-term memory is the lines since the last rewrite, each under its time as the character could tell it: what the character heard and saw, its
-  own actions and notes, and the calls that waited for it.
-- The long-term memory is one text of at most `longWords` words, 400 unless the world file says otherwise. The
-  character writes it itself, through the model, from the old text and the lines being folded into it. What it
-  leaves out is forgotten. A longer answer is cut at the limit and its end is lost, so the character is asked to aim
-  at about 85% of the limit. It is asked to begin with what it wants and what has changed in it, then to give what
-  later turns hang on, with the figures, names and places as the lines give them (what is owed, what was promised
-  and by when, sums, times, where a thing was put), then what it knows about people, and to leave out passing
-  chores, small talk and the prices of trifles. It is asked for sentences and no numbered list, for every sum and
-  time of day in figures, for the past tense without where it is at that moment, and to give a deed a result only
-  where the lines show one. The order is there so that the cut takes what matters least.
-  A kept memory ends before its first `}`, without the spaces before it, and is marked as cut; an answer with
-  nothing before that `}` cannot be used. In two plays on a hosted model at low effort three rewrites closed the
-  string with `»}` and went on inside it, with the model's own words or with noise in several scripts.
-- A character rewrites its memory when it wakes: everything before the sleep is folded, and the waking and the calls
-  that waited begin the new lines. A sleeper who has lived through nothing since its last rewrite but falling
-  asleep and waking wakes without one, and no model is asked. A character also rewrites its memory at the start of a turn while the lines hold more than
-  `shortWords` words, 2000 by default: the oldest lines are folded until about half of that is left.
-- If the answer to a rewrite cannot be read, it is asked for once more. After two such answers the old text stays,
-  the lines are dropped all the same, and the journal and the totals say that a rewrite was lost.
-  A readable first answer to a rewrite is set aside and asked for once more when the sheet has at least 20
-  letters, at least four fifths are of the script with the most, and the text after cutting has at least 10
-  letters with fewer than half of them in that script; it counts as an unusable answer in the totals and in the
-  stop on too many in a row. The second answer is kept as it comes, without judging its script; if it cannot be
-  read, was cut at the output limit or was declined, the first is kept, as it is if the run stops before another
-  answer: the guard can cost one request and never a memory. A readable second answer after an unreadable first
-  is kept whatever its script too.
-  Only letters count: Latin, Cyrillic, Greek, Arabic, Hebrew, Devanagari, Thai, and Han, Hiragana, Katakana and Hangul
-  together. A tie or a sheet with no clear script leaves the check off; names and a few words of another script may
-  stay. A language written in two scripts is held to the script of the sheet.
-  This rule changes no text a model reads and was played on no model.
-- A word counts as at most ten characters for every limit, so a text without spaces cannot get around one. This is
-  why a request has a largest size that depends on the world file and not on how long the world has run.
+The `action` is `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private `note` written before the action.
+The note is what goes on in the character now, what it notices, feels, wants and holds back, rather than a plan.
+A `say` can have a `gesture`, what its face, hands or body do, seen with the speech but not sent to the world.
+Only a figure here can be its `to`; any other `to` is dropped. A `do` can have `says`, spoken aloud
+before the world answers; the world still receives the deed alone. [Gestures, words and note order were checked
+together](docs/measured.md#gestures-words-and-notes), without counting whether the action follows its note.
+`schemaOf` in `src/live.ts` lists the world's actions and place ids, omitting `call` without remote contact.
+The other fields are text or null, or a whole number or null for `seconds`. [The turn schema check](docs/measured.md#turn-schemas)
+compared invalid destinations; a server ignoring the schema can still write one, which the rules refuse.
 
-The journal and the state file:
+`worldSystemOf`, `deedOf`, `placeOf` and `hereOf` in `src/live.ts` build a deed's request. It has the world's
+description and facts, the place and its facts, listed and hidden things, ordinary other places, the clock, doer,
+deed and span. For people here, awake or asleep, it has name, id, looks, pose, things and facts; for neighbours
+only names, ids and whether awake or asleep, or nobody. It has the crowd and figures with looks and facts,
+recent deeds, and recent speeches to figures and their answers. A vehicle inside has its description and the
+places between which it drives or the stop where it stands; a deed outside sees only vehicles standing there.
+It has optional traces, touches and lasting feelings as described below. It has no sheet, note, memory or speech
+between residents. [The port's deed checks](docs/measured.md#deed-requests-on-the-main-line) do not measure what
+these mechanisms change in a story.
 
-- Everything that happens is a record in an append-only journal: an action as it was read from the answer, or the
-  reason why the answer could not be used, the world's answer to a deed, a figure's answer to a speech, an arrival, a waking or a falling asleep
-  at the limit, a change of the weather, a memory rewrite. A drive is one action record, with the driver, vehicle,
-  departure, destination and arrival instant; its arrival is one record of the engine at that instant. A state
-  stopped on the way continues to the same arrival. With no `ways`, no `hunger`, no speaker's `wordsPerMinute` and none of the three body candidates below, a world without
-  `vehicles` keeps format `18`, so its state files open as before. A world with `vehicles`, even an empty list,
-  takes `19`; one with a `route` takes `20`,
-  since bus positions follow the clock and fares leave the world. A file with another mark is refused as another
-  version. Each record is stored with the event the rules made of it. There is no other
-  state: where everyone is and what each one remembers is rebuilt from the records, by the same code that
-  plays the world. Any beginning of a journal is a whole world at that moment.
-- Without `--state` the journal lives in memory and ends with the run. Then the run is the whole story: a turn says
-  how much of it is left, and speech shortens towards the end.
-- With `--state <file>` the journal is a SQLite file, written one record at a time, and `live` continues the world
-  it finds there. `--minutes` then count from where the world stands: from an unfinished deed's moment, or else from
-  what the clock brings first if it is due (a change of the weather, a vehicle's arrival), or else from the next
-  person's turn. The end of a run is a pause: nobody is told how much is left.
-  When the file is opened, every record is replayed and must give the event stored with it;
-  a journal that does not is refused. The file belongs to one world file and its environment together, by a hash
-  of the content of both, and refuses another of either, so neither can be edited or exchanged while the world is
-  under way. A second run on a file that is in use is
-  refused. The file also holds a random name of its own, made when it begins: every request of a run carries a name
-  made of it for its player, one for each resident and one for the world, as the request's `cache`, so a world that
-  is continued keeps those names and a journal begun in another file has others. A run with no state file makes one
-  for itself. No name is printed, and none is in the journal. A byte copy of a state file has the names of the original. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
-  writes nothing to it.
-- The state file's format mark is `31` in a world with `hunger`, otherwise `30` in a world with `ways`, `29` when any character or figure has `wordsPerMinute`, `23` in a world with traces,
-  `22` with `marks`, `21` with `touch`, and otherwise
-  `18`, `19` or `20` as above: earlier versions ignore those settings and must not continue such a world without
-  keeping them. The highest mark that applies is taken, so vehicles with touch take `21` too, and a speaker's rate takes `29` before those and after `ways` and `hunger`.
-  A state file opens only under the mark of its world file. A file of release 0.1.0 or 0.1.1 for a world with none
-  of these settings and no `vehicles` still opens and goes on. A file of either release for a world whose file already had
-  `hunger: true`, `touch: true`, `marks: true`, a character's `traces` or a speaker's `wordsPerMinute` has mark `18` and is refused: that release ignored the
-  setting and kept nothing of the mechanism.
-- With `--run <dir>` the run is kept as an experiment that [the lab](#the-lab) reads: the directory holds the world
-  file as it was given, `world.json`; the state file, `state.sqlite`, with everything the point above says of one;
-  and for every start a stretch of its own, `part1`, `part2` and so on, as two files. `part<N>.events.jsonl` has the
-  events of that start, one a line, as the rules made them. `usage-part<N>.jsonl` has a row for every request: when
-  it was sent, what it was for (`turn`, `memory`, `world` or `reply`), whose it was, the model's name, the
-  milliseconds it took, the input, cached, output and reasoning tokens that the service reported, and the code of a
-  failure. No text of a request, an answer or a failure is in a row. A second start with the same directory goes on
-  in the same world as the next stretch. Nothing that is there is overwritten or shortened: a file is made only where
-  there is none, and lines are only added. A directory that keeps another world file is refused, and `--state` is not
-  given together with `--run`. An event is in the state file before it is in the events file, so a run that is killed
-  between the two has the event in its world and not in its stretch. A file `about.txt` that you put into the
-  directory is shown by the lab as what the experiment was for.
+Every listed thing's facts reach the world, whether hidden, carried or nested, for deeds and figure replies.
+They follow the place's facts as sentences without labels or headings, once per identical text at its first record:
+`The place: Red room (red), under a roof. Red walls. Facts: FACT-RED. FACT-KEY.`
+A part taken from a stock or count keeps its facts; counts merge only with identical facts.
+In `examples/night-pass.json` the guest register, backpack, map and notebook carry their own texts.
+This layout avoids a labelled facts block that led a weak model to move things against the lists;
+[the combined check](docs/measured.md#facts-of-things) did not isolate each part of the request.
 
-The laws of the world. Whatever the model answers, these hold in every journal. `npm test` plays thirty characters
-for thousands of steps with answers of every kind, checks each law from the journal alone, and a failure names the
-law and the record. Each law is one sentence, and they are written in one place: `LAWS` in
-`src/invariants.test.ts`.
+`resultSchemaOf` in `src/live.ts` and `readResult` in `src/answer.ts` hold the world's answer and its checks.
+The answer lists entries before its prose `result`, so words cannot lead the entries. [Both orders were checked](docs/measured.md#order-of-the-world-answer).
+With traces, `traces` and `wipes` come last, after `result`, in that order; [that order's checks](docs/measured.md#traces-in-the-answer)
+were on the earlier line. Each request's schema enumerates allowed labels, ids and states. An empty enum takes
+any string because a strict schema may refuse an empty list; all states share one list, so it cannot hold a state
+to its own thing. Code then drops out-of-place `finds`, `poses` and `feels`, or `wakes` naming no sleeper here or
+next door. Invalid moves or states refuse the whole answer. More than 12 moves or 6 state entries makes it unusable.
+Answer texts are cut at their word limits. An empty `beyond` is null, and an empty pose clears the pose.
 
-The run ends after `--minutes` of the story, 30 by default, after `--calls` requests, 60 by default, or before a
-request when the reported input and output tokens reach `--tokens`, if given; a memory rewrite is a request too.
-Usage that was not reported adds nothing, and the request that crosses the token ceiling is the last.
-It stops at the first failure of the model connection and tries nothing again, with two
-exceptions. A request that the service declined to answer (`declined`) counts as a request and as an unusable answer,
-as the rules of time and hearing above say, and the third in a run ends it as `failed (declined)` unless the row of
-unusable answers ends it before then. And an answer that the model's own
-limit cut short (`output_limit`) is an answer that cannot be used. For a
-turn it is a lost turn like any other, for the world's answer and a memory rewrite it is one of their two tries,
-and it counts as a request, with no tokens known for it. Three such answers of one model in a row, with no answer
-of that model arriving whole in between, end the run as `failed (output_limit)`, unless the row of unusable answers
-ends it before then. Five unusable answers of one model's name, with none of its answers used in between, end it
-as `failed (invalid)`, including cut and declined answers. An answer that the rules of things refuse is neither
-used nor unusable: it is counted under `refused` and neither adds to that row nor ends it. When one answer reaches
-the invalid limit and the cut or decline limit together, `output_limit` or `declined` wins respectively. `cutRun`,
-`declinedRun` and `invalidRun` of `runLive()` set these limits; they have no command flags. It prints
-each event as it happens. In the text output an event is one line, followed by a line for each thing it found, moved
-or put into another state, for each pose it changed, for each private feeling, for what was heard next door, for the words said with a deed and for a private note; a gesture stands in brackets before its speech; a `wait` with
-no note prints nothing,
-and a memory rewrite is shown whole, over as many lines as it has, marked as private like a note. With `--json`
-every event is one JSON object on one line, the silent waits too. Then comes one line of totals: the status and its
-reason, for a run that a connection's failure ended also the HTTP status and the service's own code and field name when the failure had them (`failed (provider_failed 502 bad_gateway)`; `httpStatus`, `providerCode` and `param` with `--json`; `provider_failed` with no status means the service could not be reached), never the service's words, the story minutes played, the requests, the unusable answers of every kind, how many of them were cut
-at the output limit (`overlong`) and how many the service declined to write (`declined`), the memory rewrites and how
-many of them were lost, the answers of the world that the rules of things refused and the deeds left with nothing, and the tokens: the input tokens, how many of them the service says it read from its cache (`cachedInputTokens`), and the output tokens. The tokens are summed over the answers that reported their usage: when some
-reported none, the totals say how many (`unreported`) and do not count them as zero; an answer that reported no cached count adds none. The totals also count the requests and the tokens by what a request was for, a resident's turn, a memory rewrite or an answer of the world, which is the result of a deed or a figure's answer, a second ask included: `--json` has them as `kinds`, and the text output adds one line for each, so that the turns are told from the world's answers when one model gives both.
+| Answer field | Meaning and limit |
+| --- | --- |
+| `search` | Whether the deed searched the place. The rules count its seconds. |
+| `finds` | Labels of hidden things whose exact spot the deed went straight to. Unknown labels are dropped. |
+| `moves` | Entries `{ what, n, to }`: thing label, count and destination, a person here, this place, a container label, `eaten` or `burned`. No `from`; the rules already know it. |
+| `sets` | Entries `{ what, state }`, changing a thing to one of its states. |
+| `poses` | Entries `{ of, text }`, where and how a person here is; 20 words. A pose names no other place. |
+| `touches` | Only with touch, after `poses`, before `wakes`; entries `{ of, to, kind, force, text }` described below. |
+| `wakes` | Sleepers here or next door whom the deed wakes. |
+| `feels` | Entries `{ of, text }`, bodily feeling, not a thought or wish; 20 words, later entry per person wins. Only that owner receives `You feel: …`, even with no result. No sleeper, including one woken by this deed, figure, traveller or person elsewhere gets it. Empty entries are dropped. |
+| `lingers` | Only with marks, after `feels`, before `beyond`; entries `{ of, zone, kind, level, minutes, text }` described below. |
+| `beyond` | Sound next door, text or null, at most 20 words. |
+| `result` | One or two sentences anyone here could see, hear or smell, 65 words at most, or null for nothing noticeable. |
+| `traces` | Only with traces, entries `{ of, text }` left on people here. |
+| `wipes` | Only with traces, labels of traces removed from people here. |
+| `leads` | Only with ways, first before `search`: this place's id to stay here, another id for the doer's way there. |
 
-A model for each resident. `--cast <character id>=<model name>`, given as many times as needed, has that character
-played by a model of its own; `--model` plays everyone else. A model name is what `--model` takes. Every request
-of a character, a turn or a memory rewrite, goes to its model's connection, so everything a resident perceives is
-sent to the service that plays it. When a connection fails the run ends with its code: nobody is moved to another
-model. Each entry of the journal keeps `by`, the name of the model whose answer it came of, or null for an arrival,
-a waking or a change of the weather; `--json` prints it with the event, and the state file keeps it. The rules never read it: the same
-records give the same world whoever answered. The totals count requests, unusable answers and tokens for each model
-name as well: `--json` has them as `models`, and the text output adds one line for each model when more than one
-played.
+`replyOf`, `replySchemaOf` and `figureInstructionsOf` in `src/live.ts` build a figure's request. It has the deed
+request's place and people, without hidden things, neighbours, touches or lasting feelings. It includes crowd,
+every figure's looks and facts, recent deeds, and the latest 300 words said to the figures here and answered.
+These lines are shared by all figures, not a figure's private memory. The answer has `reply`, up to 65 words or
+null, and `moves` for something handed over while speaking. A figure's things are among the place's things;
+it cannot eat or burn through its answer. `reply` in `src/answer.ts` starts the answer when the speech ends and
+holds those who heard it as speech does; it wakes nobody, and `applied` in `src/journal.ts` writes it into their
+memories at that time. A deed's request includes what figures promised, too.
 
-`npm run bench` plays a synthetic town with a stand-in that answers at once and prints what a step costs and how
-large the requests were; `node src/bench.ts 1000 100 50` is 1000 characters in 100 places with 50 calls each.
+#### The mechanisms
 
-What it lacks:
+##### Turn order and hearing
 
-- There is no author above the characters. Nothing happens in the world unless a character does it.
-- The world answers a deed and does nothing of its own accord. The rules count the things and hold every move to
-  what is there, but whether a deed moved a thing at all is the world's reading: a weak model leaves a move out, and
-  then its words say that a jacket was hung up while the lists keep it on its owner. Nothing compares the words of
-  a result with its moves. The facts of the world file never change.
-- What a place keeps of its earlier deeds says what the rules moved and never where a thing is now: a thing that
-  left the place on its carrier, or was moved by a figure's answer, leaves no line there, and an older line of
-  the world's own words may still speak of it. The lists are the truth, and the world is told so.
-- Speech does not pass a door: a `say` is heard in the speaker's place and nowhere else, however loud. Someone
-  who calls through a door does it by a `do`, and the one inside reads only what the world put into `beyond`, and
-  can answer the same way. Whether a deed is heard next door is the world's reading, and nothing checks it; every
-  place next door hears the same, and the doer is not told that it was heard.
-- A door has no state. It is not a thing that is open, shut or bolted: what a place's description says of its door
-  is all the world knows, a `go` passes any door, and what is heard next door does not depend on one.
-- A search is whatever the world calls one, and a deed went straight to a hidden thing when the world says so:
-  nothing checks either, so a world that is generous finds a thing for someone who only guessed. Nobody is told how
-  long a search has lasted or that there is anything left to find.
-- A walk is a straight line at one pace for everyone, whatever lies between and however tired the walker is. A
-  long walk cannot be broken off, nothing is perceived on it, and the walker is not told what the weather did meanwhile.
-- A `go` takes along everything a person carries, whatever its size, and nobody is told what lies in a place
-  without a deed. A resident names a thing in its own words, and the world has to find the label.
-- A clock is a mark in the world file and not a thing: a watch that is handed over, lost or stopped still shows its
-  first owner the time, and a clock carried out of a place stays in it. A span in seconds is said exactly to
-  everyone, and a sleeper who is woken early is not told by how much.
-- Tiredness is one number. It does not slow anyone or change what a character can do before the limit, and a
-  character who is on the way when it reaches the limit falls asleep only at its turn after the arrival.
-- A seeded series of weather knows no time of day and no season: its states must read true at any hour.
-- A figure remembers nothing of its own: it is consistent only by its facts and by the latest of what was said to
-  the figures of its place, which all of them share. It does not hear what residents say to each other. A crowd is a text and answers nobody.
-- The world answers only a `do` and a speech to a figure. What is claimed in a speech or a note is checked by nobody.
-- A rewrite is the model's own summary, and nothing checks that it adds no facts. What a character forgets cannot be
-  looked up again: the journal keeps it, the character has no way to it.
-- The calls that wait for a sleeper or a traveller are kept until it wakes or arrives, however many they are. If
-  they are more than the short-term memory holds, the oldest are folded before its next turn, one rewrite after
-  another, so the request stays within its size.
-- The journal does not branch yet. A story that forks from a checkpoint needs a copy of the journal up to there.
-- The state file does not keep the totals of earlier runs, and Node prints a warning that its SQLite is experimental.
-- Its own checks talk only to a scripted stand-in for the model.
+`next`, `apply`, `arrive`, `wake` and `attend` in `src/action.ts` keep residents taking turns in time order.
+Arrivals come before waking and both before turns at one instant, so two who walk together are both there before
+either looks around. [The arrival check](docs/measured.md#arrivals-at-one-instant) covered this order on one model.
+The clock displays whole seconds and names the day from day 2. Everyone awake in the speaker's place hears a
+`say` and is held until it ends. A `call` reaches its recipient anywhere, with only the caller's half heard by
+those near the caller. A sleeper or traveller gets its waiting calls on waking or arrival.
+
+##### Action spans
+
+`speechSeconds`, `wordLimit`, `travelSeconds` and `lasting` in `src/time.ts` give spans; `readAction` in `src/action.ts`
+reads actions. Speech and a call are cut at 65 words and at the turn's limit, with the speaker's rate and a minimum
+of two seconds. Notes and deeds are cut at 65, gestures at 12, words with a deed at 20 and the turn's limit.
+A deed lasts at least as long as its words, and they hold listeners like speech.
+[Speaker rates were checked with stand-ins](docs/measured.md#speech-rates), with no changed instruction text.
+The walking fields above give the time. Walking hears nothing,
+cannot stop and takes no turn on the way.
+
+A `do` or `wait` lasts chosen whole `seconds`, at most an hour, or `until` the next occurrence of a time of day such as `06:30`;
+a `sleep` lasts at most 12 hours. `until` wins over seconds. An excessive span is capped without losing the turn;
+the resident reads the seconds with no cut warning and the action record has `capped`, never sent in a request.
+A deed and wait end early with speech, a call to the resident, leaving or arrival nearby, sound next door, or a
+weather record reaching the place, even with unchanged text. Freedom waits for speaking and listening to end.
+A deed is nevertheless credited whole at once: the world answers its whole span and a search counts it all.
+A sleeper sees and hears nothing, interrupts nobody, and wakes early only by the world's `wakes`. It wakes at
+the deed's intended end or its already earlier waking time. Others see deeds, falling asleep and waking at their
+own next turn; leaving and arrival also end their waits.
+
+##### Time without a clock
+
+`hasClock`, `timeFor`, `sensed` and `DRIFT` in `src/time.ts` keep clock knowledge local.
+With a clock at hand a turn opens `Now 21:04:10.` and perceived lines keep clock times; without one it opens a
+part of day, `Now evening, as far as you can tell: no clock is at hand.`, and a line begins `[evening]`. Nothing from the rules gives a clock time then; a time spoken aloud
+stays speech. Memories keep the time as their owner could tell it when it happened, even after losing a clock.
+Open-sky cues begin at 05:00 early morning, 07:00 morning, 10:00 late morning, 12:00 around midday,
+14:00 afternoon, 16:00 late afternoon, 18:00 early evening, 20:00 late evening and 23:00 night.
+Under a roof or on the way they are 05:00 morning, 11:00 the middle of the day, 15:00 afternoon,
+18:00 evening and 23:00 night. Later days are named. With a clock, `until` is an alarm at that time.
+Without one, replayable drift is at most a tenth of the span and half an hour for sleep, a twentieth and three
+minutes for deed or wait, never outside the action's allowed span. Its own line says `until about 06:00`.
+The world always receives the clock.
+
+##### Refused turns
+
+An unusable turn is a thirty-second wait. `REFUSALS` in `src/action.ts` and `refused` in `src/journal.ts`
+keep its reason and the next turn's sentence of what to do instead. The original nine are a non-JSON object,
+unknown action, missing text, invalid call recipient, this place or unknown place, bad time, output cut or service
+decline. Vehicle refusals add unavailable, full, driving, unauthorised driver, out of reach, self-driven round
+and insufficient fare. A decline uses the non-JSON sentence because no separate sentence was measured; the
+journal distinguishes them.
+
+##### Vehicles and buses
+
+`driveSeconds`, `busRound` and `busAt` in `src/time.ts` govern timing. `go` boards or gets out immediately,
+holding the next turn ten seconds; boarding needs a free seat. Inside, `go` drives elsewhere immediately,
+taking walk time divided by `faster`, rounded up, at least thirty seconds. The driver is busy ten seconds;
+riders take turns en route. Ordinary journeys stay walks. There is no fuel, key, getting out, turning back or
+changing destination on the way. Invalid journeys take a thirty-second wait and fixed refusal sentence;
+driving a bus gives `This vehicle goes its round by itself.`
+[Vehicle checks](docs/measured.md#vehicles-on-the-main-line) and
+[bus checks](docs/measured.md#buses-on-the-main-line) showed drives and paid rides, without measuring their
+effect on the story.
+
+`pay` in `src/things.ts` takes directly carried money first, then contents, then their contents, in list
+order. Too little takes nothing: `You need 30 rubles for the fare.` Only the payer reads `You pay 30 rubles.`
+after boarding. Getting out gives no refund; staying another round costs no fare. A holder with id `fare` can
+receive ordinary moves; deeds cannot use up money.
+
+`vehicleView` and `standingAt` in `src/journal.ts` give `Here stands:` lines with free seats and a bus's next
+departure: `Here stands: Blue car (car), 1 of 2 seats free.` or
+`Here stands: Bus 4 (bus4), 19 of 20 seats free, leaving for Hill in 1 min 0 s.` A line is written on first
+sight, arrival, pull-up or a change of seats, with the time left then; time alone adds no line. Outside,
+`Bus 4 has driven off.` and `Bus 4 has pulled up.` name no occupants. At a stop a bus's pull-up frees only
+those who wait, with the standing line at once; others get it at their next turn only if the bus remains, and
+a long deed continues to its end. A driven vehicle's arrival frees everyone awake where it arrives. A departure
+ends no wait; its line waits for the person's turn. Inside, arrival frees everyone awake and is told in the
+vehicle's words; departure is only in the next `Now` position line. Bus sleepers get no notices, even on
+waking; their `Now` gives position. Driven-vehicle sleepers get arrival on waking.
+
+`vehicleDue` and `applied` in `src/journal.ts` give one bus arrival record only with someone awake at its stop
+or inside beforehand. Other bus instants add no record, request or delay to the run or horizon; the timetable
+restores position after a pause without witnesses. Replay refuses a `round` refusal without a round. Vehicle
+arrivals follow weather and precede sleep at the limit, people's arrivals and turns at the same instant.
+Without vehicles, requests and journals stay unchanged. This port keeps the main line's rebuilt turns and the
+candidate's transport wording; it has no opening hours, places on demand, closed-place refusals or going by
+words.
+
+##### Things and deeds
+
+`settle`, `keep`, `stocked` and `sought` in `src/things.ts`, with `result` and `refusal` in `src/answer.ts`,
+keep model prose from changing counts. A deed is an attempt, not a fact. The rules take an answer's moves in
+order, the whole answer or none. A whole record keeps its label and contents; a part of a count or stock is
+another record, the rest stays, and compatible counts at a holder merge. A stock is unchanged. Labels `t1`, `t2`
+and on follow file order and are never reused or shown to residents. The world reads notation such as
+`t8 parka [t9 cigarettes ×17, burns; t10 lighter, fire]`, under `Things here`, `Carries`, and brackets for contents.
+There is no model-maintained list or count.
+
+An answer is refused for its first unknown or unfound hidden thing, fixed thing, excess count or more than 20
+from stock, invalid holder, self-containment or nesting beyond four, non-food eaten, nonburnable burned or burning
+without fire, money eaten or burned, more than 30 records on a person or 60 in a place, or invalid state.
+Moves all to their current holders refuse it because prose could claim a move that did not happen; beside an
+actual move they are passed over. A refusal changes nothing and is not journalled. The world gets the same
+request once more with a sentence naming the entry and cause in its instructions' words. After the second,
+nothing comes of the deed or speech; totals count `refused` and `void`.
+
+Only stock creates things; only eating, burning and fares remove them. For each name, what remains plus what was
+eaten, burned or paid, minus stock additions, equals what the file gave. Money plus fares never changes.
+Events hold `moved` postings with source, destination and amount, `set` and `found`; eaten postings name the eater,
+and only with hunger keep calories and drink. Residents receive one line from postings with names and no labels;
+`told` in `src/journal.ts` leaves out a move whose two ends it names alike, such as into the doer's own pocket,
+which the world's earlier-deed line keeps. The invariant checks count from these postings.
+
+##### Search
+
+`result` in `src/answer.ts` adds a searching deed's seconds to a time kept per person and place, across deeds and
+after leaving; `sought` in `src/things.ts` reads it and says what a search finds now. The world's `search` credits
+the whole deed's seconds, so a ten-minute hidden backpack can be found in one search or several. The request
+separates what this deed finds if a search from what no search finds yet; the model does not count time.
+Alternatively `finds` judges a deed straight to the named spot, however short, not merely the thing's name or
+another spot. Found things and contents become visible to all; only an answer finding one can move it or its
+contents. Nobody is told search progress or that more is hidden. Nothing checks the model's judgement of search
+or direct reach, nor that its result does not mention something still hidden.
+
+##### Earlier deeds
+
+`earlierOf` in `src/live.ts` and `advance` in `src/journal.ts` keep the latest 400 words of deeds in each place,
+and always its newest line. A line has clock, doer, deed, span, `Result:` words and `In the lists:` postings,
+including things found, eaten, burned or changed. Each move names its label and the destination exactly as a
+request names that holder, never its source (`t38 camera went to t1 long table.`, `t15 key to the shed went to
+ t33 hiking jacket.`). Names alone made a weak model mistake a jacket for its owner. Entries without prose still
+leave a line; neither entries nor prose leaves none. Feelings and sound next door leave none of it in that
+history. [Stale-list checks](docs/measured.md#earlier-deeds-and-stale-lists) explain why these lines were added;
+their effect on a whole run was not measured.
+
+##### World retries
+
+`runLive` in `src/live.ts` and `advance` in `src/journal.ts` require a result immediately after its deed, or a
+reply immediately after addressed speech. No other record can intervene. Unreadable or cut world answers are
+asked once more; unreadable replies leave silence, deeds leave nothing. Retries are local to a start: a pause
+at the call cap resets the two-ask count and loses the refusal explanation. Declines follow the separate stop
+rule above. The doer and awake witnesses get the result on their next turns, without interruption; a sleeper
+woken here learns who woke it and by what deed.
+
+##### Sound next door
+
+`result` in `src/answer.ts` names who hears `beyond` next door and `applied` in `src/journal.ts` writes their lines.
+It gives sound, not the doer's identity unless a voice carries words. Awake people next door receive
+`From <place name>, next door: <text>` and stop waiting. It reveals no deed, result, pose, move or feeling.
+A named sleeper wakes with `Something from <place name>, next door, woke you: <text>`, or `… woke you.` if null,
+because a weak world may fill `wakes` before `beyond`. Others asleep or travelling get nothing, nor anyone in the
+deed's place, including its doer. With no neighbour, any returned sound is made null, saved and printed nowhere,
+without refusal or retry. The world is told to use null then; the transcript labels it `heard next door: …`. [The sound check](docs/measured.md#sound-next-door)
+did not count it separately from the other request changes.
+
+##### Feeling during a deed
+
+`readResult` and `result` in `src/answer.ts` read a bodily feeling and `applied` in `src/journal.ts` gives it to its
+owner alone and keeps it out of the world's later history. Its transcript label is `private feeling of …`.
+A deed touching another body asks for feelings of both toucher and touched; looking, listening, speaking,
+watching and ordinary handling of a thing ask for none. Each text begins with what is felt, naming nobody,
+since it follows `You feel:`. [Feeling checks](docs/measured.md#feelings-during-a-deed) led to narrower wording;
+its separate effect was not counted. This is the first of three planned layers: feeling during a deed is built;
+feeling from bodily state over time, such as an arm tired after carrying, and a body that changes are not.
+
+##### Touches
+
+`readTouches` and `touched` in `src/touch.ts` keep one touch per ordered pair, allowing mutual touch. With
+`touch: true`, a list is required; otherwise requests and saved form stay unchanged and older journals replay.
+Entries precede waking and feelings so those agree. Continuing entries name two different people here,
+sleepers allowed; `kind` is `touch`, `press`, `squeeze`, `hold`, `embrace`, `rub`, `lean` or `none` to end;
+`force` is `light`, `firm` or `hard`; `text` says with what body part and where on the other body, naming
+neither, at most 15 words. A touch that holds needs no entry. `MAX_TOUCHES` is 8 per place. Entries run in
+order; endings make room; later per pair wins. Invalid ids, kind, force, empty text, endings without a touch
+and ninth beginnings are dropped. A changed kind or force restarts the touch at the deed's start; otherwise its
+start stays and only the text changes. Leaving, boarding or getting out
+ends touches in `applied` in `src/journal.ts`; sleep, driving and arrival keep them. Holding someone back or
+keeping touch while walking together is not built.
+
+Deed requests list `Touches that hold now:` after people, with
+`- of <id> to <id>: <kind>, <force>, for <time>: <text>`, or `Touches that hold now: none.`. Time is seconds,
+whole minutes from two minutes; figure replies omit them. `runLive` in `src/live.ts` shows participants, under
+their poses, `You touch <name> (<kind>, <force>, for <time>): <text>` or `<name> touches you (…): <text>`;
+awake witnesses here see only `<name> touches <name> (<kind>): <text>` after other people. Nobody elsewhere
+sees it. Residents are told no renewal is needed; a deed lets go or leaving ends it. Result records and events
+keep `touches`; transcripts say `touch of … on …`. Leaving adds no touch entry; the next turn lacks it. Touch
+adds no memory line; result and feeling tell its beginning.
+[The body port check](docs/measured.md#body-mechanisms-on-the-main-line) left the story effect unmeasured.
+
+##### Lasting feelings
+
+`readLingers`, `marked` and `marksAt` in `src/marks.ts` keep a person's feeling per zone and kind.
+With marks on, `lingers` is required; without it the request and saved form stay unchanged. It uses the initial
+mark's fields plus `of`, a person here, `minutes`, null or a whole number from 1 to 1440, and `level` also allows
+`none`. Text has 15 words; none needs no text. Null lasts indefinitely; a number lasts that many minutes after
+the deed's end, then restores what was there, including an older temporary layer. Up to 3 layers (`MAX_LAYERS`)
+keep relief or worsening; layers expiring before the new one are dropped. A change to a part already feeling
+something needs an entry, such as cream on a burn, cold water, a muscle rub or a blow on a bruise.
+Invalid person, zone, kind, level, minutes, empty text except none, ending a missing mark, a fourth layer or a
+seventh mark is dropped. Later entry per person, zone and kind wins. No entry leaves it unchanged; only entries
+and time change it, and it follows its owner asleep or awake.
+
+Expiry writes no record. Entries stay in result records and events; transcript lines are
+`private lasting feeling of …`. A turn gives only its owner `Your <zone> (<kind>, <level>): <text>` after sleep
+debt, `Your whole body` for body, no time or temporarily absent mark, and no memory line. The deed request has
+`Feelings that last now:` after people and touches, with `- of <id>, <zone>: <kind>, <level>, for <time>: <text>` and `, <time> left` when temporary,
+or `Feelings that last now: none.`. Times are seconds, whole minutes from two minutes, whole hours from two hours. An unchanged
+initial mark has no `for <time>`; temporarily gone is none with no text. Figure replies omit it. The name `lingers`
+avoids confusion with the marks after things in the world's notation. [The body port check](docs/measured.md#body-mechanisms-on-the-main-line) left the story effect unmeasured.
+
+##### Traces
+
+`marked`, `retraced` and `refusal` in `src/answer.ts` keep traces on people, independent of looks and pose.
+The labels `m1`, `m2` and on follow file order and are never reused. The world reads `Traces: m1 …; m2 …` or
+`Traces: none`; residents read only `On you: …` or `On them: …` after looks and pose, without labels, as they are
+now. Past lines never retell appearances. Deeds alone leave or wipe traces; a figure answer has neither field.
+Wipes precede additions; unknown person, empty text or unknown local label is dropped, a duplicate text is passed
+over, and a ninth trace refuses the whole answer with a retry, like a thirty-first carried record. Both lists
+are required. Records keep them and events `traced` and `wiped` with owner, label and text; earlier-deed lines
+name traces left or removed. Optional instructions and schema sentences appear only when traces are on.
+[The first trace checks](docs/measured.md#traces-first-checks) were on an earlier engine, and
+[the example comparison](docs/measured.md#traces-unchanged-examples) checked unchanged worlds without the setting.
+Trace state survives continuation; formats are listed with the files above. Traces on things or places, clothing
+or pose hiding them, and fading with time are not built: a wet sleeve stays wet until a deed dries it.
+
+##### Ways by deeds
+
+`waysOf` in `src/action.ts` and `wayDue` in `src/journal.ts` let a deed begin the journey of a `go`. Without ways,
+the world is told to leave doers here by the way out. Poses never name another place. With ways, `leads` names here or an
+allowed id, even when travel outlasts the deed. Only the doer goes; results say only what happens here before
+leaving. Unlisted parts, upstairs rooms, yards or steps towards doors stay here. The schema lists available
+ways and told refusals, full, fare, driver, reach or round, including standing vehicles and this vehicle's
+stop. The other-place line is ``Other places, which a deed reaches only through `leads`: ...``, replacing
+`Other places, which nobody reaches by a deed: ...`. The last sentence names here and any standing vehicle:
+``What comes of it? This place is `cafe`, and `leads` is `cafe` unless the deed is the way to another place or into a vehicle that stands here.``
+Inside, `This vehicle stands at ...` gives the stop's id. This avoids mistaking similar names for neighbours'
+ids. [The six wordings](docs/measured.md#ways-by-deeds) tested mistaken departures and missed ways; their
+limits stay with that entry.
+
+`worldInstructionsOf`, `worldTextOf` and `WORLD_INSTRUCTIONS` in `src/live.ts` give the exact texts with and
+without ways. Only the world's fourth instruction paragraph, first-field point, other-place line and last
+request sentence change; residents and figure requests do not. Result records and events keep the way as `goes`,
+another place id or null, whatever the answer's field is called. `result` in `src/answer.ts` drops the doer's
+pose for a named way; other entries work normally. At the doer's next free moment, the deed's end or an earlier
+interruption, the rules check and take that `go` without asking a model. Travel, notices, seats, drivers, fares
+and touch endings use ordinary `go` rules. A refusal leaves the deed as it was and takes the ordinary
+thirty-second wait and refusal sentence; either way the pending way is used up. Clock laws and vehicle arrivals
+precede it.
+Action records and events have `fromDeed`, the result's sequence number, and null `by`. Rebuilding from
+results preserves pauses before departure or during travel. Without ways, requests, records, events, stored
+rows and format stay unchanged.
+
+##### Clock laws
+
+`Law`, `LAWS` and `beginLaws` in `src/laws.ts` give a clock law its settings and checks, state, due record,
+turn line and request-size bound. Weather also supplies the world's line; sleep supplies how someone looks and
+updates debt on sleep and waking; hunger updates counts from eating and sleep. Core laws have no model or disk
+access.
+
+##### Sleep debt
+
+`sleep` in `src/sleep.ts` grows debt while awake, including travel, and reduces it twice as fast in sleep,
+never below zero, beginning at time since `dayStart`. The count is not told. Its four bodily steps are rested,
+awake a long while from half `tiredHours`, tired from that threshold, and hardly able to stay awake in the last
+quarter to `spentHours`. From tired on the owner is warned it will fall asleep where it is, and tiredness shows
+to others here. At the limit sleep replaces a turn, where the
+person is, for eight hours; it is an engine record, no model asked, witnessed as falling asleep.
+
+##### Hunger and thirst
+
+`hunger` in `src/hunger.ts` accounts only for the doer's accepted `eaten` postings, never words or a figure's
+answer. Everyone begins fed for 3 hours and not thirsty for 2. Both fall by a second per waking second, half per
+sleeping second, below zero when needed. A deed's calories count together: at least 100 first lifts a negative
+count to zero; each calorie then adds 36 seconds, up to 10 hours. Smaller meals add time without that lift.
+Thus an awake hour uses 100 calories, 600 holds 6 hours from zero or less, and 400 after waking hungry holds 4.
+Water with zero calories feeds nobody; each drink first lifts negative thirst to zero and adds 3 hours up to 6;
+a drink with calories feeds too. Effects begin at the deed's recorded moment and replay from the journal;
+this law writes no record of its own. [The hunger checks](docs/measured.md#hunger-and-thirst) explain why a fine
+body adds no line: a resident used `You are not hungry.` to refuse an agreed supper.
+
+Only its owner's turn receives the line after sleep debt. At zero to above minus 2 hours it says
+`You are getting hungry.`, from minus 2 to above minus 8 `You are hungry.`, at minus 8 or below
+`You are very hungry and feel weak.` Thirst at zero to above minus 6 says `You are thirsty.`, below that
+`You are very thirsty.` Both sentences share one line with one space; above zero there is no sentence or line.
+These are the only new model texts; world and figures are asked as before, and others never learn these counts.
+
+##### Weather
+
+`weather` in `src/weather.ts` says which change is due and what it does; `runLive` in `src/live.ts` and `applied`
+in `src/journal.ts` put it before actions, without a model request, and replay refuses a wrong or undue change.
+Awake people in open places receive its text and end their waits, those under a roof do so only with indoors
+text. Travellers and sleepers get nothing and are not told later. Turns give the local
+text; the world always gets weather and roof or sky, with instructions to mention weather only when a deed
+meets it. Nothing checks that instruction. Seeded weather is replayable and does not repeat a state consecutively.
+
+##### Folding memory
+
+`oldest`, `rewrite` and `idle` in `src/memory.ts` keep short memory as perceived lines with local times, own
+actions and notes, and delivered waiting calls. On waking, everything before sleep is folded; waking and calls
+start new lines. Sleep and waking alone since the last rewrite need no request. Before a turn over `shortWords`,
+the oldest lines fold until about half remains. Long memory is the character's own summary of its old memory
+and folded lines; omissions are forgotten and overlong text loses its end. `rewriteOf` in `src/live.ts` asks
+for about 85% of the limit, beginning with wants and changes, then lasting obligations, promises, sums, times,
+locations and knowledge of people, retaining the names and figures in the lines. Passing chores, small talk and
+trivial prices go last or are omitted, so a cut loses least. It asks for sentences, no numbered list, sums and
+times in figures, past tense without current location, and no deed result without one in the lines.
+
+##### Guarding a rewrite
+
+`readMemory` and `sameScript` in `src/memory.ts` guard a rewrite without judging its truth.
+It ends before the first `}`, trims spaces before it and marks a cut; nothing before it is unusable.
+[The ending check](docs/measured.md#memory-endings) saw continuations inside the string and noise.
+An unreadable rewrite gets one retry; after two the old memory stays but folded lines are lost, counted as `lost`.
+A readable first answer in another script is set aside and retried only when a sheet has at least 20 letters,
+at least four fifths in one script, and the cut answer has at least 10 letters with fewer than half in that script.
+It counts unusable, but a failed, cut or declined retry, or a stop before retry, saves the first; a readable second
+is kept unchecked, also after an unreadable first. The guard can cost one request and never a memory.
+Only letters count, and letters of any script count towards these sizes and shares; the scripts told apart are
+Latin, Cyrillic, Greek, Arabic, Hebrew, Devanagari, Thai, and Han/Hiragana/Katakana/Hangul together. A tie or
+unclear sheet disables it; names and a few foreign words can stay, while a language with two scripts follows the
+sheet. [This guard has stand-in checks](docs/measured.md#memory-script-guard), no model measurement.
+`requestLimit` in `src/live.ts` bounds requests by the world file, however long the story runs, using the text limits.
+
+##### The journal
+
+`Record`, `advance` and `replay` in `src/journal.ts` make the append-only records the world's only state.
+Actions or their refusal reasons, results, replies, arrivals, waking, sleep at the limit, weather and rewrites
+are records, each with its derived event. A drive records driver, vehicle, departure, destination and arrival,
+with one engine arrival record. Every journal prefix rebuilds a whole world through the same rules that play it.
+`LAWS` in `src/invariants.test.ts` gives each invariant in one sentence; `npm test` plays thirty characters for
+thousands of steps with answers of every kind, checking laws from the journal alone, naming law and record on failure.
+
+`npm run bench` uses an immediate stand-in in a synthetic town and prints step costs and request sizes;
+`node src/bench.ts 1000 100 50` means 1000 characters, 100 places and 50 calls each.
+
+#### What it lacks
+
+- There is no author above the characters; the world answers deeds and does nothing of its own accord.
+- Counts are checked, but whether a deed should move a thing is the model's reading. Words can say a jacket was
+  hung up while lists keep it on its owner. No check compares prose and moves; immutable facts do not adapt.
+- Earlier-deed lines are history, not current location. A carrier leaving or a figure moving a thing writes no
+  deed line; old prose can still name it. The lists are the truth, and the world is told so.
+- Speech never passes a door, however loud. Calling through it needs a deed, and an answer another deed.
+  Every neighbour hears the same `beyond`, the doer is not told who heard it, and hearing is the model's judgement.
+- Doors have no open, shut or bolted state. Description is all the world knows, every `go` passes, and sound does
+  not depend on doors. There is no shop, prices, manufacture or taking, giving and eating without the world.
+- Walking is straight at one pace for everyone, whatever terrain or tiredness. It cannot be interrupted,
+  perceives nothing and receives no later weather notices. Carried things go along regardless of size.
+  A resident names a thing in words, and the world must find its label.
+- A handed-over, lost or stopped watch still tells its original owner time; a removed place clock stays there.
+  Seconds are exact for all; an early-woken sleeper is not told by how much. Tiredness is one count, changes no
+  ability before its limit, and a traveller falls asleep only on its turn after arrival.
+- Figures have no private memory, hear no resident-to-resident speech, and share only local figure dialogue
+  history plus their facts. A crowd cannot answer. Only a deed or addressed figure speech asks the world;
+  claims in speech or notes are unchecked.
+- Nothing checks invented facts in a memory summary. The character cannot retrieve what it forgot from the
+  journal. Waiting calls have no count limit; repeated rewrites fold the oldest before the next turn if needed.
+- The journal cannot branch. A checkpoint fork needs a copy of its prefix. The project's checks ask stand-ins alone.
 
 #### What comes next for the live world
 
-1. What the things still lack: tags on food, a shop and prices, things made of other things, and residents who
-   take, give and eat without the world.
-2. A larger seaside world than `examples/seaside-cafe.json`: four residents, houses, a sports pool, a beach and cafés.
-3. An energy balance: hunger from the day's shortfall, weight and fitness from the same count over weeks.
-4. `examine` as an action the engine answers by a table, more detailed for a resident with a doctor's skill; skills
-   in the world file; injury and illness; a person's own reactions to kinds of food.
-5. Ordinary days that cost no model calls.
-6. After that: training, learning a skill in the story, a farm, ecology.
+1. What things still lack: food tags, a shop and prices, things made of other things, and residents who take,
+   give and eat without the world.
+2. A larger seaside world than `examples/seaside-cafe.json`: four residents, houses, a sports pool, beach and cafés.
+3. An energy balance: hunger from daily shortfall, weight and fitness over weeks.
+4. `examine` answered by an engine table, more detailed with a doctor's skill; skills in the world file, injury,
+   illness and a person's reactions to kinds of food.
+5. Ordinary days with no model calls.
+6. Then training, learning a skill, a farm and ecology.
 
 ### A judge of a live run
+
+`runEval` and `readQuestions` in `src/eval.ts` hold the judge and its questions; `readState` in `src/state.ts` reads its journal.
 
 ```sh
 sagents eval <dir> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
@@ -1039,6 +947,7 @@ nonempty texts, each cut at 150 words, then each list under its own name with a 
 Its hash, with the text of the environment it names when this checkout has it, is compared with the saved hash.
 A difference refuses nothing: the report says `world: "matches"` or `"unverified"`.
 
+`--calls` and `--window` accept positive safe whole numbers.
 The model name chooses the connection as in `live`. The questions file holds `{ "task": "what to look for",
 "kinds": { "id": "what this kind of finding is" } }`, with 1 to 12 kinds whose ids are lower-case letters,
 digits and `-`. [examples/eval-questions.json](examples/eval-questions.json) asks about lost or invented
@@ -1047,39 +956,16 @@ its instructions, then the run's head and the first 30 memory rewrites, or `Memo
 `You have <n> answers.` for the call cap, then `No record is in this message: ask for them with show.`
 It answers one strict schema with its notes, findings, `drop`, a required list of integers empty when nothing is
 taken back, and one tool.
-The instructions say that the world answers deeds and speaks for people whom no model plays, such as a waiter;
-going somewhere, waiting, sleeping, waking and speech between the played people are settled by the rules. They
-say that memory is folded when recent lines grow past a limit and when a person wakes from sleep with something
-lived through since the last rewrite; a waking with nothing new brings no rewrite. A person holds their first
-memory, or the latest rewrite, and the later perceived lines word for word. A failed rewrite leaves the old text
-and drops only the folded lines. A rewrite is asked to begin with what the person wants and what has changed in
-them, then to keep what will be needed later: what is owed and to whom, what was promised and by when, sums agreed,
-times set, where a thing was put and what the person knows about people, and to leave out passing chores and small
-talk. A loss of what was to be kept is a fault. A person knows what every turn tells them: the world's title and
-the names of its places, the world and each place as their `about` gives them, not their `facts`, which places
-are next door to which, where they are and how far the other places are, the names of the people whom models
-play, the means of remote contact, their own sheet, looks, pose and tiredness, the things they carry with what
-those hold and what that holds, the time, exact with a clock at hand and a guess without one, in some runs how
-much of the story is left, the weather as it
-reaches their place, and who is in the place with them: the others whom models play, with how they look, their
-pose and what they are seen to carry, the people of that place whom no model plays, with their names and looks,
-and the crowd around. They do not know what another carries out of sight, thinks or notes, the people whom no
-model plays in a place where they have not been, or what happened where they were not, unless they perceived it.
-How much of the story is left is said only in a run that is no pause: the `live` command plays every run that
-keeps a state file as a pause and says it to nobody, while `runLive()` given a journal and no `pause` says it at
-every turn, and the judge can read that journal too.
+`INSTRUCTIONS` in `src/eval.ts` gives the judge the live world's rules of perception, memory and time,
+as described [above](#what-a-model-is-sent). A lost obligation, promise, sum, time, location or knowledge that a
+rewrite was asked to keep is a fault. The judge can also read a library run with a journal but no `pause`, whose
+residents were told the horizon, unlike a kept CLI run.
 The two texts of a rewrite and the records it folded are compared before anything
 in it is called invented or lost; a field the instructions do not explain is no ground for a finding.
 The judge writes `notes`, `says` and `summary` in the task's language, whatever language the run is in and wherever
-its story is set. Each person is
-busy for as long as what they do lasts, and whoever is free first acts next. A deed and a wait end early when
-someone speaks, comes or leaves nearby or calls the person from elsewhere, when something is heard from next door
-and at every record of the weather that reaches their place, changed or not: the person is free then, or once
-what they are saying and what they are hearing is over. A sleep ends early only when the world says that a deed
-wakes the sleeper: then at the moment that deed was to end, even if the deed itself is cut short, or sooner if
-the sleep was already due to end sooner, by its own span or by an earlier deed that wakes. A walk never ends
-early. So a next record that comes before the seconds of a deed or a wait have passed is no fault. The
-judge is
+its story is set.
+`INSTRUCTIONS` in `src/eval.ts` explains when deeds, waits and sleep end early, so an action before its
+original span has passed is no fault. The judge is
 told to read the whole run in order
 with `show` unless the task says otherwise, to use `log` to find a place by, and not to hand in a finding already
 kept.
@@ -1135,31 +1021,26 @@ it. Where it matters, the lookup first tries an exact id, then an id or name wit
 continues where it stopped; `show` with `from` and `who` null continues after the last record it showed, or within an
 unfinished one.
 
-The schema lets `at` hold any number of integers. An empty list refuses the finding with reason `record`; only the
-first four numbers of a longer list are taken, then repeats are removed and the numbers sorted. Each finding
-has its whole quote compared before cutting; only the quote kept in findings and `unkept` is put into Unicode NFC
-and cut at 40 words. Code keeps it only when all the records exist and its whole quote is in the full text `show`
-gives for at least one of them, including the memory a rewrite replaced, now part of that rewrite's shown text.
-The record and quote are normalized with Unicode
-NFKC, lowercased, and compared as words separated by single spaces. A comma or point between digits
-and an apostrophe between letters stay in the word, with a typographic apostrophe folded to the plain one:
-`1,000`, `1.25` and `I'll` each stay one word. Every other sign separates words. Words are the stretches of letters
-and digits, with those internal signs kept, so a quote from text written without spaces between words has to run
-from one separating sign to the next. The quote must begin and end at a word boundary, an edge or a space in the
-folded text:
-`can` does not match `cannot`, nor `1` match `100`, `1,000` or `1.25`, nor `ll` match `I'll`.
-Case does not change the comparison. A quote with no letters or digits is refused. A repeated kind, set of records
-and cut quote is kept once by the same folding rule. At most 50 findings are kept, each numbered, and the next
-tool answer says which were kept and why the others were refused, except that a `report` ending the run gets no
-next answer. `drop` is read before `found`: a kept finding of each given number leaves `findings` and enters
-`dropped` with the request's number as `call`. Its receipt is `Finding #<n> taken back.`; another number gives
-`There is no kept finding #<n>.`. These receipts come before the findings' receipts. A taken-back finding leaves
-the list that stays in the judge's view, which is made anew then and whenever older answers leave it, and no
-longer counts as a duplicate. A new finding takes the next number no
-finding has had, and the limit of 50 counts only those kept at that moment. The instructions put doubts and
-checks that found nothing wrong in notes. What the judge concludes from a quote is not checked. Notes replace
-the old notes when not empty and are cut at 150 words; a finding's explanation at 40, and the summary at 300.
-Words are counted as in live, with a word at most ten characters for limits.
+`normalized` and `contains` in `src/eval.ts` compare quotes by whole words; `runEval` in `src/eval.ts` keeps
+and takes back findings. The schema allows any number of integers in `at`; an empty list refuses the finding
+with `record`. Only the first four numbers count, without repeats, sorted. All must name existing records; the
+whole quote must occur in at least one's full `show` text, including a rewrite's replaced memory. Only after
+comparison is the saved quote, in findings and `unkept`, normalized to Unicode NFC and cut at 40 words.
+Comparison uses Unicode NFKC and ignores case. Commas and points between digits and apostrophes between
+letters stay within words, with typographic apostrophes folded to plain ones: `1,000`, `1.25` and `I'll` are
+one word each. Other signs separate stretches of letters and digits, so text without spaces must be quoted
+from one separating sign to the next. Quotes must span whole words: `can` cannot match `cannot`, `1` cannot
+match `100`, `1,000` or `1.25`, nor `ll` match `I'll`. Quotes without letters or digits are refused. The same
+kind, record set and cut quote, under the same folding, is kept once. At most 50 findings stay kept; the next
+tool answer gives numbers and refusal reasons, unless `report` ends the run.
+
+`drop` is read before `found`: a kept finding of each given number leaves `findings` and enters `dropped` with
+the request's number as `call`. Its receipts come first: `Finding #<n> taken back.` or
+`There is no kept finding #<n>.`. Taken-back findings leave the judge's view and cease counting as duplicates.
+The view is rebuilt then and when older answers leave it. Finding numbers are never reused; the 50 limit
+counts only those currently kept. Instructions put doubts and checks finding nothing wrong in notes;
+conclusions from quotes are unchecked. Nonempty notes replace old notes, cut at 150 words; explanations at 40,
+summaries at 300. Words count as in live, at most ten characters per word for limits.
 
 Each assistant message holds a usable answer's own text in full. Only an unusable answer is cut at 60 words,
 or replaced by `{}` when there is no text. When the judge's answers and the tool answers together pass
@@ -1202,42 +1083,14 @@ zero for a report that ends the work since none is sent, milliseconds and
 input, cached, output and reasoning tokens, null when not reported, and a failure's code when it failed. No
 request or answer text is in usage. A failed run exits with code 1, as in live.
 
-There is no branch to try a move on, and only one run is judged at a time. Earlier wordings of the instructions
-went through two small measurements on a real model, GPT-6 Luna at low effort, 11 and 40 requests over two synthetic
-journals with planted faults. In the second no answer was unusable, and three of six runs ended before the records
-had been read: one reported at once, one read only the index, and one stopped at 61 of 88 records, which is what
-the question about an early report is for; the checks use stand-ins. A third measurement, 52 requests over
-twelve readings, read every record in each. A first reading of the journals of seven played runs of invented
-scenes, twice each by a small model at medium effort, led to showing what a rewrite folded and the memory it
-replaced, and to `drop`.
-A fourth measurement, 63 requests after the eighth pass, saw findings about memory in the six readings of the
-three journals with rewrites fall from about 18 to 3, all three still false.
-The planted loss of a time set was found in none of three readings where it had been found in all three.
-Of the planted faults at medium effort, 16 of 33 were found where 24 of 33 had been.
-The sentences on what a rewrite is asked to keep and on what a person does not know come from this measurement.
-A fifth, 77 requests after the ninth pass on the same model at medium effort, found 27 of 55 planted faults and
-the planted loss of a time set in 2 of 5 readings, and kept 5 findings about memory in the six readings of the
-three journals with rewrites, all five false: those sentences changed little. The eighth pass on a larger model,
-gpt-6.1-sol at high effort, 36 requests over five readings, found 27 of 28 planted faults and handed in nothing
-but faults those two journals are known to have: the small model, more than the wording, is what holds the judge
-back. After the fifth, the sentence on what a person knows was narrowed, and the one on a rewrite names what it
-is asked to begin with: a sixth measurement, 28 requests on the small model, found 17 of 33 planted faults, the
-same half. The larger model at high effort then read with the tenth pass the journals of five played runs and the
-two with planted faults, 56 requests, one of which failed and left a reading without its summary. Of the 16
-findings it handed in on the played runs, 11 held when checked by hand against the records, one of them about
-memory, and 5 did not. Three of the five called it a fault that a person acted before the seconds of their deed
-had passed: the instructions said that speech nearby ends a wait early and nothing of a deed, which ends early in
-the same way. The other two came of a record this judge does not know, written by a candidate that makes places
-on demand. In the two journals with planted faults it found 10 of 11, the two faults one of them is known to have
-besides, and one more that held when checked. The sentence on being busy now says when a deed, a wait and a
-sleep end early, and the sentence on what a person knows was made longer twice more by reviews, which found the
-world's title, the neighbours of the places and the people whom no model plays missing from it: in these forms
-neither has been measured on any model yet. The review of the fifteenth pass, which read only what that pass
-changed, was the first to ask for no change. A checked quote
+There is no branch to try a move on, and only one run is judged at a time. A checked quote
 is evidence that its folded words occur together as whole words in a named record's printed text or the memory
 a named rewrite replaced. It does not establish that the finding is right.
+The [judge measurements](docs/measured.md#judge-measurements) compare wordings and models.
 
 ### Numbers of kept runs
+
+`numbersOf`, `numbersTable` and `numbersJSON` in `src/numbers.ts` hold the counts and the two outputs.
 
 ```sh
 sagents numbers <dir>... [--json]
@@ -1284,6 +1137,8 @@ standing still.
 
 ### The lab
 
+`startLab` in `lab/server.ts` serves the files read by `openLab` in `lab/data.ts`.
+
 ```sh
 sagents lab [<dir>...] [--port <n>] [--lang <en|ru>] [--no-open]
 export SAGENTS_LAB=~/runs:~/more-runs    # the folders `sagents lab` reads when it is given none
@@ -1294,7 +1149,7 @@ export SAGENTS_LAB_LANG=ru               # the page's language when `--lang` is 
 names, separated as in `PATH`, when it is given none, and under the current directory when that is not set either.
 It asks no model and writes nothing into those directories. It prints its address, which is on this computer only,
 and opens it in the default browser unless `--no-open` is given; `--port` asks for a port, and without it the system
-picks one. Ctrl+C stops it. A computer with no browser to open is no failure: the address is on the screen.
+picks one. It is a whole number from 0 to 65535; 0 also lets the system choose. Ctrl+C stops it. A computer with no browser to open is no failure: the address is on the screen.
 
 A directory is looked into six levels deep. Names that begin with a dot and `node_modules` are passed over, a link is
 followed only where it stays inside the directory given, and a `*.sqlite` is never opened: only its name is looked at.
@@ -1319,40 +1174,38 @@ two experiments side by side, the story's chapters and the transcript; `?` lists
 event that the page does not know is shown as a plain line, so a journal of a newer engine still reads. The page is
 in English or in Russian: in the language that `--lang` names, or `SAGENTS_LAB_LANG` when the flag is not given, and
 with neither in Russian for a browser set to Russian and in English for any other. Any other value is refused. The
-language goes to the page in the address that the command prints and opens, as `?lang=ru`. In its review the page was
-opened in Chrome over synthetic runs, in English: the list with its groups, the folded rehearsals, the narrowing, the
-feed, the transcript and the numbers. The Russian page was opened in the review of the command too, over synthetic
-runs: the list, the feed and the numbers.
+language goes to the page in the address that the command prints and opens, as `?lang=ru`.
+[The browser checks](docs/measured.md#lab-browser-checks) covered both languages.
 
-An experiment that has a world file also has a map (the key `P`). It draws every place of the file with its name: a
-room as a box, a place under the open sky with a rounded dashed edge, the people of a place whom nobody plays named
-under it, and a thick line between two places that are `nextDoor`. Places that are near each other form a group
-that is drawn to a scale of its own, written under it, and groups stand apart with the time of the way written on
-the link between them, which is not to scale: the places are joined into one tree by the shortest ways, and a way of
-that tree that takes five minutes or more, and three times the middle one of the other ways of its part or more,
-parts two groups. Inside a group a place with `at` stands where its metres put it and one with minutes alone where
-its minutes do, as well as a plane allows; places that name one point, and boxes that would lie on each other, are
-set beside each other, so a distance of a few steps is not to be measured on the drawing. Everyone is a mark of its
-own colour in the place where it is at the moment that the control above the map names, a ring when asleep, and on
-the way a mark on a dashed line between the two places with where it goes and when it is due. Each direction has
-its own side of the line; beyond six travellers in one direction the rest share one mark with their count. When
-only a continuation is available, someone with no event yet is listed as not yet known and has no mark, and so is
-someone whose first event finds it elsewhere than where the world file starts it, until that event. The moment
-is `t` of the address, as in the feed, `J` and `K` step to the next and the previous moment at which someone moved, fell
-asleep or woke, and with the newest followed it is the newest. Pointing at a place shows its description, who is
-there and the time to every other place; a click puts it into the feed's filter by place. Beside a second
-experiment the map is of the left one alone and says so. The same world file gives the same drawing at every load.
-For a world with vehicles, the feed names drives, pull-ups and door crossings, and marks fare postings as fares.
-The map keeps a rider in the vehicle and draws its mark at the standing stop or along the drive. Bus positions
-come from their timetable even when no arrival was recorded: times are hours and minutes, and each leg takes the
-engine's walk time in that direction divided by `faster`, rounded up to a whole second and at least thirty seconds.
-The bus stands for `stands` seconds at each stop after the first, and waits at the first until its next leaving.
-The list beside the map names the vehicle too;
-empty vehicles have no mark of their own.
-The map was checked without a browser: its positions as tables and its drawings as SVG files made by the layout
-code that the page uses, over the three example worlds and a synthetic one played by a stand-in for the model, and
-the page's script was run through over a stand-in for the document.
+`layoutOf`, `groupsOf` and `layGroup` in `lab/map.js` lay out the places; `sceneOf` and `peopleOf` in
+`lab/map.js` draw them, and `whereAt` and `ridersAt` in `lab/map.js` give positions. An experiment with a
+world file has a map (`P`). Each place is named, a room as a box, open sky with a rounded dashed edge,
+unplayed people named below; a thick line joins `nextDoor` places. Nearby places form groups, each with its
+own scale below. Links between groups give travel time and are not to scale. The shortest ways join places
+into a tree; a way parts groups at five minutes or more and at least three times the middle of its part's
+other ways. Within a group a place with `at` stands by its metres and one with minutes alone by its minutes, as
+well as a plane allows. Coincident places and
+overlapping boxes spread apart, so a few steps cannot be measured on the drawing.
 
+Each person has a coloured mark at the control's moment, a ring asleep, or a mark on a dashed journey line
+naming destination and arrival time. Directions have separate sides; beyond six travellers per direction, the
+rest share a counted mark. When only a continuation is available, someone with no event yet is listed as not
+yet known and has no mark, and so is someone whose first event finds it elsewhere than where the world file
+starts it, until that event. The moment is the address's `t`, as in the feed; `J` and `K` step forward and
+back through moves, falling asleep and waking. Following newest uses the newest moment. Pointing at a place
+shows its description, occupants and times to every other place; clicking filters the feed by place. With two
+experiments, the map says it shows only the left one. The same world file gives the same drawing at every
+load.
+
+With vehicles, the feed names drives, pull-ups and door crossings, marking fare postings as fares. Riders stay
+in their vehicle, drawn at its stop or along its drive; the list names the vehicle too, and empty vehicles
+have no mark. Buses follow timetables without arrival records. Times are hours and minutes; legs take
+directional walk time divided by `faster`, rounded up to seconds, at least thirty seconds. Stops after the
+first last `stands` seconds; at the first the bus waits for its next leaving.
+[The map checks](docs/measured.md#lab-map-checks) used the page's layout code.
+
+`openInside` and `mapOf` in `lab/data.ts` keep paths within the roots and restrict world fields;
+`openInBrowser` in `lab/open.ts` keeps the address out of process arguments.
 What the lab may do with the files, and `lab/lab.test.ts` holds it to that:
 
 - It listens on `127.0.0.1` alone and has no option for another address. Its address holds a token made at start,
@@ -1381,22 +1234,22 @@ which the server's reading shares with the page.
 
 ## The model connection
 
-There are two, and the name of the model chooses between them (`src/model.ts`). Neither tries a request a second
+There are two; `modelFor` in `src/model.ts` chooses by the model name. Neither tries a request a second
 time: a failure comes back as a code, and the caller decides.
 
 ### A server of your own
 
 A model written as `api:<id>` goes to any server that speaks the OpenAI chat completions protocol
-(`src/compatible.ts`): vLLM or llama.cpp on a card you rent, or OpenRouter. The settings come from the environment.
+through `createCompatible` in `src/compatible.ts`: vLLM or llama.cpp on a card you rent, or OpenRouter. The settings come from the environment.
 
 | Variable | Meaning |
 | --- | --- |
 | `SAGENTS_API_URL` | The versioned root, such as `http://127.0.0.1:8000/v1` or `https://openrouter.ai/api/v1`. Required. |
-| `SAGENTS_API_KEY` | The key, when the server asks for one. |
-| `SAGENTS_API_MAX_TOKENS` | The output limit of one call, 2048 by default. |
+| `SAGENTS_API_KEY` | The key, when the server asks for one; nonempty keys must be printable ASCII with no spaces. |
+| `SAGENTS_API_MAX_TOKENS` | A positive safe whole number, the output limit of one call, 2048 by default. |
 | `SAGENTS_API_EXTRA` | One JSON object of further body fields, such as `{"reasoning":{"enabled":false}}`, which keeps a model's reasoning off on OpenRouter. |
-| `SAGENTS_API_CACHE_FIELD` | The name of the body field that a request's `cache` name is sent under, such as `session_id` or `prompt_cache_key`. Not set, the name is not sent. |
-| `SAGENTS_API_STREAM` | `1` asks for the answer as a stream, for a server that gives no other. Not set, the answer is one JSON body. Any other value is refused. |
+| `SAGENTS_API_CACHE_FIELD` | The name of the body field that a request's `cache` name is sent under, such as `session_id` or `prompt_cache_key`. It is 1 to 40 lower-case letters, digits and `_`, starting with a letter. Not set, the name is not sent. |
+| `SAGENTS_API_STREAM` | `1` asks for the answer as a stream, for a server that gives no other. Empty or not set gives one JSON body; any other nonempty value is refused. |
 
 ```sh
 export SAGENTS_API_URL=https://openrouter.ai/api/v1 SAGENTS_API_EXTRA='{"reasoning":{"enabled":false}}'
@@ -1414,7 +1267,8 @@ What sagents sends and to whom:
   `stream_options` or `n`: a setting that names one is refused.
 - With `SAGENTS_API_STREAM=1` the body also holds `"stream": true` and `"stream_options": {"include_usage": true}`,
   and the request asks for `text/event-stream`. The text is the `delta.content` of the chunks, and reasoning in a
-  delta is never read. With nothing held, a `data:` line that is JSON is read at once; otherwise it is held and
+  delta is never read. With nothing held, a `data:` line that is JSON is read at once and an empty one counts for
+  nothing; any other is held and
   joined with line feeds to the next data lines of that event. The held event is read once, at its blank line,
   which may end in a carriage return; comments and other fields are skipped and end nothing. A held event that
   is not JSON at its blank line, or a stream that ends with an event held, is `invalid_stream`. Only `data: [DONE]`
@@ -1435,16 +1289,9 @@ What sagents sends and to whom:
   digits, space, `.`, `/`, `-` and `_`; any other string, and any name after the sixteenth of a model in one run,
   is counted as `other`. A server that sends no such field changes nothing. The journal and the state file do not
   hold it, and an answer that failed is counted under no endpoint.
-- A router that is told nothing may spread the requests of one run over its endpoints, and then little of a request
-  is read from a cache. In the check of release 0.1.0, on OpenRouter with Gemma 4 31B, two runs of 12 requests with
-  nothing set but the address and the key were answered by three and by four endpoints, and 7 and 15 percent of their
-  input tokens were read from a cache. Three runs of 36 requests whose `SAGENTS_API_EXTRA` named a session and the one
-  endpoint that may answer, `{"reasoning":{"enabled":false},"session_id":"<a name of the run>","provider":{"quantizations":["fp4"],"order":["<endpoint>"],"allow_fallbacks":false}}`,
-  were each answered by that endpoint alone and read 71 to 75 percent, 64 to 71 in their first 12 requests. For the
-  café, the one world played both ways, that is 71 percent of 24,247 input tokens against 15 percent of 24,134. These
-  are OpenRouter's own fields, which of them made the difference was not taken apart, and nothing else was compared.
-- The address is `https`, or plain `http` to this computer only (`localhost`, `127.0.0.1`, `::1`), with a key or
-  without one: neither the key nor the text travels unencrypted. Any other address is refused before a request is
+- [Naming one router endpoint can help its cache](docs/measured.md#router-cache).
+- The address is `https`, or plain `http` to this computer only (`localhost`, `127.0.0.1`, `::1`, or another address in `127.*.*.*`), with a key or
+  without one: neither the key nor the text travels unencrypted. Credentials in the URL, a query or a fragment are refused too, before a request is
   made. Reach a rented card through an SSH tunnel to a local port or over `https`.
 - sagents writes no log of requests or answers. What the server keeps is the server's own matter: a hosted service may
   store requests, so real stories go only to a model you run yourself.
@@ -1456,11 +1303,13 @@ What sagents sends and to whom:
 
 ### ChatGPT plan
 
+`createChatgpt` and `signIn` in `src/chatgpt.ts` hold this connection and its sign-in.
+
 sagents uses OpenAI's [Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source) for
 open-source and locally run tools. At the first sign-in it registers itself as a client of your account. Its requests
-go to the public Responses API and count against your ChatGPT plan, so there is no API key. OpenAI offers this to
-eligible Plus and Pro accounts. In [ChatGPT's settings](https://chatgpt.com/settings/usage) you can limit the share of
-the plan that sagents may use, or disconnect it.
+go to the public Responses API and count against your ChatGPT plan, so there is no API key. The earlier README reports eligibility for Plus and Pro accounts, and says that
+[ChatGPT's settings](https://chatgpt.com/settings/usage) let you limit the share of the plan sagents may use or
+disconnect it. Those service claims are unconfirmed by this checkout.
 
 What sagents keeps and what it sends:
 
@@ -1474,26 +1323,26 @@ What sagents keeps and what it sends:
   Text counts toward the limit of 100,000 characters as it arrives: a draft that grows past it before the
   service marks it as interim ends the request as `output_limit`. This limit ends a runaway answer early.
 - A request that has a `cache` name carries it three times: as `prompt_cache_key` in the body and as the headers
-  `session-id` and `x-client-request-id`. The plan's route reads far more of a request from its cache with them:
-  8 or 9 requests of 20 against 1 to 3 without. A request with no name has none of the three.
+  `session-id` and `x-client-request-id`. [The cache check](docs/measured.md#plan-cache) compared requests with and without these names. A request with no name has none of the three.
 - Every request has `store: false`. sagents writes no log of requests or answers.
 - A failure is a code, with the HTTP status and OpenAI's own error code and field name when there were any. sagents
   never prints OpenAI's error text, which can quote the request.
 - When the plan's limit, or the share of it given to sagents, is used up, sagents stops with `budget_exceeded` and tries
   nothing else.
 - Several sagents processes may run at once. They take turns to renew the tokens through a lock next to the account
-  file, because OpenAI replaces the renewing token at every use. An exclusive SQLite transaction in
+  file, because the connection assumes OpenAI replaces the renewing token at every use. An exclusive SQLite transaction in
   `chatgpt.json.renew.sqlite`, made with the account file's permissions plus the owner's write bit and never removed,
   holds the lock through renewal and saving. A process that dies gives it up; a stopped process keeps it, and waiters
-  time out after 90 seconds. Version 0.1.0 and this version do not shut each other out, so do not use them on one
-  account at the same moment.
+  time out after 90 seconds. The earlier README warns that version 0.1.0 and this version do not shut each other out, so do not use them on one
+  account at the same moment; the old lock's behaviour is unconfirmed here.
 
 ## Development
 
 ```sh
 npm test                        # no install and no network
 npm install && npm run check    # the type check
-npm run size                    # how large the core is, in tokens
+npm run size                    # token counts and the core's comment share
+npm run pointers                # check the README and docs after a rename
 ```
 
 `npm run size` counts tokens (`o200k_base`) of three things: the core of the live mode without model and disk
@@ -1505,10 +1354,15 @@ the number is printed and nothing else; from there to 70,000 a
 note says that the core is nearing its size; from there to 84,000, six fifths of the mark, a warning says that it is over, and that a change
 which adds to the core says what it takes out or why the size should rise; above 84,000 a strong warning says that
 the core no longer reads whole and should be split or cut before more is added. The script ends well in every band:
-it forbids nothing. Tests are counted against nothing. The list of core files and the three bounds are at the top of `scripts/size.py`. The count needs the Python package `tiktoken`,
-which is no dependency of this project: name a Python that has it in `SAGENTS_SIZE_PYTHON`. Without it the script
-says how to get it, counts nothing and ends well. It
-is not part of `npm test`. A change that grows the core says by how many tokens.
+it forbids nothing. One more line gives the comment tokens, total tokens and whole-percent comment share of the
+core and `src/live.ts`, with a bound of 10 percent for the core. A comment is a whole line whose first characters
+after indentation are `//`; its token count is the file's count less the count without those lines, summed across
+the core's files. Above the comment bound a note asks for a look at comments that retell the code, while keeping
+reasons; it forbids nothing. Tests are counted against nothing. The list of core files, the three size bounds and
+the comment bound are at the top of `scripts/size.py`. The count needs the Python package `tiktoken`,
+which is no dependency of this project: name a Python that has it in `SAGENTS_SIZE_PYTHON`.
+Without `tiktoken` the script says how to get it, counts nothing and ends well. `SAGENTS_SIZE_AGAIN` is its
+internal guard against entering that Python twice, not a user setting. It is not part of `npm test`. A change that grows the core says by how many tokens.
 
 ## License
 

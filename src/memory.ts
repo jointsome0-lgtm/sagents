@@ -1,18 +1,12 @@
-// What one character remembers, with no model and no disk in it. The long-term memory is one text the character wrote
-// itself; the short-term memory is what it perceived and did since, as lines in the order they came. Both have a
-// size in words that the world sets, and that is what keeps a request to the model from growing with the story.
 import { cut, sizeOf } from './world.ts';
 
-// `seq` is the journal record the line came from. An `idle` line says only that the character fell asleep or woke.
 export type Line = { seq: number; text: string; size: number; idle?: true };
-// `folded` is the record up to which the lines were folded into `long`, or -1; `waiting` holds the calls made to the
-// character while it was on the way or asleep, which become lines when it arrives or wakes.
+// A folded value of -1 means no record has been folded yet.
 export type Mind = { long: string; lines: Line[]; size: number; folded: number; waiting: Line[] };
 
 export const blank = (): Mind => ({ long: '', lines: [], size: 0, folded: -1, waiting: [] });
 export const lineOf = (seq: number, text: string): Line => ({ seq, text, size: sizeOf(text) });
-// Whether the character lived through nothing since its last rewrite but falling asleep and waking: then a waking has
-// nothing to fold, and asks no model.
+// Sleep and waking alone need no model call to fold memory.
 export const idle = (mind: Mind) => mind.lines.every(line => line.idle);
 
 export function remember(mind: Mind, ...lines: Line[]): void {
@@ -20,8 +14,7 @@ export function remember(mind: Mind, ...lines: Line[]): void {
   mind.size += lines.reduce((sum, line) => sum + line.size, 0);
 }
 
-// The lines one fold takes when the short-term memory is over `most` words: the oldest, record by record, until half
-// of `most` is left or the fold itself holds `most`. At least one record's lines, so that every fold moves on.
+// Take at least one record so every fold makes progress.
 export function oldest(mind: Mind, most: number): Line[] {
   let count = 0, taken = 0;
   while (count < mind.lines.length) {
@@ -34,8 +27,7 @@ export function oldest(mind: Mind, most: number): Line[] {
   return mind.lines.slice(0, count);
 }
 
-// A rewrite of the long-term memory that folded the lines up to the record `upTo`. Those lines are gone whatever
-// came of it: a null `text` is a rewrite that was lost, which leaves the old text.
+// A null text means the rewrite was lost; dropping its lines still bounds the next request.
 export function rewrite(mind: Mind, upTo: number, text: string | null): void {
   const kept = mind.lines.filter(line => line.seq > upTo);
   Object.assign(mind, { long: text ?? mind.long, lines: kept, size: kept.reduce((sum, line) => sum + line.size, 0), folded: upTo });
@@ -48,8 +40,6 @@ const SCRIPTS = [
   /[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}]/u,
 ];
 
-// A sheet of at least 20 letters with four fifths in its most common script needs at least half the rewrite's
-// letters in it too. Only letters count; a tie, no clear script or a rewrite under 10 letters leaves it alone.
 export function sameScript(sheet: string, text: string): boolean {
   const letters = sheet.match(/\p{L}/gu) ?? [];
   if (letters.length < 20) return true;
@@ -62,8 +52,7 @@ export function sameScript(sheet: string, text: string): boolean {
   return written.filter(letter => script.test(letter)).length * 2 >= written.length;
 }
 
-// A character's answer to the request to rewrite its memory, before its first `}` and within `limit` words, or null
-// when it cannot be used. An empty text cannot: forgetting everything is not one of the things a rewrite may do.
+// Reject an empty rewrite so it cannot erase the whole memory.
 export function readMemory(answer: string, limit: number): { text: string; cut: boolean } | null {
   let value: unknown;
   try { value = JSON.parse(answer); } catch (error) {

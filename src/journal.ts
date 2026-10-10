@@ -1,8 +1,4 @@
-// The journal of a live world: an append-only sequence of records, and the only state there is. A record is what was
-// decided outside the rules: what a character answered, that an arrival or a waking came due, what a character wrote
-// as its memory. `advance` is the one way a record changes the world, for a run and for a replay alike, and it gives
-// the record's event. So the same records always give the same world, and any beginning of a journal is a whole world
-// at that moment. No model and no disk here.
+// Run and replay must both use advance() so the same records give the same world.
 import { isDeepStrictEqual } from 'node:util';
 
 import { blank, idle, lineOf, remember, rewrite } from './memory.ts';
@@ -24,18 +20,9 @@ import type { Answer, Traces } from './answer.ts';
 import type { Move, Things } from './things.ts';
 import type { Event, Person, Place, World } from './world.ts';
 
-// The sentences about a journal that the rules cannot have written; they are this file's own and may be shown.
+// These sentences are ours, so cli.ts may show them.
 export class JournalError extends Error {}
 
-// `act`: the action as it was read from the answer, or the reason why the answer could not be used, with that turn's
-// word limit. `memory`: the new long-term text, or null for a rewrite that was lost, and the record up to which the
-// short-term lines were folded into it. `result`: the world's answer to the `do` just before it, of the same `who` and
-// `at`: what came of the deed, or null, the sleepers it wakes, what it moved by label and where to, the states and
-// the poses it changed, what it makes a body feel, each line with its owner, what of it is heard next door, whether the deed was a search of its
-// place, the labels of the hidden things it went straight to, in a world with `touch` the touches it began, changed or ended, and in a world with `marks` its entries about the lasting feelings of bodies, `lingers`, and in a world that keeps traces what it leaves on people and the labels of the traces it takes off. `reply`: what a figure answers to the `say` addressed to it just before, of the same `who` and `at`:
-// its words, or null, and what changed hands with them. Neither is ever an answer that the rules of things refuse.
-// A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
-// no answer is behind it.
 export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal; fromDeed?: number; place?: string; drive?: { vehicle: string; from: string; to: string; at: number } }
   | { kind: 'park'; who: string; at: number }
   | { kind: 'arrive' | 'wake'; who: string; at: number }
@@ -43,29 +30,17 @@ export type Record = { kind: 'act'; who: string; at: number; limit: number; acti
   | { kind: 'reply'; who: string; at: number; figure: string; text: string | null; moves: Move[] }
   | ({ kind: 'result'; who: string; at: number } & Answer)
   | LawRecord;
-// `by` is the name of the model whose answer the record came of, and null for a record no answer is behind. The rules
-// never read it: the same records give the same world whoever answered.
+// Replay must not depend on which model answered.
 export type Entry = { seq: number; record: Record; event: Event; by: string | null };
-// Everything a journal amounts to: where everyone is and what each one remembers. `seq` is the next record's number.
-// `deed` is a `do`, or a `say` to a figure, that the world has not answered yet: its answer is the only record that
-// can come next. `results` holds, for each place, the latest of what came of the deeds done there, in the world's
-// words and in what the rules moved, set and found, which the world is shown when it answers the next, and `said` the latest of what was said to the figures of the place and answered.
-// `things` is what each place and each person holds now, with how long each person has searched each place, and `laws`
-// holds the parts of the state that the laws of `laws.ts` keep. `touches` are the touches that hold now, of every place, in the
-// order they began: the two of a touch are always in one place, since a touch ends when either of them leaves it.
-// `marks` are the lasting feelings of everyone's bodies, in the order they began, as they stood at the latest result
-// of a world with `marks`: what the clock has done to them since is not kept and is read with `marksAt` (`marks.ts`).
-// `traces` is what is on each person's body or clothes for the time being, or null in a world that keeps none.
-// `ways`, only in a world with that setting, holds each doer's pending destination and the result record that named it.
+// live.ts must answer deed before appending another record.
+// Use marksAt() in marks.ts for expiry since the last result.
 export type State = { places: Place[]; vehicleLines?: Map<string, Map<string, string>>; people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
   said: Map<string, Line[]>; things: Things; laws: Parts; touches: Touch[]; marks: Mark[]; traces: Traces | null; ways?: Map<string, { place: string; seq: number }>; buses?: { at: number; passed: string[]; waiting: Set<string>; doors: Map<string, { place: string; at: number }> } };
-// How many words of earlier results a place keeps. The newest one stays whatever its size.
 export const RESULT_WORDS = 400;
-// How many words of earlier speeches to its figures and their answers a place keeps, the newest whatever its size.
 export const SAID_WORDS = 300;
-// Where a journal is kept. `append` is one step: its entries are written together or not at all.
+// state.ts must append a step's entries together or not at all.
 export type Store = { entries(): Iterable<Entry>; append(entries: Entry[]): void };
-// The sentences about a place where a journal is kept that cannot be used, a state file for one; they may be shown.
+// These sentences are ours, so cli.ts may show them.
 export class StateError extends Error {}
 
 export const memoryStore = (): Store & { all: Entry[] } => {
@@ -73,9 +48,8 @@ export const memoryStore = (): Store & { all: Entry[] } => {
   return { all, entries: () => all, append: entries => { all.push(...entries); } };
 };
 
-// The fixed sentences a character's own lines may hold.
 export const UNUSABLE = `Your answer could not be used and counted as a wait of ${LOST_SECONDS} seconds.`;
-// What follows it, for each reason. The model that plays the character reads it, so it says what to do instead.
+// The resident model reads this, so give it a usable alternative.
 const INSTEAD = {
   json: 'Answer with one JSON object and nothing else, with one of the listed actions.',
   action: '`action` must be one of the listed actions.',
@@ -93,24 +67,18 @@ const INSTEAD = {
   time: `A \`do\` or a \`wait\` lasts 1 to ${MAX_SECONDS} seconds and a \`sleep\` 1 to ${MAX_SLEEP}, given as \`seconds\` or as \`until\`, a time of day like 06:30.`,
 };
 const NO_REMOTE = 'There is no means of remote contact here: to reach someone, go where they are.';
-// A turn that the service declined to write has no sentence of its own: its character reads what one reads whose
-// answer was no JSON object, and only the record says which of the two it was.
 export const refused = (world: World, reason: Refusal, place?: string) => `${UNUSABLE} ${reason === 'fare' ? `You need ${world.places.find(item => item.id === place)!.vehicle!.fare!.n} ${world.places.find(item => item.id === place)!.vehicle!.fare!.name} for the fare.`
   : reason === 'to' && world.remote === null ? NO_REMOTE : INSTEAD[reason === 'declined' ? 'json' : reason]}`;
 export const CUT = 'Your speech was longer than the limit: the others heard only its first words.';
 const NOTHING = 'Nothing came of it that could be noticed.';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
-// What an answer did to things, as everyone who perceived it is told: from the postings the rules made, never from
-// the answer's words. No label is in it, and a thing that stayed on one person or in one thing of the place is not.
 const told = (event: Event, doer: string) => [
   ...(event.moved ?? []).filter(posting => posting.out !== posting.into).map(({ name, n, to, out, into }) => `${name}${n === null ? '' : ` ×${n}`} ${
     to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went from ${out} to ${into}`}.`),
   ...(event.set ?? []).map(({ name, state }) => `${name} is now ${state}.`),
   ...(event.found ?? []).map(({ name, spot }) => `${name} was found: ${spot}.`)].join(' ');
-// The same for the world, in the line a place keeps: every posting, each thing under the label it has now, and where
-// it went as the answer's `to` said it and as a request writes that holder, a thing by its label, a person or the
-// place by its id. The other wording names the person and not the pocket, and a model that reads it answers so.
+// The resident wording names the person rather than the pocket, which leads the model to answer that way.
 const listed = (world: World, things: Things, event: Event, doer: string) => {
   const within = [...things.places.get(event.place)!, ...[...things.people.values()].flat()];
   const holder = (id: string) => { const one = [...world.characters, ...world.places].find(item => item.id === id); return one ? `${one.name} (${id})` : `${id} ${all(within).find(thing => thing.label === id)?.name ?? ''}`.trim(); };
@@ -121,13 +89,9 @@ const listed = (world: World, things: Things, event: Event, doer: string) => {
   ...(event.traced ?? []).map(({ of, label, text }) => `${holder(of)} now has the trace ${label} ${text}.`),
   ...(event.wiped ?? []).map(({ of, label, text }) => `${holder(of)} no longer has the trace ${label} ${text}.`)].join(' ');
 };
-// A speech as it opens when it is addressed to a figure of the place.
 const toFigure = (world: World, event: Event) => event.kind === 'say' && event.to !== null ? ` to ${named(namesOf(world), event.to)}` : '';
-// What the speaker's body did meanwhile, as the line of a speech holds it before the words.
 const gestured = (event: Event) => event.gesture === undefined ? '' : ` (${event.gesture})`;
 
-// An event as one who perceived it remembers it, under the time as that one could tell it, `when`: one line, and
-// before the line of a deed done with words the line of those words, as of a speech. A note is never part of it.
 function perceived(world: World, event: Event, viewer: string, when: string): string[] {
   if (event.kind === 'drive') return [`${when} ${named(world.places, event.place)} has driven off.`];
   if (event.kind === 'park') return [`${when} ${named(world.places, event.who)} has pulled up.`];
@@ -143,9 +107,6 @@ function perceived(world: World, event: Event, viewer: string, when: string): st
   return [...(event.says === undefined ? [] : [`${who} says: "${event.says}"`]), what].map(line => `${when} ${line}`);
 }
 
-// What a character remembers of its own action: the action, its note, and the sentence about a speech that was cut.
-// The first line is the action itself, or the words said with a deed, and the deed is then the second. `when` is the time as the character could tell it, and `span` how long the
-// action lasts as the character knows it.
 function own(world: World, event: Event, when: string, span = `${event.seconds} s`): string[] {
   const what = event.transfer ? world.places.find(place => place.id === event.to)?.vehicle
     ? `You get into ${named(world.places, event.to)}.` : `You get out of ${named(world.places, event.place)}.`
@@ -165,8 +126,7 @@ export const worldOf = (world: World, state: State, at = state.buses?.at ?? 0): 
   return state.buses ? { ...current, places: doorsOf(current.places.map(place => place.vehicle?.route
     ? { ...place, vehicle: busAt(current, place.vehicle, at) } : place)) } : current;
 };
-// A way named by the world waits for the doer's next free moment and is checked again there. The result's
-// record number marks the action and its event; a refusal is the same wait and sentence as a resident's refused go.
+// Check the way again when the doer is free; it may no longer be usable.
 export function wayDue(world: World, state: State, actor: Person): Extract<Record, { kind: 'act' }> | null {
   const way = state.ways?.get(actor.id);
   if (!way || actor.asleep || actor.place === null) return null;
@@ -177,7 +137,6 @@ export function wayDue(world: World, state: State, actor: Person): Extract<Recor
   return { kind: 'act', who: actor.id, at: actor.freeAt, limit: MAX_WORDS, action, fromDeed: way.seq,
     ...(drive ? { drive } : {}), ...(action === 'fare' ? { place: way.place } : {}) };
 }
-// Only the door of a standing vehicle joins it to another place. Each change makes a new list for the run.
 function doorsOf(places: Place[]): Place[] {
   return places.map(place => ({ ...place, nextDoor: places.filter(other => other !== place && (place.vehicle
     ? place.vehicle.at === other.id : other.vehicle ? other.vehicle.at === place.id : place.nextDoor.includes(other.id))).map(other => other.id) }));
@@ -208,7 +167,7 @@ const standingLine = (world: World, people: Person[], place: Place, at: number) 
   return `Here stands: ${tagged(place)}, ${free} of ${seats} seat${seats === 1 ? '' : 's'} free${place.vehicle!.route ? `, leaving for ${named(world.places, place.vehicle!.departure!.to)} in ${remaining(place.vehicle!.departure!.at - at)}` : ''}.`;
 };
 const remaining = (seconds: number) => `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
-// Standing vehicles are told when first seen or when their seats change, never for the passing of time alone.
+// Passing time alone must not add another standing-vehicle line.
 export function vehicleView(world: World, state: State, actor: Person, now: number): [string, string][] {
   if (!state.vehicleLines) return [];
   const shown = state.vehicleLines.get(actor.id)!;
@@ -232,13 +191,11 @@ export function begin(world: World): State {
   return state;
 }
 
-// One record applied to the world: the event it makes, with everyone moved on and every memory brought up to date.
-// A record that the rules could not have produced in this state is refused, and the state is then not to be used.
+// After a refused record, the state may be partly changed and must not be used.
 export function advance(world: World, state: State, record: Record): Event {
   const event = applied(worldOf(world, state, record.at), state, record);
   if (state.buses) {
-    // A record closes its instant to the arrivals of every bus, but for two kinds: a vehicle's arrival closes it to that
-    // vehicle alone, and a change of the weather to none, since it comes before the vehicles due at its instant.
+    // Weather must leave bus arrivals due at its instant; parking closes it only for its own bus.
     const passed = state.buses.at === record.at ? state.buses.passed : [];
     state.buses = { ...state.buses, at: record.at, passed: record.kind === 'weather' ? passed : record.kind === 'park'
       ? [...passed, ...(state.places.find(place => place.id === record.who)?.vehicle?.route ? [record.who] : [])] : (world.vehicles ?? world.places).filter(place => place.vehicle?.route).map(place => place.id) };
@@ -259,29 +216,24 @@ export function advance(world: World, state: State, record: Record): Event {
   return event;
 }
 
-// The record by itself, with the current vehicle positions.
 function applied(world: World, state: State, record: Record): Event {
   const { people, minds, seq } = state;
   const refuse = (problem: string): never => { throw new JournalError(`The journal cannot be used: record ${seq} ${problem}.`); };
-  // The time of a line as its owner can tell it where it is: the clock only when one is at hand.
   const when = (id: string, at: number) => timeFor(world, id, people.find(person => person.id === id)!.place, at);
   const deed = state.deed;
   if (deed?.kind === 'say' || record.kind === 'reply') {
-    // A speech to a figure is followed by that figure's answer and by nothing else, and a figure answers nothing else.
     if (!deed || record.kind !== 'reply' || record.who !== deed.who || record.at !== deed.at || record.figure !== deed.to) return refuse('is not a figure\'s answer to a speech to it just before');
     const { text, moves } = record;
     if (!isDeepStrictEqual(readReply(JSON.stringify({ reply: text, moves })), { text, moves })) return refuse('holds an answer that the speech cannot have');
     const event = reply(world, people, state.things, deed, text, moves);
     if ('code' in event) return refuse('holds an answer that the rules of things refuse');
     const figure = named(namesOf(world), record.figure), speaker = named(world.characters, deed.who), end = deed.at + deed.seconds;
-    // The speaker learns that nothing was answered; the others heard the speech and nothing after it.
     if (text === null) remember(minds.get(deed.who)!, lineOf(seq, `${when(deed.who, end)} ${figure} does not answer.`));
     const moved = told(event, '');
     for (const id of event.heard) {
       if (text !== null) remember(minds.get(id)!, lineOf(seq, `${when(id, end)} ${figure} answers ${id === deed.who ? 'you' : speaker}: "${text}"`));
       if (moved) remember(minds.get(id)!, lineOf(seq, `${when(id, end)} ${moved}`));
     }
-    // The place keeps what was said to its figures and what they answered, the latest of it.
     const kept = state.said.get(deed.place)!;
     kept.push(lineOf(seq, `${event.clock} ${speaker} to ${figure}: "${deed.text}" ${text === null ? `${figure} did not answer.` : `${figure}: "${text}"`}`));
     while (kept.length > 1 && kept.reduce((sum, line) => sum + line.size, 0) > SAID_WORDS) kept.shift();
@@ -289,20 +241,15 @@ function applied(world: World, state: State, record: Record): Event {
     return event;
   }
   if (deed || record.kind === 'result') {
-    // A deed is followed by the world's answer and by nothing else, and the world answers nothing but a deed.
     if (!deed || record.kind !== 'result' || record.who !== deed.who || record.at !== deed.at) return refuse('is not the world\'s answer to a deed just before it');
     const spot = world.places.find(place => place.id === deed.place)!, sleepers = sleepersNear(people, spot).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
-    // In a world with `touch` the record holds the touches as they were read against those of the place, and in no other world.
     const held = world.touch ? state.touches.filter(touch => present.includes(touch.of)) : undefined;
-    // The same for a world with `marks`: its entries about marks, read against the marks of those in the place as the clock has left them.
     const end = deed.at + deed.seconds, lasting = world.marks ? { marks: marksAt(state.marks, deed.at).filter(mark => present.includes(mark.of)), at: deed.at, end } : undefined;
-    // The two fields of traces belong to the answer only in a world that keeps traces.
     const extra = { ...(state.traces ? { traces: record.traces, wipes: record.wipes } : {}), ...(world.ways ? { goes: record.goes } : {}) };
     const { text, wakes, moves, sets, poses, feels, beyond, search, finds, touches, lingers } = record,
       answer = { text, wakes, moves, sets, poses, feels, beyond, search, finds, ...(touches === undefined ? {} : { touches }), ...(lingers === undefined ? {} : { lingers }), ...extra };
     const hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
-    // Nothing is heard next door of a deed in a place that has no place next door.
     if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, beyond, search, finds, touches, lingers, ...extra }), sleepers, present, hidden, held, lasting, state.traces ? labelsOn(state.traces, present) : undefined, world.ways ? waysOf(world, people, people.find(person => person.id === deed.who)!, state.things) : undefined), answer)
       || (beyond !== null && !spot.nextDoor.length)) {
       return refuse('holds an answer of the world that the deed cannot have');
@@ -313,9 +260,7 @@ function applied(world: World, state: State, record: Record): Event {
     if (touches) state.touches = touched(state.touches, touches, deed.at);
     if (lingers) state.marks = marked(state.marks, lingers, deed.at, end);
     const doer = named(world.characters, deed.who), moved = told(event, doer);
-    // What the answer says came of the deed, and after it what the rules say went where, for the doer and for those there.
-    // What a body feels is told to its owner alone, last, and also when nothing came of the deed for anyone else:
-    // it is in no line of another person and in nothing that the place keeps for the world.
+    // A feeling must reach only its owner, never another memory or the place's lines for the world.
     const felt = (id: string) => feels.filter(entry => entry.of === id).map(entry => `You feel: ${entry.text}`);
     const lines = [...(text === null ? moved || felt(deed.who).length ? [] : [NOTHING] : [`What came of it: ${text}`]), ...(moved ? [moved] : []), ...felt(deed.who)];
     remember(minds.get(deed.who)!, ...lines.map(line => lineOf(seq, `${when(deed.who, event.at)} ${line}`)));
@@ -324,17 +269,14 @@ function applied(world: World, state: State, record: Record): Event {
       const lines = [...(event.heard.includes(id) ? [...(text === null ? [] : [`What came of what ${doer} did: ${text}`]), ...(moved ? [moved] : [])] : []), ...felt(id)];
       remember(minds.get(id)!, ...lines.map(line => lineOf(seq, `${when(id, event.at)} ${line}`)));
     }
-    // What is heard next door is one line with the deed's place and the world's words for the sound: it holds
-    // nothing else of the deed, and a sleeper woken from next door wakes with no more than that. The place keeps none of it.
+    // Someone next door, including a sleeper woken there, must learn only the sound.
     const from = named(world.places, deed.place);
     for (const id of event.nearby!) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} From ${from}, next door: ${beyond}`));
     for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${present.includes(id) ? `${doer} woke you by this: ${deed.text}`
       : `Something from ${from}, next door, woke you${beyond === null ? '.' : `: ${beyond}`}`}`));
     const lists = listed(world, state.things, event, doer);
     if (text !== null || lists) {
-      // The place keeps what came of the deeds done in it, the latest ones: the world's words, and after them what the
-      // rules say went where, under labels, so that a deed that only moved a thing leaves a line and no older line is the last word
-      // about a thing that has gone since.
+      // Keep a line even for a move without words, or an older line could still describe a thing that is gone.
       const kept = state.results.get(deed.place)!;
       kept.push(lineOf(seq, `${event.clock} ${doer} did (${deed.seconds} s): ${text === null ? closed(deed.text as string) : `${deed.text} Result: ${lists ? closed(text) : text}`}${lists ? ` In the lists: ${lists}` : ''}`));
       while (kept.length > 1 && kept.reduce((sum, line) => sum + line.size, 0) > RESULT_WORDS) kept.shift();
@@ -369,12 +311,11 @@ function applied(world: World, state: State, record: Record): Event {
     if (vehicle.vehicle!.route) for (const person of here.filter(person => person.place === heading.to)) {
       const text = standingLine(world, people, vehicle, parked.at), mind = minds.get(person.id)!;
       state.buses!.doors.set(`${person.id} ${vehicle.id}`, { place: heading.to, at: vehicle.vehicle!.departure!.at });
-      // Whoever the pull-up does not free reads the standing line at its own next turn, with the time left then.
+      // Someone not freed by the arrival must read the time left at its own next turn.
       if (!state.buses!.waiting.has(person.id)) { state.vehicleLines!.get(person.id)!.delete(`vehicle ${vehicle.id}`); continue; }
       remember(mind, lineOf(seq, text));
       state.vehicleLines!.get(person.id)!.set(`vehicle ${vehicle.id}`, text);
     }
-    // As with a call, a sleeper receives this notice when it wakes and hears nothing at the arrival.
     for (const person of people.filter(person => !vehicle.vehicle!.route && person.asleep && person.place === vehicle.id)) minds.get(person.id)!.waiting.push(
       lineOf(seq, `${when(person.id, parked.at)} ${vehicle.name} has arrived at ${named(world.places, heading.to)}.`));
     for (const law of LAWS) law.after?.(state.laws, event);
@@ -382,7 +323,6 @@ function applied(world: World, state: State, record: Record): Event {
     return event;
   }
   if (record.kind === 'park') return refuse('is an arrival of a vehicle that is not due');
-  // A record the clock brings comes where its law says it is due, and nothing else comes there.
   for (const law of LAWS) {
     const put = law.due?.(world, state.laws, actor);
     if (!put || !law.put) continue;
@@ -401,7 +341,6 @@ function applied(world: World, state: State, record: Record): Event {
   const mind = minds.get(actor.id)!;
   let event: Event;
   if (record.kind === 'memory') {
-    // A sleeper folds everything it lived through before the sleep; anyone else folds its oldest lines.
     const reaches = actor.asleep ? mind.lines.at(-1)?.seq === record.upTo : mind.lines.some(line => line.seq === record.upTo);
     if (actor.place === null || !reaches) return refuse('folds lines its character does not hold');
     if (record.text === null ? record.cut : !record.text.trim() || sizeOf(record.text) > world.longWords) return refuse('holds a memory outside its limit');
@@ -412,8 +351,7 @@ function applied(world: World, state: State, record: Record): Event {
     if (actor.asleep || actor.place === null) return refuse('is an action of someone asleep or on the way');
     if (!way && mind.size > world.shortWords) return refuse('is an action of someone whose memory was not folded first');
     if (!Number.isInteger(record.limit) || record.limit < 1 || record.limit > MAX_WORDS) return refuse('holds a word limit that no turn has');
-    // An answer that could not be used is kept as its reason, which must be one of the list; an action must read as itself.
-    // An action whose span was cut reads as itself from one second more, so the mark stands on nothing else.
+    // Read a capped span from one second more to verify that the cap could have come from readAction().
     const reason = typeof record.action === 'string' ? record.action : null, taken = typeof record.action === 'string' ? null : record.action as Action | null,
       asked = taken?.capped === undefined ? taken : { ...taken, seconds: (taken.seconds ?? 0) + 1 };
     if (reason === 'fare' ? readAction(world, actor, JSON.stringify({ action: 'go', place: record.place }), people, state.things) !== reason
@@ -442,10 +380,8 @@ function applied(world: World, state: State, record: Record): Event {
     if (fare) event.moved = pay(state.things, actor.id, fare.name, fare.n, named(world.characters, actor.id));
     if (drive) state.places = doorsOf(world.places.map(place => place.id === drive.vehicle ? { ...place,
       vehicle: { ...place.vehicle!, at: null, heading: { from: drive.from, to: drive.to, at: drive.at } } } : place));
-    // Whoever leaves a place touches nobody there and is touched by nobody; a sleep ends no touch.
     if (event.kind === 'go') state.touches = state.touches.filter(touch => touch.of !== actor.id && touch.to !== actor.id);
-    // The actor may have left: its own lines are of the place where it acted. An action `until` a time of day is
-    // remembered by its seconds only with a clock at hand; otherwise by the time it aimed at, which it may miss.
+    // The actor may have left; its memory must use the place where it acted.
     const told = timeFor(world, actor.id, event.place, event.at);
     const span = action.until === null || hasClock(world, actor.id, event.place) ? undefined : `until about ${action.until}`;
     const lines = (reason ? [`${told} ${refused(world, reason, record.place)}`] : own(world, event, told, span)).map(line => lineOf(seq, line));
@@ -453,7 +389,7 @@ function applied(world: World, state: State, record: Record): Event {
     remember(mind, ...lines);
     if (event.kind === 'do' || (event.kind === 'say' && event.to !== null)) state.deed = event;
   } else {
-    // A sleeper wakes with its long-term memory and no line of anything it lived through, so those were folded first.
+    // Fold the sleeper's earlier lines before waking so it wakes with only its long-term memory.
     const due = record.kind === 'wake' ? actor.asleep && idle(mind) : actor.place === null;
     if (!due) return refuse('is a waking or an arrival of someone who is not due one');
     event = record.kind === 'wake' ? wake(world, people, actor, record.at) : arrive(world, people, actor, record.at);
@@ -464,7 +400,6 @@ function applied(world: World, state: State, record: Record): Event {
     : perceived(world, event, id, when(id, event.at))).map(line => lineOf(seq, line)));
   for (const id of event.nearby ?? []) remember(minds.get(id)!, ...perceived(world, event, id, when(id, event.at)).map(line => lineOf(seq, line)));
   if (event.kind === 'call' && !event.heard.includes(event.to as string)) {
-    // The call was not heard: it waits for the arrival or the waking of the one called.
     const callee = people.find(person => person.id === event.to)!;
     minds.get(callee.id)!.waiting.push(lineOf(seq, `${when(callee.id, event.at)} ${named(world.characters, event.who)} called you (${world.remote}) while you were ${
       callee.asleep ? 'asleep' : 'on the way'}: "${event.text}"`));
@@ -474,7 +409,7 @@ function applied(world: World, state: State, record: Record): Event {
   return event;
 }
 
-// The world a journal amounts to. Every record must give the event stored with it, to the letter.
+// Saved events must match replay to the letter.
 export function replay(world: World, entries: Iterable<Entry>): State {
   const state = begin(world);
   for (const entry of entries) {

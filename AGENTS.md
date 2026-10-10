@@ -5,7 +5,9 @@ Orientation for AI coding assistants and people working in this project. Keep it
 ## What this is
 
 sagents runs story agents: models with tools for an interactive story where a coding agent has tools for a repository.
-[README.md](README.md) says what is written and what is only planned. Today the code is the two model connections
+[README.md](README.md) says what is written and what is only planned. README points at code by a symbol and its file.
+`npm run pointers` checks that every pointer still names a top-level declaration of its file. Run it after a rename.
+Today the code is the two model connections
 (`src/chatgpt.ts` for a ChatGPT plan, `src/compatible.ts` for a chat completions server), the choice between them by
 the model's name (`src/model.ts`), a prototype of the live mode and the command line (`src/cli.ts`). The live mode is
 `src/world.ts` for the world file and what a run holds, `src/time.ts` for the clock and the distances, `src/action.ts`
@@ -41,6 +43,8 @@ This limit ends a runaway answer early.
 - Node 24.9+ runs the TypeScript without a build step, so use erasable syntax only and explicit `.ts` import
   specifiers.
 - No dependencies at run time. `typescript` and `@types/node` are there for `npm run check`.
+- A comment says why, never what. Comments are whole lines that begin with `//` after indentation.
+  `npm run size` counts their token share of the core against a 10 percent bound, a reason to look and not a ban.
 - `npm test` needs no `npm install` and no network. A test goes in only where a failure would cost money, leak
   something or lose data unnoticed.
 - A request to the model holds what the caller gave and nothing else. Do not add default instructions, tools or

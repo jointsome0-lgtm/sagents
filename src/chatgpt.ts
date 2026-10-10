@@ -8,27 +8,22 @@ import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { DatabaseSync } from 'node:sqlite';
 
-// GPT on a ChatGPT plan, with no API key and no coding agent in between: OpenAI's "Sign in with ChatGPT" for
-// open-source and locally run tools (developers.openai.com/siwc/token-sharing-open-source). The person signs in once
-// in a browser, this tool becomes a client registered to that person, and its requests to the public Responses API
-// count against the plan. A request holds the instructions, the messages and the schema it was given and nothing else.
 const AUTH = 'https://auth.openai.com';
 const AUTHORIZE = `${AUTH}/api/accounts/authorize`;
 const TOKEN = `${AUTH}/api/accounts/oauth/token`;
 const KEYS = `${AUTH}/.well-known/jwks.json`;
 const API = 'https://api.openai.com/v1';
 const CALLBACK = '/auth/callback';
-// The first sign-in asks for a registration under this id and gets the person's own client id back.
 const REGISTER = 'dynamic_agent_client';
 const APP_NAME = 'sagents';
 const PLAN_SCOPE = 'chatgpt.tokens.use.direct';
 const SCOPES = `openid profile email offline_access resource.invoke ${PLAN_SCOPE}`;
-// What the documentation names as a refresh token that will never work again.
+// These failures mean the refresh token cannot work again; another sign-in is needed.
 const SPENT = ['invalid_grant', 'invalid_refresh_token', 'token_expired', 'refresh_token_expired', 'refresh_token_invalidated',
   'refresh_token_reused'];
 const EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'];
 const PASSIVE_ITEMS = ['message', 'reasoning'];
-// An access token lives an hour; one with less than this left is replaced before a request starts.
+// Access tokens live an hour.
 const MARGIN_MS = 5 * 60_000;
 const GRANT_TIMEOUT_MS = 30_000;
 const LOCK_WAIT_MS = 90_000;
@@ -37,9 +32,8 @@ const MAX_TEXT = 100_000;
 
 export const ACCOUNT_PATH = join(homedir(), '.config', 'sagents', 'chatgpt.json');
 
-// A failure is a code and, where there was one, an HTTP status. The text of an answer is never carried: it may quote
-// the request or hold a token. The service's own code and the request field it names are carried when they are plain
-// identifiers, because they say which field the plan's route refused.
+// Service error text may quote the request or contain a token.
+// Plain codes and field names let the caller identify a refused field without that text.
 const PROVIDER_CODE = /^[a-z][a-z0-9_]{0,79}$/;
 const PARAM = /^[A-Za-z_][\w.[\]]{0,79}$/;
 export class ModelError extends Error {
@@ -55,30 +49,20 @@ export class ModelError extends Error {
     this.param = typeof param === 'string' && PARAM.test(param) ? param : undefined;
   }
 }
-// The sentences of a sign-in that went wrong; they are this file's own and may be shown.
+// These sentences are ours, so cli.ts may show them.
 export class SignInError extends Error {}
 
 export type Message = { role: 'user' | 'assistant'; content: string };
-// `model` is `<id>` or `<id>@<effort>`; `schema` is a JSON Schema the answer must follow, in OpenAI's strict form.
-// `cache` is a name the caller made up for whoever the request is one of, so that a service which keeps the
-// beginnings of requests it has read can bring one player's requests to the same place. It is `CACHE` and holds
-// nothing of the text; a request that has none is sent with none, since no connection makes one up.
 export type Request = { model: string; system?: string; messages: Message[]; schema?: object; cache?: string };
-// A name of that kind goes into headers, so it is letters, digits, `-` and `_`, as many as the service's key takes.
+// Cache names enter headers and must fit the service's key limit.
 export const CACHE = /^[A-Za-z0-9_-]{1,64}$/;
 export type Usage = { inputTokens: number | null; cachedInputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null };
-// An answer is whole or it is a failure: one that the model's own limit cut short is `output_limit`. `endpoint` is
-// the name a router gave to whoever answered, when the connection learned one: `ENDPOINT` is all a name may be, and a
-// name that is anything else is `OTHER_ENDPOINT`.
 export type Result = { text: string; usage: Usage | null; endpoint?: string };
 export const ENDPOINT = /^[A-Za-z0-9 ./_-]{1,40}$/, OTHER_ENDPOINT = 'other';
-// `onText` is handed the text as it arrives: of the plan's stream each piece at once, before the answer is known to be
-// whole and to come from the model asked for, so a call that then fails may have handed over a part; of an `api:`
-// server the whole text once, after its checks, or with SAGENTS_API_STREAM each piece at once like the plan's. Only
-// what a call returns is an answer.
+// onText may receive pieces before a later failure; only the return value is a complete answer.
 export type Controls = { signal?: AbortSignal; onText?: (delta: string) => unknown; timeoutMs?: number };
 
-// A caller's limit also ends a wait for its text callback, even when that callback never settles.
+// The caller's limit must also stop a text callback that never settles.
 export async function untilStopped<T>(work: () => T | PromiseLike<T>, signal: AbortSignal, until = Infinity): Promise<T> {
   signal.throwIfAborted();
   if (performance.now() >= until) throw new ModelError('timeout');
@@ -96,10 +80,8 @@ export async function untilStopped<T>(work: () => T | PromiseLike<T>, signal: Ab
 }
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
-// What a sign-in leaves on this computer, in a file only its owner can read. `hostId` names this installation to
-// OpenAI and is no secret; `clientId` is the registration the person approved; `subject` is the account it belongs
-// to. The ID token and the email are not kept: nothing here needs to know who the person is. `declined`: the plan
-// permission was missing the last time, so the next sign-in asks for it again.
+// `hostId` names this installation to OpenAI and is no secret, unlike the tokens kept beside it.
+// The connection needs neither the ID token nor the email after verification.
 type Account = { hostId: string; clientId?: string; subject?: string; accessToken?: string; refreshToken?: string;
   expiresAt?: number; scopes?: string[]; declined?: boolean };
 type Failure = { code?: unknown; param?: unknown } | null;
@@ -117,8 +99,7 @@ const filled = (value: unknown) => typeof value === 'string' && value ? value : 
 const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 const errnoOf = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code;
 
-// The saved account, or null where there is none yet. A file that is there and cannot be read or understood is a
-// failure and never a reason to start over: starting over would write a new account on top of it.
+// Starting over on an unreadable account file would overwrite the saved account.
 function load(path: string): Account | null {
   let value: unknown;
   try { value = JSON.parse(readFileSync(path, 'utf8')); } catch (error) {
@@ -133,9 +114,8 @@ function load(path: string): Account | null {
     declined: value.declined === true ? true : undefined };
 }
 
-// Written whole, flushed and renamed into place: a refresh replaces both tokens together or not at all. Every caller
-// holds the lock. What no file can cover is the moment between the service's answer to a refresh and this rename: a
-// process that dies there leaves a spent refresh token behind, and the next call asks for a new sign-in.
+// Callers must hold withLock() through the save.
+// A process killed between token rotation and rename leaves a spent refresh token and needs another sign-in.
 function save(path: string, account: Account) {
   const draft = `${path}.${randomUUID()}.tmp`;
   try {
@@ -146,7 +126,7 @@ function save(path: string, account: Account) {
     try { rmSync(draft, { force: true }); } catch { /* nothing was written */ }
     throw new ModelError('storage_failed');
   }
-  // The new name reaches the disk with its folder. Only a file system that cannot flush a folder at all is let pass.
+  // Flush the folder too so the renamed account reaches disk.
   try {
     const folder = openSync(dirname(path), 'r');
     try { fsyncSync(folder); } finally { closeSync(folder); }
@@ -155,7 +135,7 @@ function save(path: string, account: Account) {
   }
 }
 
-// For a pair that has just replaced a spent refresh token: it is tried again before the failure is said.
+// The old refresh token is spent, so retry saving its replacement before reporting failure.
 async function keep(path: string, account: Account) {
   for (let attempt = 1; ; attempt++) {
     try { return save(path, account); } catch (error) {
@@ -165,7 +145,6 @@ async function keep(path: string, account: Account) {
   }
 }
 
-// An answer of the sign-in service, or of the API outside a stream. Only named fields of it are ever read.
 async function jsonOf(response: Response, limit = 2_000_000): Promise<unknown> {
   if (!response.body) return null;
   const chunks: Buffer[] = [];
@@ -182,7 +161,6 @@ const errorCodeOf = (body: unknown) => !isObject(body) ? undefined
   : typeof body.error === 'string' ? body.error : isObject(body.error) ? body.error.code : body.code;
 const paramOf = (body: unknown) => isObject(body) && isObject(body.error) ? body.error.param : undefined;
 
-// Complete server-sent events, including UTF-8 characters split across chunks.
 async function* events(body: Response['body'], limit: number) {
   if (!body) throw new ModelError('invalid_stream');
   const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -210,9 +188,7 @@ async function* events(body: Response['body'], limit: number) {
   if (buffer.trim()) throw new ModelError('invalid_stream');
 }
 
-// One call of the token endpoint: the code of a sign-in for tokens, or a refresh token for the next pair. It has a
-// time limit of its own and no other way to stop: once the service has replaced a refresh token, the pair must be
-// saved. The service's code goes along with a refusal, and the caller tells a spent token from a refused client by it.
+// Caller cancellation must not interrupt a refresh; the service may already have rotated the token.
 async function grant(fetcher: Fetch, fields: Record<string, string>) {
   let response: Response;
   try {
@@ -228,7 +204,7 @@ async function grant(fetcher: Fetch, fields: Record<string, string>) {
   return body;
 }
 
-// A refresh that names no scopes keeps the ones the person granted.
+// A refresh may omit scopes without revoking the existing grant.
 const withTokens = (account: Account, tokens: { readonly [field: string]: unknown }, now: number): Account => ({
   hostId: account.hostId, clientId: account.clientId, subject: account.subject,
   accessToken: tokens.access_token as string, refreshToken: tokens.refresh_token as string,
@@ -236,9 +212,9 @@ const withTokens = (account: Account, tokens: { readonly [field: string]: unknow
   scopes: typeof tokens.scope === 'string' ? tokens.scope.split(' ').filter(Boolean) : account.scopes ?? [],
 });
 
-// Refresh tokens rotate: a second refresh with a spent one ends the session. So the processes of this computer take
-// turns through an exclusive SQLite transaction, and read the account again once they hold it. The kernel releases
-// the lock when a process dies; a stopped process keeps it. The file stays, and is not the link that 0.1.0 used.
+// A second refresh with a spent token ends the session, so processes must lock and reread the account.
+// The kernel releases the SQLite lock on death; a stopped process keeps it.
+// Version 0.1.0 used a link and does not share this lock.
 const sqliteCode = (error: unknown) => error instanceof Error && 'errcode' in error && typeof error.errcode === 'number' ? error.errcode & 0xff : null;
 async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   const lock = `${path}.renew.sqlite`;
@@ -246,8 +222,7 @@ async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     const mode = ((statSync(path, { throwIfNoEntry: false })?.mode ?? 0o600) & 0o777) | 0o200;
-    // Closing any descriptor of this file drops this process's locks on it. Open our own only to create a file
-    // that did not exist, so no other connection of this process can hold its lock yet.
+    // Closing any descriptor drops this process's locks on the file; create it only while no connection can hold one.
     try {
       const file = openSync(lock, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, mode);
       try { fchmodSync(file, mode); } finally { closeSync(file); }
@@ -279,7 +254,6 @@ async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-// The body of one request, whole: a caller that stores its hash can say exactly what the model saw.
 export function responsesBody(request: Request) {
   const [model, effort, ...more] = request.model.split('@');
   if (!model || more.length || (effort !== undefined && !EFFORTS.includes(effort))) throw new ModelError('invalid_request');
@@ -294,8 +268,6 @@ export function responsesBody(request: Request) {
   };
 }
 
-// A failure the API names, before a stream or inside one. A plan or an app limit that is used up is `budget_exceeded`:
-// the caller stops, and nothing here asks for more.
 const failure = (code: unknown, httpStatus?: number, param?: unknown) => new ModelError(
   httpStatus === 402 || code === 'subscription_sharing_usage_limit_exceeded' ? 'budget_exceeded'
     : code === 'subscription_sharing_usage_unavailable' || code === 'subscription_sharing_user_unavailable' ? 'model_unavailable'
@@ -312,8 +284,6 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
   const usable = (account: Account | null, margin: number) =>
     account?.accessToken && account.scopes?.includes(PLAN_SCOPE) && (account.expiresAt ?? 0) - now() > margin ? account.accessToken : null;
 
-  // The caller's cancellation does not reach a refresh: the service may already have replaced the refresh token, and
-  // a pair that is not saved is a session lost.
   async function accessToken(): Promise<string> {
     const ready = usable(load(path), MARGIN_MS);
     if (ready) return ready;
@@ -328,19 +298,15 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
         tokens = await grant(fetcher, { grant_type: 'refresh_token', client_id: account.clientId, refresh_token: account.refreshToken });
       } catch (error) {
         const refusal = error instanceof ModelError ? error.providerCode : undefined;
-        // A session that is over is forgotten, so that the next call says so at once; the registration stays for the
-        // next sign-in.
         if (refusal && SPENT.includes(refusal)) save(path, registration);
-        // The sign-in service did not answer, or failed for now: the token in hand still works until it expires. A
-        // refused client is neither case: nothing is erased, and the old token does not hide the refusal.
+        // A temporary service failure leaves the held token usable; an invalid client must not be hidden that way.
         else if (refusal !== 'invalid_client') {
           const held = usable(account, 30_000);
           if (held) return held;
         }
         throw error;
       }
-      // From here on the old refresh token is spent. The new pair is on disk before anything else is done with it, and
-      // a pair that cannot be written is a failure said aloud, not a request quietly sent with the old token.
+      // After rotation the old token is spent; persist the new pair before using it.
       const next = withTokens(account, tokens, now());
       await keep(path, next.scopes?.includes(PLAN_SCOPE) ? next : { ...registration, declined: true });
       const token = usable(next, 0);
@@ -357,15 +323,13 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
       const current = signal ? AbortSignal.any([signal, timer]) : timer;
       if (signal?.aborted) throw new ModelError('cancelled');
-      // A failure of the sign-in or of the account file is said as it is, even when the caller has given up
-      // meanwhile: a new pair that could not be written must not look like a time limit.
+      // A failure to save rotated tokens must not be hidden by a caller timeout.
       const token = await accessToken().catch(error => { throw error instanceof ModelError ? error : new ModelError('internal_error'); });
       try {
         return await untilStopped(async () => {
           current.throwIfAborted();
-          // The plan's route takes no output limit (`max_output_tokens` is refused); the length of the text is checked here.
-          // The caller's name for the player goes as the cache key of the body and as the session of the two headers:
-          // with the three the route read from its cache in 8 or 9 requests of 20, and with none in 1 to 3.
+          // The plan route refuses max_output_tokens.
+          // With the cache key in the body and both headers, cache hits occurred in 8 or 9 of 20 requests, versus 1 to 3 without them.
           const response = await fetcher(`${API}/responses`, { method: 'POST', redirect: 'error', signal: current, body,
             headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'text/event-stream',
               ...(request.cache ? { 'session-id': request.cache, 'x-client-request-id': request.cache } : {}) } });
@@ -377,8 +341,7 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
             const refusal = await jsonOf(response).catch(() => null);
             throw failure(errorCodeOf(refusal), response.status, paramOf(refusal));
           }
-          // The plan's route names no content type for its stream. A type that is named must be a stream's, and only
-          // the closing event below makes an answer of what is read.
+          // The plan route may omit the stream's content type.
           const type = response.headers.get('content-type');
           if (type !== null && !type.includes('text/event-stream')) {
             if (!response.body?.locked) await response.body?.cancel();
@@ -393,7 +356,7 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
             length -= pieces.filter(piece => piece.index === index).reduce((sum, piece) => sum + piece.text.length, 0);
           };
           let completed: StreamEvent | undefined;
-          // Every delta is an event of some 300 bytes, and the closing event repeats the whole answer.
+          // Each delta has cost about 300 bytes, and the closing event repeats the whole answer.
           for await (const data of events(response.body, MAX_STREAM)) {
             if (data === '[DONE]') break;
             let event: StreamEvent;
@@ -403,18 +366,14 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
             }
             if (!isObject(event)) throw new ModelError('invalid_stream');
             if (event.type === 'error') throw failure(event.code ?? event.error?.code, undefined, event.param ?? event.error?.param);
-            // Nobody is moved to another model unnoticed: an event that names the model that answers must name the one
-            // asked for. An event that names none leaves nothing to compare.
+            // A service must not silently substitute a different model.
             const answering = isObject(event.response) ? event.response.model : undefined;
             if (typeof answering === 'string' && answering && answering !== sent.model) throw new ModelError('wrong_model');
             if (event.type === 'response.failed') throw failure(event.response?.error?.code, undefined, event.response?.error?.param);
-            // The service declined to write: it says so in events of its own, by an answer its content filter stopped,
-            // or in a part of the closing event. Its words are never kept, like the text of any failure.
             if (event.type === 'response.refusal.delta' || event.type === 'response.refusal.done') throw new ModelError('declined');
-            // An answer that stopped short is no answer, whatever was written by then.
             const stopped = event.response?.incomplete_details?.reason;
             if (event.type === 'response.incomplete') throw new ModelError(stopped === 'max_output_tokens' ? 'output_limit' : stopped === 'content_filter' ? 'declined' : 'incomplete_stream');
-            // No tools are sent, so an item of any other kind than these is not an answer.
+            // No tools were sent, so other item kinds cannot be an answer.
             if (event.type === 'response.output_item.added' && !PASSIVE_ITEMS.includes(event.item?.type as string)) throw new ModelError('unexpected_tools');
             if (['response.output_item.added', 'response.output_item.done'].includes(event.type as string)
               && event.item?.type === 'message' && event.item.phase === 'commentary' && typeof event.output_index === 'number') interim(event.output_index);
@@ -426,11 +385,10 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
               if (length > MAX_TEXT) throw new ModelError('output_limit');
               await untilStopped(() => onText(event.delta as string), current, until);
             }
-            // The closing event ends the reading at once: a connection left open after it is not waited for.
+            // Stop at completion so an open connection cannot delay the answer.
             if (event.type === 'response.completed') { completed = event; break; }
           }
           current.throwIfAborted();
-          // Only the closing event makes an answer: a limit can end a stream that has already begun.
           if (!completed) throw new ModelError('incomplete_stream');
           if (!isObject(completed.response) || Array.isArray(completed.response)) throw new ModelError('invalid_stream');
           const output = completed.response.output;
@@ -446,7 +404,7 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
             if (closing.some(part => typeof part.text !== 'string') || (closing.length && closing.map(part => part.text).join('') !== text)) throw new ModelError('invalid_stream');
           }
           if (!text.trim()) throw new ModelError('empty_response');
-          // input_tokens includes the cached part, output_tokens the reasoning.
+          // input_tokens includes cached tokens; output_tokens includes reasoning.
           const usage = completed.response?.usage;
           const inputTokens = count(usage?.input_tokens), outputTokens = count(usage?.output_tokens);
           return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
@@ -460,8 +418,7 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       }
     },
 
-    // The names the plan's list of models shows for the signed-in account. It is not the set of names a request
-    // takes: a name that is not in it may be served all the same, so its absence says nothing about a request.
+    // The offered list is not exhaustive; an absent name may still be served.
     async models(): Promise<string[]> {
       let response: Response;
       const token = await accessToken();
@@ -475,7 +432,6 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       return body.models.filter(entry => isObject(entry) && entry.visibility === 'list' && typeof entry.slug === 'string').map(entry => entry.slug as string);
     },
 
-    // Booleans and a count for a person or a session to look at; no part of the account itself.
     status() {
       const account = load(path);
       return { signedIn: !!account?.refreshToken, planUse: !!account?.scopes?.includes(PLAN_SCOPE),
@@ -486,8 +442,6 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
 
 const decoded = (part: string): unknown => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
 
-// Whose account the tokens belong to, by the ID token: its signature against OpenAI's published keys, then its issuer,
-// its audience (the client just issued or used), its expiry and the nonce of this attempt.
 async function subjectOf(fetcher: Fetch, idToken: unknown, clientId: string, nonce: string, now: number): Promise<string> {
   const refused = new SignInError('The sign-in could not be verified');
   const [head, body, signature, ...more] = typeof idToken === 'string' ? idToken.split('.') : [];
@@ -511,13 +465,9 @@ async function subjectOf(fetcher: Fetch, idToken: unknown, clientId: string, non
   return claims.sub;
 }
 
-// The sign-in itself: an address for the person's browser, and a listener on this computer for the browser's way
-// back. Nothing of the person's password passes through here. `register` asks for a new registration even when one is
-// saved, for another account or after the app was disconnected in ChatGPT's settings.
 export async function signIn({ path = ACCOUNT_PATH, fetch: fetcher = globalThis.fetch, register = false, timeoutMs = 600_000,
   show = (address: string) => console.log(`Open this address in your browser and approve:\n${address}`) }: {
   path?: string; fetch?: Fetch; register?: boolean; timeoutMs?: number; show?: (address: string) => void } = {}) {
-  // The host id is chosen and kept before the first sign-in.
   const saved = await withLock(path, async () => {
     const current = load(path);
     if (current) return current;
@@ -533,7 +483,6 @@ export async function signIn({ path = ACCOUNT_PATH, fetch: fetcher = globalThis.
   const server = createServer((request, response) => {
     let url: URL | undefined;
     try { url = new URL(request.url ?? '/', 'http://127.0.0.1'); } catch { /* no address at all */ }
-    // Only an answer to the visit that is waiting counts, and only once; anything else leaves it waiting.
     if (!url || !waiting || request.method !== 'GET' || url.pathname !== CALLBACK || url.searchParams.get('state') !== waiting.state) {
       response.writeHead(404).end();
       return;
@@ -551,10 +500,9 @@ export async function signIn({ path = ACCOUNT_PATH, fetch: fetcher = globalThis.
     server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve((server.address() as AddressInfo).port); });
   });
   try {
-    // 127.0.0.1 and this path stay the same from the registration on; only the port may differ.
+    // Registration requires the same loopback host and callback path across visits; only the port may change.
     const redirect = `http://127.0.0.1:${await listening(1455).catch(() => listening(0))}${CALLBACK}`;
 
-    // One visit of the browser: an address out and a code back, with a state, a nonce and a verifier of its own.
     const visit = async (clientId: string | undefined) => {
       const state = randomBytes(32).toString('base64url'), nonce = randomBytes(32).toString('base64url'), verifier = randomBytes(48).toString('base64url');
       let timer: NodeJS.Timeout | undefined;
@@ -565,7 +513,7 @@ export async function signIn({ path = ACCOUNT_PATH, fetch: fetcher = globalThis.
       answered.catch(() => {});
       try {
         const address = new URL(AUTHORIZE);
-        // A returning sign-in shows no consent screen, so one that follows a refusal has to ask for it.
+        // Returning sign-ins skip consent, so a missing grant needs an explicit consent request.
         const parameters = { client_id: clientId ?? REGISTER, ...(clientId ? {} : { agent_name_hint: APP_NAME }),
           ...(clientId && saved.declined ? { prompt: 'consent' } : {}), ext_agent_host_id: hostId,
           response_type: 'code', redirect_uri: redirect, scope: SCOPES, resource: API, state, nonce, code_challenge_method: 'S256',
@@ -573,7 +521,7 @@ export async function signIn({ path = ACCOUNT_PATH, fetch: fetcher = globalThis.
         for (const [name, value] of Object.entries(parameters)) address.searchParams.set(name, value);
         show(address.href);
         const answer = await answered;
-        // A new registration names the client it issued; a returning sign-in may name none, and never another.
+        // A returning sign-in may omit the client id, but may not change it.
         const issued = clientId ?? answer.clientId;
         if (!issued || issued === REGISTER || (clientId && answer.clientId && answer.clientId !== clientId)) throw new SignInError('The sign-in did not name its client');
         return { issued, nonce, exchange: () => grant(fetcher, { grant_type: 'authorization_code', client_id: issued, code: answer.code,
@@ -587,8 +535,7 @@ export async function signIn({ path = ACCOUNT_PATH, fetch: fetcher = globalThis.
     let visited = await visit(returning);
     let tokens: { readonly [field: string]: unknown };
     try { tokens = await visited.exchange(); } catch (error) {
-      // A code the service refuses is thrown away, and the authorization starts once more with the client that was
-      // just issued, so that a first sign-in does not register twice.
+      // Reuse the just-issued client so retrying an authorization code does not register twice.
       if (!(error instanceof ModelError) || error.providerCode !== 'invalid_grant') throw error;
       visited = await visit(visited.issued);
       tokens = await visited.exchange();
@@ -599,9 +546,9 @@ export async function signIn({ path = ACCOUNT_PATH, fetch: fetcher = globalThis.
     const account = withTokens({ hostId, clientId: issued, subject }, tokens, Date.now());
     const planUse = !!account.scopes?.includes(PLAN_SCOPE);
     await withLock(path, async () => {
-      // The browser took its time, and another sign-in may have finished meanwhile. Its registration is not replaced.
+      // Another sign-in may finish while the browser waits; do not replace its registration.
       if (load(path)?.clientId !== saved.clientId) throw new SignInError('Another sign-in changed the registration meanwhile; run this one again');
-      // Without the permission to use the plan the registration is kept and the tokens are not: they could do nothing here.
+      // Without plan permission the tokens cannot be used here.
       save(path, planUse ? account : { hostId, clientId: issued, subject, declined: true });
     });
     return { planUse };

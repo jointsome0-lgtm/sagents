@@ -1,5 +1,4 @@
-// Numbers of a kept run, from its world, events and usage rows. The lab's reader opens only regular files for
-// reading; the state file is never opened. null means that the files do not give the number, not zero.
+// null means the files do not give the number, rather than zero.
 import { accessSync, constants, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
@@ -16,8 +15,7 @@ const amount = (value: unknown): value is number => typeof value === 'number' &&
 const unreadable = (error: unknown) => error instanceof Error && 'code' in error && ['ENOENT', 'ENOTDIR', 'EISDIR', 'EACCES', 'EPERM', 'ELOOP'].includes(error.code as string);
 const share = (part: Value, whole: Value) => part === null || whole === null || whole === 0 ? null : Math.round(100 * part / whole);
 
-// A broken or unfinished line leaves the counts unknown. The reader's byte position also tells a missing or
-// unreadable file from an empty one, and a last line still being written from a whole line.
+// The reader's byte position distinguishes an empty file from a missing one and a whole line from one still being written.
 function rowsOf(path: string): Fields[] | null {
   try {
     const file = statSync(path);
@@ -82,7 +80,6 @@ export function numbersOf(dir: string): Numbers {
       continue;
     }
     const result = events[n + 1];
-    // A run cut between a deed and its result: that deed is left out of the counts and of the shares.
     if (!result) { cut += 1; end(who); continue; }
     if (result.kind !== 'result' || result.who !== who || result.at !== event.at
       || !(result.text === null || typeof result.text === 'string') || typeof result.search !== 'boolean'
@@ -128,8 +125,6 @@ export function numbersOf(dir: string): Numbers {
   return { name: basename(resolve(dir)), rows };
 }
 
-// Row names are shared across the columns. Request kinds keep their first appearance; the two commonest kinds
-// for a mean are chosen in each run, with a tie kept in that same order.
 export function numberRows(runs: Numbers[]): string[] {
   const names = [...new Set(runs.flatMap(run => [...run.rows.keys()]))];
   const requestKinds = names.filter(name => name.startsWith('requests: ')), means = names.filter(name => name.startsWith('mean input tokens: '));

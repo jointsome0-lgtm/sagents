@@ -4,10 +4,11 @@
     npm run size            the working tree's text of the files Git tracks
     npm run size -- --index what is staged in the Git index
 
-It prints three counts: the core, `src/live.ts`, and all tracked text. The core's count falls into one of four
-bands, and from the second on this prints a line that grows stronger with the band. It always ends well: a band is a
-reason to look, not a ban. It never estimates: without `tiktoken` it says how to get it, counts nothing, and ends
-well too.
+It prints the core, `src/live.ts`, and all tracked text, then the comment tokens and shares of the core and
+`src/live.ts`. Whole-line // comments count as the difference between each file and the file without those lines.
+The core's size falls into four bands; its comment share has a separate bound. Above a bound this gives a reason
+to look, not a ban, and always ends well. It never estimates: without `tiktoken` it says how to get it, counts
+nothing, and ends well too.
 """
 import os
 import subprocess
@@ -23,6 +24,8 @@ CORE_BANDS = [
     (70_000, 'WARNING: the core is over its size. A change that adds to the core says what it takes out of it, or why the size should rise.'),
     (84_000, 'STRONG WARNING: the core no longer reads whole. Split it or cut it before anything more is added.'),
 ]
+# Leave most of the core's reading to code; comments should explain choices the code cannot show.
+CORE_COMMENT_PERCENT = 10
 LIVE = 'src/live.ts'
 # Tracked files that are not this project's own text.
 NOT_COUNTED = ['LICENSE', 'package-lock.json']
@@ -59,11 +62,16 @@ def read(path: str) -> bytes:
 
 encoding = tiktoken.get_encoding(ENCODING)
 counts = {}
+comments = {}
 for path in git('ls-files', '-z').decode().split('\0'):
     if not path or path in NOT_COUNTED:
         continue
     try:
-        counts[path] = len(encoding.encode(read(path).decode('utf-8'), disallowed_special=()))
+        text = read(path).decode('utf-8')
+        counts[path] = len(encoding.encode(text, disallowed_special=()))
+        if path in CORE or path == LIVE:
+            without = ''.join(line for line in text.splitlines(keepends=True) if not line.lstrip().startswith('//'))
+            comments[path] = counts[path] - len(encoding.encode(without, disallowed_special=()))
     except (UnicodeDecodeError, FileNotFoundError):
         # Not text, or tracked and deleted in the working tree: neither is text to read.
         continue
@@ -72,11 +80,19 @@ missing = [path for path in CORE + [LIVE] if path not in counts]
 if missing:
     print(f'size: {", ".join(missing)} of the list in scripts/size.py is not a tracked text file; the counts below lack it.')
 core = sum(counts.get(path, 0) for path in CORE)
+core_comments = sum(comments.get(path, 0) for path in CORE)
+live = counts.get(LIVE, 0)
+live_comments = comments.get(LIVE, 0)
+core_share = 100 * core_comments / core if core else 0
+live_share = 100 * live_comments / live if live else 0
 print(f'size, in {ENCODING} tokens, of {"the Git index" if staged else "the working tree"}:')
 print(f'  core, {len(CORE)} files without model and disk: {core:,} (bounds: {", ".join(f"{bound:,}" for bound, _ in CORE_BANDS)})')
 print(f'  {LIVE}: {counts.get(LIVE, 0):,}')
 print(f'  all tracked text but {" and ".join(NOT_COUNTED)}: {sum(counts.values()):,}')
+print(f'  comments: core {core_comments:,} of {core:,} ({core_share:.0f}%); {LIVE} {live_comments:,} of {live:,} ({live_share:.0f}%) (core bound: {CORE_COMMENT_PERCENT}%)')
 over = [(bound, line) for bound, line in CORE_BANDS if core > bound]
 if over:
     bound, line = over[-1]
     print(f'size: {line} It is {core - bound:,} tokens above {bound:,}. This forbids nothing.')
+if core_share > CORE_COMMENT_PERCENT:
+    print(f'size: note: the core\'s comment share is above {CORE_COMMENT_PERCENT}%. Look for comments that retell the code; keep the reasons. This forbids nothing.')

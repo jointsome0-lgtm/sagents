@@ -1,38 +1,22 @@
-// Hunger and thirst, a law of a live world in the form of `laws.ts`. Only what a deed's result really moves to
-// `eaten` feeds its doer; the clock spends the counts awake and asleep. No model and no disk here.
 import type { Law } from './laws.ts';
 import { refuse } from './reading.ts';
 
-// How long everyone is fed at the story's start, in seconds.
 const FED_START = 10_800;
-// How long everyone is not thirsty at the story's start, in seconds.
 const WATER_START = 7200;
-// A second awake spends one second of either count, on the way included.
 const AWAKE_RATE = 1;
-// A second asleep spends half a second of either count.
 const ASLEEP_RATE = 0.5;
-// One calorie holds for this many seconds awake.
 const CALORIE_SECONDS = 36;
-// This many calories in one deed first raise a negative fed count to zero.
 const MEAL_CALORIES = 100;
-// At this count or below one is getting hungry.
 const GETTING_HUNGRY = 0;
-// At this count or below one is hungry.
 const HUNGRY = -7200;
-// At this count or below one is very hungry.
 const VERY_HUNGRY = -28_800;
-// No meal leaves anyone fed for longer than this, in seconds.
 const FED_LIMIT = 36_000;
-// At this count or below one is thirsty; a drink first raises a lower count to here.
 const THIRSTY = 0;
-// At this count or below one is very thirsty.
 const VERY_THIRSTY = -21_600;
-// Each one drunk holds for this many seconds awake.
 const DRINK_SECONDS = 10_800;
-// No drink leaves anyone not thirsty for longer than this, in seconds.
 const WATER_LIMIT = 21_600;
 
-// The two counts in seconds as they stood at `since`; either can be negative.
+// Counts use seconds awake and may be negative.
 export type Fed = { fed: number; water: number; since: number };
 const countsAt = ({ fed, water, since }: Fed, asleep: boolean, now: number): Fed => {
   const spent = (now - since) * (asleep ? ASLEEP_RATE : AWAKE_RATE);
@@ -52,7 +36,7 @@ export const hunger: Law<'hunger', 'fed'> = {
     if (!parts.fed) return;
     if (event.kind !== 'sleep' && event.kind !== 'wake' && event.kind !== 'result') return;
     const count = parts.fed.get(event.who)!;
-    // It was awake until it fell asleep, asleep until it woke, and awake when it did the deed.
+    // Charge the elapsed time at the rate before the event changed whether the person was asleep.
     Object.assign(count, countsAt(count, event.kind === 'wake', event.at));
     if (event.kind !== 'result') return;
     let calories = 0;
