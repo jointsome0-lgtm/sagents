@@ -9,7 +9,7 @@ import { blank, idle, lineOf, remember, rewrite } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { beginLaws, LAWS } from './laws.ts';
 import type { LawRecord, Parts } from './laws.ts';
-import { apply, arrive, attend, isRefusal, next, readAction, sleepersNear, start, wake } from './action.ts';
+import { apply, arrive, attend, isRefusal, next, readAction, sleepersNear, start, wake, waysOf } from './action.ts';
 import { labelsOn, marked as traced, readReply, reply, readResult, result } from './answer.ts';
 import { all, pay, stocked } from './things.ts';
 import { touched } from './touch.ts';
@@ -36,7 +36,7 @@ export class JournalError extends Error {}
 // its words, or null, and what changed hands with them. Neither is ever an answer that the rules of things refuse.
 // A record of a law (`laws.ts`) is put by the rules when the clock reaches its moment; like an arrival and a waking,
 // no answer is behind it.
-export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal; place?: string; drive?: { vehicle: string; from: string; to: string; at: number } }
+export type Record = { kind: 'act'; who: string; at: number; limit: number; action: Action | Refusal; fromDeed?: number; place?: string; drive?: { vehicle: string; from: string; to: string; at: number } }
   | { kind: 'park'; who: string; at: number }
   | { kind: 'arrive' | 'wake'; who: string; at: number }
   | { kind: 'memory'; who: string; at: number; text: string | null; upTo: number; cut: boolean }
@@ -56,8 +56,9 @@ export type Entry = { seq: number; record: Record; event: Event; by: string | nu
 // `marks` are the lasting feelings of everyone's bodies, in the order they began, as they stood at the latest result
 // of a world with `marks`: what the clock has done to them since is not kept and is read with `marksAt` (`marks.ts`).
 // `traces` is what is on each person's body or clothes for the time being, or null in a world that keeps none.
+// `ways`, only in a world with that setting, holds each doer's pending destination and the result record that named it.
 export type State = { places: Place[]; vehicleLines?: Map<string, Map<string, string>>; people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
-  said: Map<string, Line[]>; things: Things; laws: Parts; touches: Touch[]; marks: Mark[]; traces: Traces | null; buses?: { at: number; passed: string[]; waiting: Set<string>; doors: Map<string, { place: string; at: number }> } };
+  said: Map<string, Line[]>; things: Things; laws: Parts; touches: Touch[]; marks: Mark[]; traces: Traces | null; ways?: Map<string, { place: string; seq: number }>; buses?: { at: number; passed: string[]; waiting: Set<string>; doors: Map<string, { place: string; at: number }> } };
 // How many words of earlier results a place keeps. The newest one stays whatever its size.
 export const RESULT_WORDS = 400;
 // How many words of earlier speeches to its figures and their answers a place keeps, the newest whatever its size.
@@ -164,6 +165,18 @@ export const worldOf = (world: World, state: State, at = state.buses?.at ?? 0): 
   return state.buses ? { ...current, places: doorsOf(current.places.map(place => place.vehicle?.route
     ? { ...place, vehicle: busAt(current, place.vehicle, at) } : place)) } : current;
 };
+// A way named by the world waits for the doer's next free moment and is checked again there. The result's
+// record number marks the action and its event; a refusal is the same wait and sentence as a resident's refused go.
+export function wayDue(world: World, state: State, actor: Person): Extract<Record, { kind: 'act' }> | null {
+  const way = state.ways?.get(actor.id);
+  if (!way || actor.asleep || actor.place === null) return null;
+  const action = readAction(world, actor, JSON.stringify({ action: 'go', place: way.place }), state.people, state.things);
+  const vehicle = world.places.find(place => place.id === actor.place)?.vehicle;
+  const drive = vehicle && typeof action !== 'string' && action.place !== vehicle.at
+    ? { vehicle: actor.place, from: vehicle.at!, to: action.place!, at: actor.freeAt + driveSeconds(world, vehicle.at!, action.place!, vehicle.faster) } : undefined;
+  return { kind: 'act', who: actor.id, at: actor.freeAt, limit: MAX_WORDS, action, fromDeed: way.seq,
+    ...(drive ? { drive } : {}), ...(action === 'fare' ? { place: way.place } : {}) };
+}
 // Only the door of a standing vehicle joins it to another place. Each change makes a new list for the run.
 function doorsOf(places: Place[]): Place[] {
   return places.map(place => ({ ...place, nextDoor: places.filter(other => other !== place && (place.vehicle
@@ -212,6 +225,7 @@ export function begin(world: World): State {
   const state: State = { places: world.places, people: start(world), minds: new Map(world.characters.map(character => [character.id, { ...blank(), long: character.memory ?? '' }])), seq: 0, deed: null,
     results: new Map(world.places.map(place => [place.id, []])), said: new Map(world.places.map(place => [place.id, []])), things: stocked(world), laws: beginLaws(world), touches: [], traces: traced(world),
     marks: world.characters.flatMap(({ id, marks }) => marks.map(({ zone, kind, level, text }) => ({ of: id, zone, kind, layers: [{ level, text, since: null, until: null }] }))),
+    ...(world.ways ? { ways: new Map() } : {}),
     ...(world.vehicles?.length ? { vehicleLines: new Map(world.characters.map(character => [character.id, new Map()])) } : {}),
     ...(world.vehicles?.some(place => place.vehicle?.route) ? { buses: { at: 0, passed: [], waiting: new Set(), doors: new Map() } } : {}) };
   if (state.buses) state.places = worldOf(world, state).places;
@@ -284,17 +298,18 @@ function applied(world: World, state: State, record: Record): Event {
     // The same for a world with `marks`: its entries about marks, read against the marks of those in the place as the clock has left them.
     const end = deed.at + deed.seconds, lasting = world.marks ? { marks: marksAt(state.marks, deed.at).filter(mark => present.includes(mark.of)), at: deed.at, end } : undefined;
     // The two fields of traces belong to the answer only in a world that keeps traces.
-    const extra = state.traces ? { traces: record.traces, wipes: record.wipes } : {};
+    const extra = { ...(state.traces ? { traces: record.traces, wipes: record.wipes } : {}), ...(world.ways ? { goes: record.goes } : {}) };
     const { text, wakes, moves, sets, poses, feels, beyond, search, finds, touches, lingers } = record,
       answer = { text, wakes, moves, sets, poses, feels, beyond, search, finds, ...(touches === undefined ? {} : { touches }), ...(lingers === undefined ? {} : { lingers }), ...extra };
     const hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
     // Nothing is heard next door of a deed in a place that has no place next door.
-    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, beyond, search, finds, touches, lingers, ...extra }), sleepers, present, hidden, held, lasting, state.traces ? labelsOn(state.traces, present) : undefined), answer)
+    if (!isDeepStrictEqual(readResult(JSON.stringify({ result: text, wakes, moves, sets, poses, feels, beyond, search, finds, touches, lingers, ...extra }), sleepers, present, hidden, held, lasting, state.traces ? labelsOn(state.traces, present) : undefined, world.ways ? waysOf(world, people, people.find(person => person.id === deed.who)!, state.things) : undefined), answer)
       || (beyond !== null && !spot.nextDoor.length)) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
     const event = result(world, people, state.things, deed, answer, state.traces);
     if ('code' in event) return refuse('holds an answer that the rules of things refuse');
+    if (world.ways && answer.goes !== null) state.ways!.set(deed.who, { place: answer.goes!, seq });
     if (touches) state.touches = touched(state.touches, touches, deed.at);
     if (lingers) state.marks = marked(state.marks, lingers, deed.at, end);
     const doer = named(world.characters, deed.who), moved = told(event, doer);
@@ -380,6 +395,8 @@ function applied(world: World, state: State, record: Record): Event {
   }
   if (record.kind === 'spent' || record.kind === 'weather') return refuse('is a record that only the clock brings, and it is not due');
   if (record.who !== actor.id || record.at !== actor.freeAt) return refuse('is not the next thing to happen in its world');
+  const way = wayDue(world, state, actor);
+  if (way ? !isDeepStrictEqual(record, way) : record.kind === 'act' && record.fromDeed !== undefined) return refuse('is not the way due from a deed');
   const mind = minds.get(actor.id)!;
   let event: Event;
   if (record.kind === 'memory') {
@@ -392,7 +409,7 @@ function applied(world: World, state: State, record: Record): Event {
       seconds: 0, cut: record.cut, heard: [], note: null };
   } else if (record.kind === 'act') {
     if (actor.asleep || actor.place === null) return refuse('is an action of someone asleep or on the way');
-    if (mind.size > world.shortWords) return refuse('is an action of someone whose memory was not folded first');
+    if (!way && mind.size > world.shortWords) return refuse('is an action of someone whose memory was not folded first');
     if (!Number.isInteger(record.limit) || record.limit < 1 || record.limit > MAX_WORDS) return refuse('holds a word limit that no turn has');
     // An answer that could not be used is kept as its reason, which must be one of the list; an action must read as itself.
     // An action whose span was cut reads as itself from one second more, so the mark stands on nothing else.
@@ -416,6 +433,10 @@ function applied(world: World, state: State, record: Record): Event {
       at: record.at + driveSeconds(world, vehicle.at!, action.place!, vehicle.faster) } : undefined;
     if (!isDeepStrictEqual(record.drive, drive)) return refuse('holds a drive different from the one its character takes');
     event = apply(world, people, actor, action, record.at, record.limit);
+    if (way) {
+      event.fromDeed = way.fromDeed;
+      state.ways!.delete(actor.id);
+    }
     const fare = event.transfer ? world.places.find(place => place.id === event.to)?.vehicle?.fare : undefined;
     if (fare) event.moved = pay(state.things, actor.id, fare.name, fare.n, named(world.characters, actor.id));
     if (drive) state.places = doorsOf(world.places.map(place => place.id === drive.vehicle ? { ...place,

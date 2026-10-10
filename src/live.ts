@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 
 import { ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
 import type { Request, Result } from './chatgpt.ts';
-import { advance, memoryStore, replay, RESULT_WORDS, standingAt, SAID_WORDS, vehicleDue, vehicleView, worldOf } from './journal.ts';
+import { advance, memoryStore, replay, RESULT_WORDS, standingAt, SAID_WORDS, wayDue, vehicleDue, vehicleView, worldOf } from './journal.ts';
 import type { Record, State, Store } from './journal.ts';
 import { idle, oldest, readMemory, sameScript } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { LAWS } from './laws.ts';
 import { closed } from './reading.ts';
-import { next, readAction, sleepersNear } from './action.ts';
+import { next, readAction, waysOf, sleepersNear } from './action.ts';
 import { labelsOn, readReply, readResult, refusal } from './answer.ts';
 import type { Answer, Rejected } from './answer.ts';
 import { all, MAX_IN_PLACE, MAX_MOVES, MAX_ON_PERSON, MAX_SETS, MAX_STOCK, NAME_WORDS, RECORD, shown, SINKS, sought, written } from './things.ts';
@@ -147,13 +147,13 @@ const notationOf = (traces: boolean) => `Every thing here is listed once, under 
 // things were no worse than without the field. It is form `A1` with that field, and of `A1` two forms with more
 // hints did no better on a weak model and one did harm. A change of it is a new text to measure, and the harness of
 // that check compares the two.
-const worldInstructionsOf = (traces: boolean) => `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.
+const worldInstructionsOf = (traces: boolean, ways = false) => `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.
 
 You are told what is there, and nothing else exists: a search for something you were not told of finds nothing of the kind. Say what is there as the world itself. Never speak of facts, of what was mentioned or listed, of labels and marks, or of your task.
 
 You are told the weather so that you know it, not to report it. A result speaks of the weather only when the deed meets it: someone steps out into it, opens a door or a window to it, looks or listens for it.
 
-You are told which other places there are. Nobody gets to another place by a deed: whoever tries is still here, by the way out, and the result says only that. A pose never names another place.
+${ways ? "You are told which place this is and which other places there are. A deed never ends in another place by itself: you say in `leads` where the deed takes the one who does it, and the rules do the rest. Mostly it takes them nowhere else, and `leads` is the id of this place. A part of this place that is not one of the other places, such as a room upstairs, a yard or the ground in front of the door, is this place still, and the pose may say where in the place they now are. When the deed is the way to one of the other places, such as setting off for it on foot, climbing the stairs that lead to it, going in or out through its door, getting into a vehicle that stands here or out of the one they are in, or driving off to it, `leads` is the id of that place, however long the way is: the rules then take the one who does the deed there, in the time the way takes, and the result says only what happens here before they leave. A pose never names another place." : "You are told which other places there are. Nobody gets to another place by a deed: whoever tries is still here, by the way out, and the result says only that. A pose never names another place."}
 
 You may be told which places are next door, behind a door or a thin wall, and who is in each, awake or asleep. Those people are not here: they see nothing of the deed, no entry of \`poses\` or \`feels\` is for them, and what they hear of it goes to \`beyond\`.
 
@@ -162,7 +162,7 @@ ${notationOf(traces)}
 The lists are the truth about where each thing is, and what an earlier result says of a thing may be out of date. You keep no count and rewrite no list: you say which things the deed moved, by label, and the lists are kept from that. A thing never appears from nowhere and never vanishes: it stays where it is listed unless an entry of yours moves it. A deed that only looks, listens or speaks moves nothing. A deed that needs a thing that is not here moves nothing either, and the result says what was seen of that.${
   traces ? ' The traces listed with a person are the truth in the same way: a person has those and no others, and each stays on that person, wherever they go and however long, unless an entry of yours takes it off.' : ''}
 
-Answer with one JSON object, its fields in this order.
+Answer with one JSON object, its fields in this order.${ways ? "\n- leads: the id of the place where this deed takes the one who does it. The id of this place when it takes them to no other place: they stay in it, in whatever part of it. The id of another place when the deed is their way there, even when the way lasts longer than the deed: name where it leads, and the rules count its time. Inside a vehicle, this place is the vehicle: its own id when they stay in it and it stays where it stands, the id of the place they drive it to, or the id of the place where it stands when they get out. It is for the one who does the deed alone. When the deed heads somewhere that has no id, it is the id of this place, and never the id of some other place. A step towards a door, a look up the stairs, a hand on the gate, a walk about the place: the id of this place." : ""}
 - search: true when the deed is a search of the place: someone looks through it, under and behind what is there, for one thing or for whatever there is. False for any other deed, a look around included.
 - finds: the labels of the hidden things that the deed goes straight to, or an empty list.
 - moves: what the deed moved, or an empty list. An entry has \`what\`, \`n\` and \`to\`. It says where a thing ends up and not the way it went: money taken out of a pocket and handed over is one entry, to the one who got it. \`what\` is the label of the thing. \`n\` is how many of it go: 1 for a thing with no number; for a thing with a number, the part that the deed names, or the whole number when all of it goes; for a stock, how many are taken. \`to\` is where it ends up: the id of a person here, in that person's hands or on them; the id of this place, lying here in sight; the label of a thing with brackets, in it or on it; \`eaten\`, when the one who does the deed eats or drinks it up; \`burned\`, when it burns up, which takes a \`fire\` here. A thing goes with all that it holds, as one entry: never list what is inside a thing that moves. Never list a thing that stays where it is.
@@ -218,7 +218,7 @@ const TOUCHES = `- touches: the touches between two people here that the deed be
 const LINGERS = `- lingers: the feelings of a part of a body that outlast the deed, as the deed began, changed or ended them, or an empty list. What is felt only while the deed lasts stays in \`feels\`; an itch, a burn, an ache, a pain or a numbness that is still there after the deed gets an entry here, and so does one listed under \`Feelings that last now\` when the deed eases, worsens or ends it. An entry has \`of\`, the id of a person here; \`zone\`, the part of the body: ${ZONES.slice(0, -1).map(zone => `\`${zone}\``).join(', ')}, or \`${ZONES.at(-1)}\` for the whole of it; \`kind\`: ${MARK_KINDS.slice(0, -1).map(kind => `\`${kind}\``).join(', ')} or \`${MARK_KINDS.at(-1)}\`; \`level\`: \`${LEVELS[0]}\`, \`${LEVELS[1]}\` or \`${LEVELS[2]}\`, or \`none\` when it is gone; \`minutes\`; and \`text\`: where exactly and what it is like, ${MARK_WORDS} words at most, in the language of the world's description, naming nobody, and empty with \`none\`. There is one entry at most for a person, a zone and a kind. With \`minutes\` null the feeling is so from now on. With \`minutes\`, a whole number from 1 to ${MAX_MINUTES}, it is so for that long after the deed and is then, by itself, again as it was before the entry: a salve makes a burn \`faint\` for some minutes and the burn then returns as it was, and a stubbed toe is a \`pain\` for a minute or two where nothing was and is then gone. A feeling listed under \`Feelings that last now\` needs no entry unless the deed changes it: it stays as listed, and leaving it out does not end it. A deed that does something to the very part of the body where a listed feeling sits changes it, at least for a while, and so its entry is due: a cream spread on a burn, cold water on it, a rub of an aching muscle, a blow on a bruise.`;
 // The world's text as the world of this world file reads it: the measured text, and with `touch` or `marks` those points in it.
 const worldTextOf = (world: World) => [...(world.touch ? [['\n- wakes:', TOUCHES]] : []), ...(world.marks ? [['\n- beyond:', LINGERS]] : [])]
-  .reduce((text, [before, point]) => text.replace(before, `\n${point}${before}`), worldInstructionsOf(traced(world)));
+  .reduce((text, [before, point]) => text.replace(before, `\n${point}${before}`), worldInstructionsOf(traced(world), world.ways));
 // What both texts of the world end with: the world as its file describes it, with its facts.
 const aboutOf = (world: World) => `The world: ${world.title}
 ${world.about}${world.facts === null ? '' : `\nFacts: ${world.facts}`}`;
@@ -270,9 +270,10 @@ const entries = (properties: object) => ({ type: 'array', items: { type: 'object
 // In a world with `marks` the entries about the lasting feelings stand after `feels`, for the same reason.
 // Traces and wipes stand last, after `result`, in that order, played on two models on the other line.
 // This port onto the main line is played on no model.
-const resultSchemaOf = (state: State, place: Place, { touch, marks }: World) => {
+const resultSchemaOf = (state: State, place: Place, world: World) => {
+  const { touch, marks } = world;
   const names = namedOf(state, place, true);
-  const properties = { search: { type: 'boolean' }, finds: { type: 'array', items: oneOf(names.finds) },
+  const properties = { ...(world.ways ? { leads: { type: 'string', enum: [place.id, ...waysOf(world, state.people, state.people.find(person => person.id === state.deed!.who)!, state.things)] } } : {}), search: { type: 'boolean' }, finds: { type: 'array', items: oneOf(names.finds) },
     moves: entries({ what: oneOf(names.what), n: { type: 'integer' }, to: oneOf(names.to) }), sets: entries({ what: oneOf(names.stated), state: oneOf(names.states) }),
     poses: entries({ of: oneOf(names.of), text: { type: 'string' } }),
     ...(touch ? { touches: entries({ of: oneOf(names.of), to: oneOf(names.of), kind: oneOf([...KINDS, NONE]), force: oneOf([...FORCES]), text: { type: 'string' } }) } : {}),
@@ -357,18 +358,20 @@ function replyOf(world: World, state: State, said: Event): string {
 function deedOf(world: World, state: State, deed: Event): string {
   const place = world.places.find(item => item.id === deed.place)!;
   const { found } = sought(state.things, deed);
+  const boards = world.ways && waysOf(world, state.people, state.people.find(person => person.id === deed.who)!, state.things).some(id => world.places.find(item => item.id === id)!.vehicle);
   return [...placeOf(state, place, true), ...(place.vehicle ? [place.vehicle.heading
       ? `This vehicle is driving from ${tagged(world.places.find(item => item.id === place.vehicle!.heading!.from)!)} to ${tagged(world.places.find(item => item.id === place.vehicle!.heading!.to)!)}.`
       : `This vehicle stands at ${tagged(world.places.find(item => item.id === place.vehicle!.at)!)}.`] : []), ...standingAt(world, state.people, place.id, state.deed?.at ?? state.buses?.at ?? 0),
     ...state.things.places.get(place.id)!.filter(thing => thing.hidden).map(thing => `Hidden here (${thing.label}). This deed finds it ${found.includes(thing)
       ? 'if it is a search of the place, or if it goes straight to the spot named' : 'only if it goes straight to the spot named, and not by searching'}: ${thing.hidden!.spot}: ${written(thing)}`),
-    ...(world.places.length > 1 ? [`Other places, which nobody reaches by a deed: ${world.places.filter(item => item !== place && !item.vehicle).map(tagged).join(', ')}.`] : []),
+    ...(world.places.length > 1 ? [`Other places, which ${world.ways ? "a deed reaches only through `leads`" : "nobody reaches by a deed"}: ${world.places.filter(item => item !== place && !item.vehicle).map(tagged).join(', ')}.`] : []),
     ...(place.nextDoor.length ? ['Next door:', ...place.nextDoor.map(id => `- ${tagged(world.places.find(item => item.id === id)!)}: ${world.characters.flatMap((character, index) =>
       state.people[index].place === id ? [`${tagged(character)}, ${state.people[index].asleep ? 'asleep' : 'awake'}`] : []).join('; ') || 'nobody'}.`)] : []),
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place),
     ...(world.touch ? heldOf(state, place, deed.at) : []), ...(world.marks ? lastingOf(state, place, deed.at) : []), ...crowdOf(place),
     ...earlierOf(state, place),
-    `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`, 'What comes of it?'].join('\n');
+    `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`,
+    `What comes of it?${world.ways ? ` This place is \`${place.id}\`, and \`leads\` is \`${place.id}\` unless the deed is the way to another place${boards ? ' or into a vehicle that stands here' : ''}.` : ''}`].join('\n');
 }
 
 // No request of a world is longer than this many characters, system text and message together, however long the
@@ -678,13 +681,13 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       const lasting = world.marks ? { marks: here.flatMap(id => marksOf(state, id, deed.at)), at: deed.at, end: deed.at + deed.seconds } : undefined;
       const got = await answered(deed, worldSystem, resultSchemaOf(state, place, world), deedOf(world, state, deed), answer => {
         // What is heard next door of a deed in a place with no place next door is nothing, whatever the answer says.
-        const came = readResult(answer, sleepers, here, hidden, held, lasting, state.traces ? labelsOn(state.traces, here) : undefined);
+        const came = readResult(answer, sleepers, here, hidden, held, lasting, state.traces ? labelsOn(state.traces, here) : undefined, world.ways ? waysOf(world, state.people, state.people.find(person => person.id === deed.who)!, state.things) : undefined, deed.place);
         return came && { ...came, beyond: place.nextDoor.length ? came.beyond : null };
       });
       if (!got) return outcome;
       // A deed that nothing came of changed no touch, mark or trace either.
       await happened({ kind: 'result', who: deed.who, at: deed.at, ...(got.came ?? { text: null, wakes: [], moves: [], sets: [], poses: [], feels: [], beyond: null, search: false, finds: [], ...(held ? { touches: [] } : {}), ...(lasting ? { lingers: [] } : {}),
-        ...(state.traces ? { traces: [], wipes: [] } : {}) }) }, judge.name);
+        ...(state.traces ? { traces: [], wipes: [] } : {}), ...(world.ways ? { goes: null } : {}) }) }, judge.name);
       continue;
     }
     const actor = next(state.people);
@@ -709,6 +712,11 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     }
     if (actor.asleep && idle(mind)) {
       await happened({ kind: 'wake', who, at: now });
+      continue;
+    }
+    const way = wayDue(world, state, actor);
+    if (way) {
+      await happened(way);
       continue;
     }
     const system = systemOf(world, shared, who), player = playerOf(who);

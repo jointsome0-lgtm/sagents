@@ -541,9 +541,66 @@ The world answers a deed:
   found either way is hidden no longer, for anyone: it lies in the place in sight, with all that it holds. Only an
   answer that finds a hidden thing can move it or what it holds. The time one person searched does not count for
   another, and it is kept when the person leaves.
-- Nobody gets to another place by a deed, and the world is told so: whoever tries is still where it was, by the
+- Without `ways`, nobody gets to another place by a deed, and the world is told so: whoever tries is still where it was, by the
   way out, and a pose never names another place. Only a `go` moves anyone. The world is told the weather so that it
   knows it, and to speak of it only when the deed meets it. Nothing checks that it kept to either.
+- A world file may give `"ways": true`. It was read in probes of one deed, where a scripted
+  resident does a deed and the world answers it, and played in one line of 300 requests by the smaller model at
+  low effort with the fourth of its wordings: the line's 52 deeds sent nobody on a way they did not take, and
+  only one of them was a way, whose answer the rules refused. Six wordings were tried over 75 deeds: ways to
+  another place on foot, by a stair, through a door and by car, gestures towards another place, moves within a
+  place, and one drive that the rules bar. The smaller model at low effort read all six, in 906 requests over
+  their rounds. In one round each: the first, with `goes` and null, read 69 of the 75 as meant and sent four on a
+  way they did not take; the second, which added the places a told refusal would name, 72 and two; the third,
+  which asked where the doer is when the deed is done, 67 and none, for a driver was then still in the car and a
+  walker still on the way; the fourth, which is the wording below without the request's last sentence, 74 and
+  none, and over three rounds of the 25 oldest deeds 74 of the 75 trials. An open model of 31B read
+  the fourth as well, in one round: every way and every move within a place as meant, and two gestures of 25, a
+  hand on a rail and a door held open, as the way out of a place named "Inside the lighthouse" to its neighbour
+  named "Lighthouse", whose id it took for the id of the place it stood in. The fifth wording says this place's
+  id in the request's last sentence. With it the open model sent nobody away and missed one way of 33, in one
+  round, and the smaller model in three rounds sent nobody away and missed six ways of 99, five of them a seat
+  taken in a car that stood by, which the request does not list among the other places. The sixth, below, adds
+  the vehicle to that sentence where one stands by: in two rounds and 62 deeds of a third, which a failure of
+  the service cut, the smaller model sent nobody away and missed three ways of 94, none of them a seat taken in
+  the car. The open model read the sixth in two rounds, 150 deeds: every one of the 66 ways as meant, and nobody
+  sent away. Of the fourth and the fifth wording it read one round each: its two gestures against none are too
+  few to prove the sentence. A line of 150 requests by the smaller model in a world with a car had 14 deeds, one
+  of them a seat taken in the car, which was read as the way; nobody else was sent anywhere.
+  Without the setting, requests, records, events, stored rows and the format mark stay as before. The world's
+  answer to a deed has `leads` first, before `search`: the id of the place where the deed takes its doer. The
+  schema admits the id of the deed's own place, which says that the deed takes them nowhere else, and the ids of
+  the other places that a `go` of the doer would take now or would be refused for a reason the doer is then told:
+  a full vehicle, a fare, a driver, a reach or a round. A vehicle standing here is among them, and inside a
+  vehicle the deed's own place is the vehicle and the place it stands at is among them, whose id the existing
+  `This vehicle stands at ...` line gives.
+  Only the fourth paragraph of the world's instructions, the first field's point, the request's line of other
+  places and its last line change. The paragraph reads:
+
+  > You are told which place this is and which other places there are. A deed never ends in another place by itself: you say in `leads` where the deed takes the one who does it, and the rules do the rest. Mostly it takes them nowhere else, and `leads` is the id of this place. A part of this place that is not one of the other places, such as a room upstairs, a yard or the ground in front of the door, is this place still, and the pose may say where in the place they now are. When the deed is the way to one of the other places, such as setting off for it on foot, climbing the stairs that lead to it, going in or out through its door, getting into a vehicle that stands here or out of the one they are in, or driving off to it, `leads` is the id of that place, however long the way is: the rules then take the one who does the deed there, in the time the way takes, and the result says only what happens here before they leave. A pose never names another place.
+
+  The first field's point reads:
+
+  > - leads: the id of the place where this deed takes the one who does it. The id of this place when it takes them to no other place: they stay in it, in whatever part of it. The id of another place when the deed is their way there, even when the way lasts longer than the deed: name where it leads, and the rules count its time. Inside a vehicle, this place is the vehicle: its own id when they stay in it and it stays where it stands, the id of the place they drive it to, or the id of the place where it stands when they get out. It is for the one who does the deed alone. When the deed heads somewhere that has no id, it is the id of this place, and never the id of some other place. A step towards a door, a look up the stairs, a hand on the gate, a walk about the place: the id of this place.
+
+  The request says ``Other places, which a deed reaches only through `leads`: ...`` instead of
+  `Other places, which nobody reaches by a deed: ...`, and it ends
+  ``What comes of it? This place is `cafe`, and `leads` is `cafe` unless the deed is the way to another place or into a vehicle that stands here.``,
+  with the id of the deed's place; the words about a vehicle are there only when a vehicle is among the ids that
+  the schema admits. The record of the result and its event keep the answer as
+  `goes`, the id of another place or null, whatever the field was called when the world was asked.
+  When `goes` names a place, the rest of the answer takes
+  effect as before except that the doer's entry in `poses` is dropped. At the doer's next free moment, the deed's
+  end or earlier if it is interrupted, the rules check that `go` again and take it without asking a model. Its
+  seconds, leaving and arrival, what others perceive, seats, drivers, fares and the ending of touches are those
+  of any `go`. The action record and its event have `fromDeed`, the sequence number of the result record that
+  named the way; its `by` is null. The pending way is rebuilt from that result, so a pause before departure or
+  on the way replays and continues exactly. The doer reads the ordinary lines of its own `go`.
+  If that `go` is refused at departure, no `go` is made: the deed stays as it is, and the action is the ordinary
+  refused action's thirty-second wait, with its existing refusal sentence at the doer's next turn. The pending
+  way is used up in either case. The clock's laws and due vehicle arrivals still come before an action.
+  No resident's text or request for a figure's answer changes. Such a world takes state format `30`, before
+  every other mark; a state with that mark opens only for a world with `ways`.
 - The doer and everyone awake in the place read what came of it at their own next turn; it interrupts nobody. A
   sleeper it wakes has its sleep end when the deed ends, and one of the deed's own place reads who woke it and by
   what deed.
@@ -783,7 +840,7 @@ The journal and the state file:
   reason why the answer could not be used, the world's answer to a deed, a figure's answer to a speech, an arrival, a waking or a falling asleep
   at the limit, a change of the weather, a memory rewrite. A drive is one action record, with the driver, vehicle,
   departure, destination and arrival instant; its arrival is one record of the engine at that instant. A state
-  stopped on the way continues to the same arrival. With none of the three body candidates below, a world without
+  stopped on the way continues to the same arrival. With no `ways` and none of the three body candidates below, a world without
   `vehicles` keeps format `18`, so its state files open as before. A world with `vehicles`, even an empty list,
   takes `19`; one with a `route` takes `20`,
   since bus positions follow the clock and fares leave the world. A file with another mark is refused as another
@@ -805,11 +862,11 @@ The journal and the state file:
   is continued keeps those names and a journal begun in another file has others. A run with no state file makes one
   for itself. No name is printed, and none is in the journal. A byte copy of a state file has the names of the original. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
   writes nothing to it.
-- The state file's format mark is `23` in a world with traces, `22` with `marks`, `21` with `touch`, and otherwise
+- The state file's format mark is `30` in a world with `ways`, `23` in a world with traces, `22` with `marks`, `21` with `touch`, and otherwise
   `18`, `19` or `20` as above: earlier versions ignore those settings and must not continue such a world without
   keeping them. The highest mark that applies is taken, so vehicles with touch take `21` too.
   A state file opens only under the mark of its world file. A file of release 0.1.0 or 0.1.1 for a world with none
-  of the three settings and no `vehicles` still opens and goes on. A file of either release for a world whose file already had
+  of these settings and no `vehicles` still opens and goes on. A file of either release for a world whose file already had
   `touch: true`, `marks: true` or a character's `traces` has mark `18` and is refused: that release ignored the
   setting and kept nothing of the mechanism.
 - With `--run <dir>` the run is kept as an experiment that [the lab](#the-lab) reads: the directory holds the world

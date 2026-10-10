@@ -109,6 +109,15 @@ export function readAction(world: World, actor: Person, answer: string, people: 
   return 'action';
 }
 
+// The places a deed may name as a way: those a go by its doer would take now, and those it would be refused for a
+// reason the doer is then told (a full vehicle, a fare, a driver, a reach, a round), so that the world names where
+// the deed heads and the rules say whether it gets there.
+const TOLD: readonly unknown[] = ['full', 'fare', 'driver', 'reach', 'round'];
+export const waysOf = (world: World, people: Person[], actor: Person, things: Things): string[] => world.places.filter(place => {
+  const read = readAction(world, actor, JSON.stringify({ action: 'go', place: place.id }), people, things);
+  return typeof read !== 'string' || TOLD.includes(read);
+}).map(place => place.id);
+
 // Someone spoke, came or left near this character, or the weather changed over it: its wait or its activity ends. It is free now, or when its own
 // speech and the speech it is hearing have ended.
 export const attend = (person: Person, now: number) => { person.freeAt = Math.max(now, person.speaking, person.listening, person.passageUntil ?? 0); };

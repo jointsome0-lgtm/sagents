@@ -64,7 +64,8 @@ export const traceOf = (text: string) => wordsOf(text).join(' ').replace(/[.;]+$
 // `touch` says that a touch between two people is kept as state (`touch.ts`); a world without it has none.
 // `marks` says that a lasting feeling of a part of a body is kept as state (`marks.ts`), and only in such a world may
 // a character begin with some, its own `marks`. A `result` there also has `lingers`, the entries about them as read.
-export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null; touch: boolean; marks: boolean;
+// `ways` lets the world name where a deed leads, which a result keeps as `goes`; the rules take its go at the doer's next free moment.
+export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null; touch: boolean; marks: boolean; ways?: true;
   vehicles?: Place[]; travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
@@ -87,11 +88,13 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // `result` also has `traced`, the traces the answer left, each under its new label, and `wiped`, those it took off. A `weather` is a change of the
 // weather, which nobody does and which has no place: `who` and `place` are empty, `text` is the new weather under the
 // open sky and `indoors`, which only this kind has, what of it reaches someone under a roof, or null.
+// In a world with `ways`, a result has `goes`, its doer's way or null, and the action it brings has `fromDeed`,
+// the result record's number, also when that action is refused. Neither adds a line that anyone reads.
 export type Event = { at: number; clock: string; kind: Kind | 'drive' | 'park' | 'arrive' | 'wake' | 'memory' | 'result' | 'reply' | 'weather'; who: string; place: string; to: string | null;
   text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; gesture?: string; says?: string; wakes?: string[];
   transfer?: true; from?: string; arrival?: number; indoors?: string | null; search?: boolean; finds?: string[]; moved?: Posting[]; set?: { what: string; name: string; state: string }[];
   poses?: { of: string; text: string }[]; feels?: { of: string; text: string }[]; beyond?: string | null; nearby?: string[]; found?: { what: string; name: string; spot: string }[]; touches?: Change[]; lingers?: Lingering[];
-  traced?: Mark[]; wiped?: Mark[] };
+  traced?: Mark[]; wiped?: Mark[]; goes?: string | null; fromDeed?: number };
 // A trace with its label and the person it is on.
 export type Mark = { of: string; label: string; text: string };
 // A character in the run. On the way it is in no place and `heading` names where it will arrive; asleep it stays in
@@ -126,6 +129,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   durationOf(Math.max(2, Math.ceil(MAX_WORDS / wordsPerMinute * 60)), 'wordsPerMinute');
   durationOf(Math.max(1, Math.round(travelMinutes * 60)), 'travelMinutes');
   if (value.touch !== undefined && typeof value.touch !== 'boolean') return refuse('touch', 'must be true or false');
+  if (value.ways !== undefined && typeof value.ways !== 'boolean') return refuse('ways', 'must be true or false');
   if (value.marks !== undefined && typeof value.marks !== 'boolean') return refuse('marks', 'must be true or false');
   const places: Place[] = [], taken: string[] = [], labels = { next: 1 }, longWords = countOf(value.longWords, 'longWords', 400);
   const traced = Array.isArray(value.characters) && value.characters.some(character => isObject(character) && character.traces !== undefined);
@@ -249,7 +253,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
   }
   const core = { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute, remote: typeof value.remote === 'string' ? value.remote : null, touch: value.touch === true, marks: value.marks === true,
-    travelMinutes,
+    ...(value.ways === true ? { ways: true as const } : {}), travelMinutes,
     walkMetresPerMinute, shortWords: countOf(value.shortWords, 'shortWords', 2000),
     longWords, places, characters, ...(value.vehicles === undefined ? {} : { vehicles }) };
   for (const [index, place] of vehicles.entries()) {

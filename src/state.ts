@@ -10,11 +10,11 @@ import type { StoredEntry } from './eval.ts';
 // Vehicles keep moving places, and routes take fares and follow the clock. Other worlds keep their mark.
 const FORMAT = '18', VEHICLES_FORMAT = '19', BUSES_FORMAT = '20';
 // Earlier engines ignore these settings and could go on without keeping what they name.
-const TOUCH_FORMAT = '21', MARKS_FORMAT = '22', TRACES_FORMAT = '23';
+const TOUCH_FORMAT = '21', MARKS_FORMAT = '22', TRACES_FORMAT = '23', WAYS_FORMAT = '30';
 const formatOf = (world: string) => {
   try {
     const file = JSON.parse(world);
-    return Array.isArray(file?.characters) && file.characters.some((character: { traces?: unknown } | null) => character?.traces !== undefined) ? TRACES_FORMAT
+    return file?.ways === true ? WAYS_FORMAT : Array.isArray(file?.characters) && file.characters.some((character: { traces?: unknown } | null) => character?.traces !== undefined) ? TRACES_FORMAT
       : file?.marks === true ? MARKS_FORMAT : file?.touch === true ? TOUCH_FORMAT
         : Array.isArray(file?.vehicles) && file.vehicles.some((vehicle: { route?: unknown }) => vehicle?.route !== undefined) ? BUSES_FORMAT
           : file?.vehicles !== undefined ? VEHICLES_FORMAT : FORMAT;
