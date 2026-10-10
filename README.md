@@ -297,7 +297,7 @@ The rules of time and hearing:
   and where, on waking if asleep in a driven vehicle. No arrival or departure line tells outsiders who is inside. The engine records
   an arrival before all people's arrivals and turns at that instant, after a change of the weather that falls
   on it and before a sleep that the main line's tiredness brings at it, as it does for someone who arrives on foot.
-  This is a candidate: checked with a stand-in only and played on no model. Those checks describe the other line; this port onto the main line is played on no model.
+  Those rules were checked with a stand-in on the other line; this port onto the main line was played in four runs of 79 requests each in a world with a car, one by the smaller hosted model at low effort and three by the open model, each with one drive and one parking, and in a line of 150 requests by the smaller model in a world with `ways`.
   Worlds without vehicles keep their requests and journals unchanged. Turns keep the main line's rebuilt form,
   with the transport lines in the candidate's words. Opening hours and places on demand are absent here, so their
   closed-place refusals and go by words are absent too.
@@ -426,7 +426,7 @@ The world answers a deed:
   and its span. It is sent no sheet, note, memory or speech, and of those next door no looks, pose or things.
   A candidate played on real models over an earlier engine, still awaiting measurement over 0.1.1: in a world that
   keeps traces it is also told, after each person's looks and pose, that person's traces under their labels, as
-  «Things» says. Those notes describe the other line; this port onto the main line is played on no model.
+  «Things» says. Those notes describe the other line; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
 - It answers with `search`, whether the deed was a search of the place; `finds`, the labels of the hidden things
   the deed went straight to; `moves`, `sets` and `poses`, described under «Things» below; `wakes`, the sleepers of
   that place or of a place next door whom the deed wakes; `feels`, what the deed makes a body feel, and `beyond`,
@@ -445,7 +445,7 @@ The world answers a deed:
   dropped, and an entry of `moves` or `sets` that cannot be taken refuses the answer, as «Things» says.
   In a world that keeps traces the answer has two fields more, `traces` and `wipes`, last, after `result`, in that
   order, described under «Things». This order was played on two models on the other line and is the one taken
-  here; this port onto the main line is played on no model.
+  here; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
 - `feels` is a list of `{ of, text }`: what the deed makes the body of a person there feel, such as weight, cold,
   pain or taste, and never a thought or a wish. A deed that does something to a body gives entries, for the one
   touched and for the one who touches; a deed that only looks, listens or speaks gives none, and one who only
@@ -466,7 +466,7 @@ The world answers a deed:
   carrying, and a body that changes and is kept as a record.
 - A touch between two people is kept as state only in a world whose file says `"touch": true` at its top level
   (`src/touch.ts`). **This candidate was played on real models over an earlier engine and still awaits
-  measurement over 0.1.1**. Those notes describe the other line; this port onto the main line is played on no model.
+  measurement over 0.1.1**. Those notes describe the other line; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model. In them 20 touches began, 74 answers told what a body felt, 2 lasting feelings were set, 4 traces were written and 6 wiped: the mechanisms run, and what they change in a story is what still awaits measurement.
   Without the setting a world is asked, answered and kept as before, to the letter, and a journal written before
   the setting existed replays. With it:
   - The world's answer has one more list, `touches`, after `poses` and before `wakes`, so that the fields before it
@@ -505,7 +505,7 @@ The world answers a deed:
     renew it. No line of anyone's memory is written for a touch: the result and `feels` tell of its beginning.
 - A lasting feeling of a part of a body, a mark, is kept as state only in a world whose file says `"marks": true`
   at its top level (`src/marks.ts`). **This candidate was played on real models over an earlier engine and still awaits
-  measurement over 0.1.1**. Those notes describe the other line; this port onto the main line is played on no model.
+  measurement over 0.1.1**. Those notes describe the other line; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
   Without the setting a world is asked, answered and kept as before, to the letter. With it:
   - A mark is one feeling of one person: `of`; `zone`, one of `head`, `face`, `neck`, `shoulders`, `chest`, `back`,
     `belly`, `hips`, `arms`, `hands`, `legs`, `feet`, or `body` for the whole of it; `kind`, one of `itch`, `burn`,
@@ -751,10 +751,10 @@ Things:
 - In a world file with `touch` a turn also says the touches that hold between the resident and someone there, and
   those it sees between others, as the point on touches under the world's answer says; this candidate was played on
   real models over an earlier engine and still awaits measurement over 0.1.1. Those notes describe the other line;
-  this port onto the main line is played on no model.
+  this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
 - In a world file with `marks` a turn also says the lasting feelings of the resident's own body, as the point on
   marks under the world's answer says; this candidate was played on real models over an earlier engine and still
-  awaits measurement over 0.1.1. Those notes describe the other line; this port onto the main line is played on no model.
+  awaits measurement over 0.1.1. Those notes describe the other line; this port onto the main line was played in eight runs of 79 requests each, two by the smaller hosted model at low effort and six by the open model.
 - A character's `looks` are part of its own system text. Every turn says its own pose and what it carries, three
   things deep with the counts, and for each person in its place their looks, pose and what they carry, without what
   is inside a thing unless the thing is `open`. It is never sent what is inside a thing that another carries,
