@@ -1,19 +1,22 @@
 // The laws of a live world that the clock drives, in one form, and a world file read with their settings. A law of
 // this kind has settings, a part of the world's state that is its own, and a record that the rules put when the clock
-// reaches its moment: no model is asked for it. Sleep debt and the weather are the two there are. No model and no
+// reaches its moment, if it puts records: no model is asked for it. No model and no
 // disk here: an environment comes in as the command line read it.
-import { isObject, WorldError } from './reading.ts';
+import { isObject, refuse, WorldError } from './reading.ts';
 import { sleep } from './sleep.ts';
 import type { Debt } from './sleep.ts';
 import { weather } from './weather.ts';
 import type { Skies } from './weather.ts';
+import { hunger } from './hunger.ts';
+import type { Fed } from './hunger.ts';
+import { all } from './things.ts';
 import { readCore } from './world.ts';
 import type { Event, Person, Place, World } from './world.ts';
 
 export type Fields = { readonly [field: string]: unknown };
 // The settings of the laws, which a world holds, and their parts of a world's state.
-export type Settings = Pick<World, 'sleep' | 'weather'>;
-export type Parts = { debts: Map<string, Debt>; skies: Skies | null };
+export type Settings = Pick<World, 'sleep' | 'weather' | 'hunger'>;
+export type Parts = { debts: Map<string, Debt>; skies: Skies | null; fed?: Map<string, Fed> };
 // The records the laws put: a person who could stay awake no longer falls asleep, and the weather changes to its
 // state number `n`.
 export type LawRecord = { kind: 'spent'; who: string; at: number } | { kind: 'weather'; at: number; n: number };
@@ -22,8 +25,8 @@ export type LawRecord = { kind: 'spent'; who: string; at: number } | { kind: 'we
 export type Put = { event: Event; lines: Map<string, { text: string; idle: boolean }> };
 
 export type Law<Name extends keyof Settings, Part extends keyof Parts> = {
-  kind: LawRecord['kind'];
-  // The names of its settings in a world file and in an environment.
+  kind?: LawRecord['kind'];
+  // The names of its settings in a world file; sleep and weather also take them from an environment.
   fields: string[];
   // Its settings from a world file's fields, checked: the first thing wrong is one sentence that names the field.
   read(file: Fields, clock: string): Pick<Settings, Name>;
@@ -31,8 +34,8 @@ export type Law<Name extends keyof Settings, Part extends keyof Parts> = {
   begin(world: World): Pick<Parts, Part>;
   // The record the rules put now, before `actor`, the next to play, has its turn; or null. A journal holds this
   // record there and no other, and holds a record of this kind nowhere else.
-  due(world: World, parts: Parts, actor: Person): LawRecord | null;
-  put(world: World, parts: Parts, people: Person[], record: LawRecord): Put;
+  due?(world: World, parts: Parts, actor: Person): LawRecord | null;
+  put?(world: World, parts: Parts, people: Person[], record: LawRecord): Put;
   // What it adds to a resident's turn, as one line, or null.
   turn(world: World, parts: Parts, actor: Person, now: number): string | null;
   // The most characters it adds to one request, a resident's or the world's.
@@ -41,14 +44,13 @@ export type Law<Name extends keyof Settings, Part extends keyof Parts> = {
   world?(world: World, parts: Parts, place: Place): string | null;
   // What it adds to what the others in a place are told of `person`. Sleep's alone.
   seen?(world: World, parts: Parts, person: Person, now: number): string;
-  // Its part of the state kept up after an event of any kind. Sleep's alone: its count turns when someone falls
-  // asleep or wakes.
+  // Its part of the state kept up after an event of any kind, including a deed's result.
   after?(parts: Parts, event: Event): void;
 };
 
 // In the order the rules ask them: a change of the weather that is due comes before anyone's turn at that moment.
-export const LAWS: readonly (typeof weather | typeof sleep)[] = [weather, sleep];
-export const beginLaws = (world: World): Parts => ({ ...weather.begin(world), ...sleep.begin(world) });
+export const LAWS: readonly (typeof weather | typeof sleep | typeof hunger)[] = [weather, sleep, hunger];
+export const beginLaws = (world: World): Parts => ({ ...weather.begin(world), ...sleep.begin(world), ...hunger.begin(world) });
 
 const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 // The environment a world file names, or null. It is a file's name, so it is held to lower-case letters, digits and `-`.
@@ -64,8 +66,15 @@ export const isEnvironmentName = (name: string) => NAME.test(name);
 // setting the world file gives itself takes the place of the environment's.
 export function readWorld(value: unknown, environment?: unknown): World {
   const core = readCore(value);
-  const fields = LAWS.flatMap(law => law.fields), own: Fields = isObject(value) ? value : {};
-  const read = (file: Fields) => ({ ...weather.read(file, core.clock), ...sleep.read(file, core.clock) });
+  const fields = [weather, sleep].flatMap(law => law.fields), own: Fields = isObject(value) ? value : {};
+  // Hunger belongs to the world file alone, as does the format mark that protects its kept runs.
+  const settings = hunger.read(own, core.clock);
+  if (settings.hunger) {
+    const things = all([...core.places.flatMap(place => place.things), ...(core.vehicles ?? []).flatMap(place => place.things), ...core.characters.flatMap(person => person.carries)]);
+    if (!things.some(thing => thing.food !== null && thing.food > 0)) return refuse('hunger', 'needs a thing with `food` above zero');
+    if (!things.some(thing => thing.drink)) return refuse('hunger', 'needs a thing with `drink: true`');
+  }
+  const read = (file: Fields) => ({ ...weather.read(file, core.clock), ...sleep.read(file, core.clock), ...settings });
   if (environment === undefined) return { ...core, ...read(own) };
   try {
     if (!isObject(environment)) throw new WorldError('The world file cannot be used: `the file` must be a JSON object.');

@@ -537,7 +537,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   pause = false, cutRun = 3, declinedRun = 3, invalidRun = 5, cache, onAsk = () => {} }: Live): Promise<Outcome> {
   const given = world, state = replay(world, journal.entries());
   world = worldOf(given, state);
-  const broughtFor = (actor: Person) => LAWS.map(law => law.due(world, state.laws, actor)).find(record => record !== null);
+  const broughtFor = (actor: Person) => LAWS.map(law => law.due?.(world, state.laws, actor) ?? null).find(record => record !== null);
   const first = next(state.people);
   // Neither a vehicle's arrival nor what a law brings is due after the next person's free moment.
   const stands = state.deed?.at ?? Math.min(vehicleDue(world, state)?.at ?? first.freeAt, broughtFor(first)?.at ?? first.freeAt);

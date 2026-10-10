@@ -149,7 +149,7 @@ export function readReply(answer: string): { text: string | null; moves: Move[] 
 const settled = (world: World, people: Person[], things: Things, deed: Event, { moves, sets = [], search = false, finds = [] }: Partial<Answer> & { moves: Move[] }) =>
   settle(things, deed.place, people.filter(person => person.place === deed.place).map(person => person.id),
     new Map([...namesOf(world), ...world.places].map(item => [item.id, item.name])),
-    [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do');
+    [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do', world.hunger === true);
 const hereAt = (people: Person[], deed: Event) => people.filter(person => person.place === deed.place).map(person => person.id);
 // Why an answer to `deed` cannot be taken as it was read, or null when it can. Nothing is changed by asking.
 // `traces` are those of a run that keeps them, for a deed's answer.

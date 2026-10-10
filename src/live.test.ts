@@ -3,6 +3,10 @@
 // in the stopping spends the plan on calls nobody asked for, and a mistake around sleep loses what a character knew.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { ModelError } from './chatgpt.ts';
 import type { Request } from './chatgpt.ts';
@@ -13,6 +17,8 @@ import { readWorld } from './laws.ts';
 import { readAction } from './action.ts';
 import { readMemory, sameScript } from './memory.ts';
 import { travelSeconds } from './time.ts';
+import { hunger } from './hunger.ts';
+import { openState } from './state.ts';
 
 // Sixty words a minute: one word is one second. Both rooms have a clock, so everyone reads the exact time.
 const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
@@ -55,6 +61,99 @@ Means of remote contact: telephone.
 
 You are Boris (boris).
 SHEET-BORIS`;
+
+test('optional hunger leaves old journals alone and keeps fed counts through a stopped run', async () => {
+  const file = { title: 'Kitchen', about: 'A quiet kitchen.', clock: '15:30', dayStart: '15:30',
+    places: [{ id: 'kitchen', name: 'Kitchen', about: 'A kitchen.', clock: true, things: [
+      { name: 'bread', stock: true, food: 80 }, { name: 'stew', stock: true, food: 600 },
+      { name: 'jug', holds: [{ name: 'water', n: 8, food: 0, drink: true }] }] }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'kitchen', sheet: 'SHEET-ANNA' }, { id: 'boris', name: 'Boris', place: 'kitchen', sheet: 'SHEET-BORIS' }] };
+  const fed = readWorld({ ...file, hunger: true }), plain = readWorld(file);
+  const withoutDrink = readWorld({ ...file, places: [{ ...file.places[0], things: [...file.places[0].things.slice(0, 2), { name: 'jug', holds: [{ name: 'water', n: 8, food: 0 }] }] }] });
+  const eat = (what: string, n = 1) => came({ moves: [{ what, n, to: 'eaten' }] });
+  const waits = () => Array.from({ length: 4 }, () => act('wait', { seconds: 3600 }));
+  const first = () => standIn({ anna: [...waits(), act('do', { text: 'eats stew', seconds: 1 })], boris: waits(), world: [eat('t2')] });
+  // A drink field without hunger leaves every request and entry as it was without the field.
+  const old = [];
+  for (const given of [plain, withoutDrink]) {
+    const answer = first(), journal = memoryStore();
+    await runLive({ world: given, respond: answer.respond, model: 'stand-in', calls: 10, minutes: 300, journal, pause: true });
+    old.push({ sent: answer.sent, entries: journal.all });
+    assert.equal('fed' in replay(given, journal.all).laws, false);
+    assert.doesNotMatch(JSON.stringify(journal.all), /"drink"/);
+  }
+  assert.deepEqual(old[0], old[1]);
+  for (const [things, missing] of [[[{ name: 'water', food: 0, drink: true }], /`hunger` needs a thing with `food` above zero/],
+    [[{ name: 'bread', food: 80 }], /`hunger` needs a thing with `drink: true`/]] as const) {
+    assert.throws(() => readWorld({ ...file, hunger: true, places: [{ ...file.places[0], things }] }), missing);
+  }
+  for (const setting of [false, null, 'true']) assert.throws(() => readWorld({ ...file, hunger: setting }), /`hunger` must be true or absent/);
+  assert.throws(() => readWorld({ ...file, places: [{ ...file.places[0], things: [{ name: 'water', drink: true }] }] }), /`places\[0\]\.things\[0\]\.drink` needs `food`/);
+  const directory = mkdtempSync(join(tmpdir(), 'sagents-hunger-'));
+  try {
+    const path = join(directory, 'state.sqlite'), source = JSON.stringify({ ...file, hunger: true });
+    let journal = openState(path, source);
+    const answer = first();
+    let entries;
+    try {
+      await runLive({ world: fed, respond: answer.respond, model: 'stand-in', calls: 10, minutes: 300, journal, pause: true });
+      entries = [...journal.entries()];
+      assert.equal(entries.at(-1)!.event.kind, 'result');
+      assert.deepEqual(entries.at(-1)!.event.moved![0], { what: 't2', name: 'stew', n: 1, from: 'kitchen', to: 'eaten', as: null,
+        stock: true, out: 'Kitchen', into: '', food: 600 });
+      for (const id of ['anna', 'boris']) assert.equal(answer.sent[id][0].messages[0].content, old[0].sent[id][0].messages[0].content);
+      assert.match(answer.sent.anna[4].messages[0].content, /You are getting hungry\. You are thirsty\./);
+      const sent = structuredClone(answer.sent);
+      for (const requests of Object.values(sent)) for (const request of requests) for (const message of request.messages) {
+        message.content = message.content.replace(/^(?:You are getting hungry\.(?: You are thirsty\.)?|You are thirsty\.)\n/gm, '');
+      }
+      assert.deepEqual(sent, old[0].sent);
+    } finally { journal.close(); }
+    const before = replay(fed, entries), meta = new DatabaseSync(path, { readOnly: true });
+    try { assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '31'); } finally { meta.close(); }
+    assert.throws(() => openState(path, JSON.stringify(file)), /written by another version/);
+    journal = openState(path, source);
+    try {
+      assert.deepEqual(replay(fed, journal.entries()), before);
+      assert.deepEqual(before.laws.fed!.get('anna'), { fed: 21_600, water: -7200, since: 14_400 });
+      const continued = standIn({ anna: [act('do', { text: 'drinks water', seconds: 1 })],
+        boris: [act('do', { text: 'eats bread', seconds: 1 }), ...[3600, 2878, 1, 3600, 3600, 719, 1, 3600, 3600, 3600, 2879, 1].map(seconds => act('wait', { seconds }))],
+        world: [eat('t1'), eat('t4')] });
+      await runLive({ world: fed, respond: continued.respond, model: 'stand-in', calls: 300, minutes: 469, journal, pause: true });
+      const turns = continued.sent.boris.map(request => request.messages[0].content);
+      assert.match(turns[0], /Now 19:30:00\.[\s\S]*You are getting hungry\. You are thirsty\./);
+      assert.match(turns[1], /Now 19:30:01\.[\s\S]*You are getting hungry\. You are thirsty\./);
+      assert.match(continued.sent.anna[0].messages[0].content, /\nYou are thirsty\.\n/);
+      assert.doesNotMatch(continued.sent.anna[1].messages[0].content, /You are (?:getting hungry|hungry|very hungry|thirsty|very thirsty)/);
+      for (const [clock, line] of [['21:17:59', 'You are getting hungry. You are thirsty.'],
+        ['21:18:00', 'You are hungry. You are thirsty.'],
+        ['23:29:59', 'You are hungry. You are thirsty.'],
+        ['23:30:00', 'You are hungry. You are very thirsty.'],
+        ['03:17:59', 'You are hungry. You are very thirsty.'],
+        ['03:18:00', 'You are very hungry and feel weak. You are very thirsty.']]) {
+        assert.ok(turns.find(turn => turn.includes(`Now ${clock.startsWith('03:') ? 'day 2 ' : ''}${clock}.`) && turn.includes(line)), clock);
+      }
+      const kept = [...journal.entries()];
+      assert.deepEqual(replay(fed, JSON.parse(JSON.stringify(kept))), replay(fed, kept));
+      const damaged = structuredClone(kept);
+      damaged[9].event.moved![0].food = 0;
+      assert.throws(() => replay(fed, damaged), JournalError);
+      for (const request of continued.sent.world) assert.doesNotMatch(JSON.stringify(request), /"drink"|You are (?:getting hungry|hungry|very hungry|thirsty|very thirsty)/);
+    } finally { journal.close(); }
+    // An eight-hour sleep spends four hours of each count, and replay keeps that transition too.
+    const sleeper = readWorld({ ...file, hunger: true, characters: file.characters.slice(0, 1) }), night = memoryStore();
+    let kind = '', turns = 0;
+    await runLive({ world: sleeper, journal: night, model: 'stand-in', minutes: 481, calls: 10, pause: true,
+      onAsk: next => { kind = next; }, respond: async () => ({ text: kind === 'memory' ? 'A quiet night.' : act(++turns === 1 ? 'sleep' : 'wait', { seconds: turns === 1 ? 28_800 : 600 }), usage: null }) });
+    assert.deepEqual(replay(sleeper, night.all).laws.fed!.get('anna'), { fed: -3600, water: -7200, since: 28_800 });
+    // Fewer than 100 calories after a long fast add only their seconds; a feast and many drinks still have their caps.
+    const parts = begin(fed).laws, event = { ...entries[9].event, at: 86_400, moved: [{ ...entries[9].event.moved![0], food: 50 }] };
+    hunger.after!(parts, event);
+    assert.equal(parts.fed!.get('anna')!.fed, -73_800);
+    hunger.after!(parts, { ...event, moved: [{ ...event.moved[0], food: 600, n: 20, drink: true }] });
+    assert.deepEqual(parts.fed!.get('anna'), { fed: 36_000, water: 21_600, since: 86_400 });
+  } finally { rmSync(directory, { recursive: true }); }
+});
 
 test('a character is sent its own sheet and what it perceived, and nothing else', async () => {
   const { sent, respond } = standIn({

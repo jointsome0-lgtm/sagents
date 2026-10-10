@@ -16,12 +16,13 @@ export const MAX_N = 1_000_000_000;
 // One record. `n` is how many there are of a thing that is counted, and null for a single thing. `holds` is what a
 // thing that can hold others holds, and null for one that never does; a counted thing holds nothing. `fixed` is a
 // part of its place and never moves; what an `open` thing holds is in plain sight; a `stock` is a supply with no
-// count, which taking does not use up. `food` is the calories of one, and what makes it something to eat; `burns`
+// count, which taking does not use up. `food` is the calories of one, and what makes it something to eat; `drink`
+// marks a drink only in a world with `hunger`, and is never shown in the notation. `burns`
 // says that it can burn up; `fire` that it can set things alight, always or while it is in the state `fire` names.
 // `states` are the states it can be in and `state` the one it is in. `money` is a count that no deed uses up or
 // makes. `hidden` is where a thing of a place lies unfound, with the minutes of search that find it. `facts` is what
 // is true of the thing and is not seen at once, for the world alone as every `facts` is: it goes where the thing goes.
-export type Thing = { label: string; name: string; facts: string | null; n: number | null; fixed: boolean; open: boolean; stock: boolean; food: number | null; burns: boolean;
+export type Thing = { label: string; name: string; facts: string | null; n: number | null; fixed: boolean; open: boolean; stock: boolean; food: number | null; drink?: true; burns: boolean;
   fire: boolean | string; states: string[] | null; state: string | null; money: boolean; holds: Thing[] | null; hidden: { spot: string; minutes: number } | null };
 // The things of a run: what lies in each place and what each person has in hand or wears, with all that those hold;
 // the number of the next label, since a label is the world's own and is never used again; and the seconds each
@@ -36,8 +37,9 @@ export const SINKS = ['eaten', 'burned'];
 // the record `as`, or gone when `to` is a sink; `n` is null for a thing that has no count. `stock` says that they
 // were taken from a supply, which is as it was. `out` and `into` say the two holders as anyone sees them: the
 // person who has the thing on them, or the thing of the place it lies in or on, or the place. `sink` marks a fare,
-// whose `to` can also be the id of a person or a place.
-export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string; sink?: 'fare' };
+// whose `to` can also be the id of a person or a place. Only in a world with `hunger`, an `eaten` posting holds
+// `food`, the calories of one, and `drink` when it was a drink.
+export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string; sink?: 'fare'; food?: number; drink?: true };
 // Why the rules refuse an answer whole: the first entry they cannot take, and the cause. `same` is an answer whose
 // moves moved nothing, each to where its thing already was, so that its words would tell of a move the lists never took.
 export const CODES = ['what', 'hidden', 'fixed', 'n', 'to', 'inside', 'sink', 'full', 'same', 'state'] as const;
@@ -50,7 +52,7 @@ const flag = (value: unknown, field: string) => value === undefined || typeof va
 // The things of one holder as a world file gives them, each under the next label. `top` says that these are the
 // things of a place itself, the only ones that can be hidden. `fixable` says that these can be `fixed`: the things of
 // a place itself and those inside a fixed thing, so that nothing fixed is carried or lies in what can be moved.
-export function readThings(value: unknown, field: string, labels: { next: number }, top = false, level = 1, fixable = top): Thing[] {
+export function readThings(value: unknown, field: string, labels: { next: number }, top = false, level = 1, fixable = top, hunger = false): Thing[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) return refuse(field, 'must be a list of things');
   return value.map((item, at): Thing => {
@@ -63,6 +65,8 @@ export function readThings(value: unknown, field: string, labels: { next: number
     const n = item.n === undefined ? null : typeof item.n === 'number' && Number.isInteger(item.n) && item.n > 0 && item.n <= MAX_N ? item.n : refuse(`${here}.n`, 'must be a whole number from 1 to 1,000,000,000');
     const stock = flag(item.stock, `${here}.stock`), money = flag(item.money, `${here}.money`), open = flag(item.open, `${here}.open`);
     const food = item.food === undefined ? null : typeof item.food === 'number' && Number.isFinite(item.food) && item.food >= 0 ? item.food : refuse(`${here}.food`, 'must be the calories of one, zero or more');
+    const drink = flag(item.drink, `${here}.drink`);
+    if (drink && food === null) return refuse(`${here}.drink`, 'needs `food`, zero for water');
     const burns = flag(item.burns, `${here}.burns`), fixed = flag(item.fixed, `${here}.fixed`);
     if (fixed && !fixable) return refuse(`${here}.fixed`, 'is for a thing of a place itself or a thing inside a fixed one');
     const states = item.states === undefined ? null : Array.isArray(item.states) && item.states.length >= 2 && item.states.length <= MAX_STATES
@@ -72,7 +76,7 @@ export function readThings(value: unknown, field: string, labels: { next: number
       : item.state === undefined ? states[0] : states.find(known => known === item.state) ?? refuse(`${here}.state`, 'must be one of `states`');
     const fire = item.fire === undefined || item.fire === false ? false : item.fire === true ? true
       : states?.find(known => known === item.fire) ?? refuse(`${here}.fire`, 'must be true or one of `states`');
-    const holds = item.holds === undefined ? null : readThings(item.holds, `${here}.holds`, labels, false, level + 1, fixed);
+    const holds = item.holds === undefined ? null : readThings(item.holds, `${here}.holds`, labels, false, level + 1, fixed, hunger);
     if (holds && (n !== null || stock || food !== null || burns)) return refuse(`${here}.holds`, 'is not for a thing that is counted, a stock, food or something that burns');
     if (stock && (n !== null || money)) return refuse(`${here}.stock`, 'is a supply with no count, and never of money');
     if (money && n === null) return refuse(`${here}.money`, 'needs `n`');
@@ -86,7 +90,8 @@ export function readThings(value: unknown, field: string, labels: { next: number
       durationOf(Math.ceil(minutes * 60), `${here}.hidden.minutes`);
       hidden = { spot, minutes };
     }
-    return { label, name, facts: boundedOf(item.facts, `${here}.facts`, MAX_FACTS), n, fixed, open, stock, food, burns, fire, states, state, money, holds, hidden };
+    return { label, name, facts: boundedOf(item.facts, `${here}.facts`, MAX_FACTS), n, fixed, open, stock, food, burns, fire, states, state, money, holds, hidden,
+      ...(hunger && drink ? { drink: true as const } : {}) };
   });
 }
 
@@ -120,7 +125,7 @@ export function sought(things: Things, deed: { who: string; place: string; secon
 type Slot = { thing: Thing; list: Thing[]; key: string; top: Thing; level: number; root: string };
 const height = (thing: Thing): number => 1 + Math.max(0, ...(thing.holds ?? []).map(height));
 const alike = (one: Thing, other: Thing) => one.name === other.name && one.food === other.food && one.burns === other.burns && one.money === other.money
-  && one.fire === other.fire && one.fixed === other.fixed && one.facts === other.facts;
+  && one.fire === other.fire && one.fixed === other.fixed && one.facts === other.facts && one.drink === other.drink;
 
 // An answer's entries take effect in the place of a deed, among its things and those of the people `present`, whose
 // names `names` gives with the place's: first the hidden things `found` are hidden no longer, then each move in its
@@ -129,7 +134,7 @@ const alike = (one: Thing, other: Thing) => one.name === other.name && one.food 
 // part of a count leaves the rest under the old label and is a new record where it went; what is taken from a stock
 // is a new record and the stock stays, and either has the facts of what it was taken from; counted records of one name, kind and facts at one holder become one. Without
 // `sinks` nothing is eaten or burned. Nothing of `things` is changed here: `keep` does that with what this gives.
-export function settle(things: Things, place: string, present: string[], names: Map<string, string>, found: string[], moves: Move[], sets: Setting[], sinks = true): Settled | Refused {
+export function settle(things: Things, place: string, present: string[], names: Map<string, string>, found: string[], moves: Move[], sets: Setting[], sinks = true, hunger = false): Settled | Refused {
   const lists = new Map<string, Thing[]>([[place, structuredClone(things.places.get(place)!)], ...present.map((id): [string, Thing[]] => [id, structuredClone(things.people.get(id)!)])]);
   let next = things.next;
   const settled: Settled = { moved: [], set: [], found: [], lists, next };
@@ -179,7 +184,8 @@ export function settle(things: Things, place: string, present: string[], names: 
       as = twin?.label ?? target.at(-1)!.label;
     }
     for (const [id, list] of lists) if (all(list).length > (id === place ? MAX_IN_PLACE : MAX_ON_PERSON)) return { code: 'full', entry };
-    settled.moved.push({ what: thing.label, name: thing.name, n: thing.n === null && !thing.stock ? null : entry.n, from: slot.key, to: entry.to, as, stock: thing.stock, out, into: where });
+    settled.moved.push({ what: thing.label, name: thing.name, n: thing.n === null && !thing.stock ? null : entry.n, from: slot.key, to: entry.to, as, stock: thing.stock, out, into: where,
+      ...(hunger && entry.to === 'eaten' ? { food: thing.food!, ...(thing.drink ? { drink: true as const } : {}) } : {}) });
   }
   if (moves.length && !settled.moved.length) return { code: 'same', entry: moves[0] };
   for (const entry of sets) {

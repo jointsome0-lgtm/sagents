@@ -61,11 +61,12 @@ export const traceOf = (text: string) => wordsOf(text).join(' ').replace(/[.;]+$
 // `walkMetresPerMinute` is the pace at which everyone walks between places that say where they lie.
 // `shortWords` and `longWords` are the sizes of a character's two memories, which `memory.ts` keeps. `sleep` and
 // `weather` are the settings of the laws the clock drives (`laws.ts`), as the world file and its environment give them.
+// `hunger` is the world file's setting for both hunger and thirst, kept from the things its deeds eat and drink.
 // `touch` says that a touch between two people is kept as state (`touch.ts`); a world without it has none.
 // `marks` says that a lasting feeling of a part of a body is kept as state (`marks.ts`), and only in such a world may
 // a character begin with some, its own `marks`. A `result` there also has `lingers`, the entries about them as read.
 // `ways` lets the world name where a deed leads, which a result keeps as `goes`; the rules take its go at the doer's next free moment.
-export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null; touch: boolean; marks: boolean; ways?: true;
+export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null; touch: boolean; marks: boolean; ways?: true; hunger?: true;
   vehicles?: Place[]; travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
@@ -120,7 +121,7 @@ function idOf(value: unknown, field: string, taken: string[], traced: boolean): 
 
 // A world file as it was parsed from JSON, without the settings of the laws, which `readWorld` of `laws.ts` adds.
 // The first thing wrong is one sentence that names the field.
-export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
+export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hunger'> {
   if (!isObject(value)) return refuse('the file', 'must be a JSON object');
   if (typeof value.clock !== 'string' || !TIME.test(value.clock)) return refuse('clock', 'must be a time of day like `21:00`');
   if (value.remote !== undefined && value.remote !== null) textOf(value.remote, 'remote');
@@ -161,7 +162,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     }));
     places.push({ id: idOf(place.id, `${field}.id`, taken, traced), name: textOf(place.name, `${field}.name`),
       about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
-      things: within(readThings(place.things, `${field}.things`, labels, true), MAX_IN_PLACE, `${field}.things`), open: place.open === true, clock: place.clock === true,
+      things: within(readThings(place.things, `${field}.things`, labels, true, 1, true, value.hunger === true), MAX_IN_PLACE, `${field}.things`), open: place.open === true, clock: place.clock === true,
       crowd: boundedOf(place.crowd, `${field}.crowd`, LIMITS.crowd), figures, at: at as [number, number] | null, minutesTo, nextDoor: (place.nextDoor ?? []) as string[] });
   }
   for (const [index, place] of places.entries()) {
@@ -199,7 +200,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
     characters.push({ id: idOf(character.id, `${field}.id`, taken, traced), name: textOf(character.name, `${field}.name`),
       place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), memory: boundedOf(character.memory, `${field}.memory`, longWords), facts: factsOf(character.facts, `${field}.facts`),
       looks: boundedOf(character.looks, `${field}.looks`, LIMITS.looks), pose: boundedOf(character.pose, `${field}.pose`, LIMITS.pose),
-      carries: within(readThings(character.carries, `${field}.carries`, labels), MAX_ON_PERSON, `${field}.carries`),
+      carries: within(readThings(character.carries, `${field}.carries`, labels, false, 1, false, value.hunger === true), MAX_ON_PERSON, `${field}.carries`),
       clock: character.clock === true, traces, marks: readGiven(character.marks, `${field}.marks`) });
     if (value.marks !== true && characters[index].marks.length) return refuse(`${field}.marks`, 'needs the setting `marks` of the world file');
   }
@@ -245,7 +246,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather'> {
       }
       vehicles.push({ id: idOf(vehicle.id, `${field}.id`, taken, traced), name: textOf(vehicle.name, `${field}.name`),
         about: boundedOf(textOf(vehicle.about, `${field}.about`), `${field}.about`, 60)!, facts: null,
-        things: within(readThings(vehicle.things, `${field}.things`, labels, true), MAX_IN_PLACE, `${field}.things`),
+        things: within(readThings(vehicle.things, `${field}.things`, labels, true, 1, true, value.hunger === true), MAX_IN_PLACE, `${field}.things`),
         open: vehicle.open === true, clock: false, crowd: null, figures: [], at: null, minutesTo: {}, nextDoor: [],
         vehicle: { at: vehicle.at as string, heading: null, faster: whole('faster', 30, 2), seats: whole('seats', bus.route ? 60 : 12, 1),
           drivers: ids('drivers', characters), reach: ids('reach', places) ?? places.map(place => place.id), ...bus } });

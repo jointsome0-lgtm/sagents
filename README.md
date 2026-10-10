@@ -332,6 +332,38 @@ The rules of time and hearing:
   to `spentHours`. From the tired step on the others in the place are told so with who is with them. At `spentHours`,
   24 by default, the rules put the character to sleep at its turn, where it is, for 8 hours: no model is asked, the
   journal keeps it as a record of its own, and the others there see it fall asleep.
+- A world file with `hunger: true` turns on hunger and thirst together (`src/hunger.ts`). The setting is absent or
+  true, belongs to the world file alone and changes nothing in worlds without it. In its first
+  form, with the body's line always there, `You are not hungry.` and `You are not thirsty.` among its sentences,
+  and a meal lifting a lower count to minus 2 hours, it was played in two lines of one synthetic week: 141 requests
+  by the smaller model at low effort and 685 by an open model of 31B. In both, residents who were awake drank and
+  ate within minutes to an hour and a half of a sentence that named a need, and had breakfast soon after waking
+  hungry; and in both a resident took `You are not hungry.` for a reason to refuse an agreed supper, which is why
+  the line now says only what is not fine. The form described here was played in the same week: 162 requests by
+  the smaller model, and three starts of 450, 257 and 250 requests by the open model. Three of the four reached a
+  supper, and all six residents ate at it; one start reached the next morning, where both had breakfast within
+  twenty minutes of waking. One start of the open model spent its 250 requests on a single story hour and reached no meal.
+  Everyone starts fed for 3 hours and not thirsty for 2 hours. Both counts fall by one second for each second
+  awake, on the way included, and by half a second for each second asleep;
+  either may go below zero. Only a deed's accepted moves to `eaten` feed its doer, never its words or a figure's
+  answer. The calories in one deed's accepted moves to `eaten` count together. At 100 calories or more, the fed
+  count first rises to zero if lower, then gains 36 seconds for each calorie, up to 10 hours. Fewer than 100 calories
+  only add their seconds and lift nothing. Thus a waking hour takes 100 calories, 600 calories hold for 6 hours
+  from zero or below, and a breakfast of 400 calories after waking hungry holds for 4 hours. Zero-calorie water
+  does not change hunger. Each one drunk first raises a negative thirst count to zero, then adds 3 hours, up to
+  6 hours. A drink with calories counts for hunger too. The counts are rebuilt from the journal, including sleep
+  and waking, so a kept run continues with the same counts. Nutrition takes effect at the deed's recorded moment.
+  The law puts no record of its own, and nobody faints, falls ill or dies of it.
+  A resident's turn adds a line right after sleep debt only when hungry or thirsty. The hunger sentence is
+  `You are getting hungry.` at zero down to above minus 2 hours;
+  `You are hungry.` at minus 2 hours down to above minus 8 hours;
+  `You are very hungry and feel weak.` at minus 8 hours or below. The thirst sentence is
+  `You are thirsty.` at zero down to above minus 6 hours;
+  `You are very thirsty.` at minus 6 hours or below. Above zero the count adds no sentence. When both sentences
+  apply they make one line with one space between them; when neither applies there is no line, as in a world
+  without the setting. These are the only new texts a model reads. The world and figures are asked as before,
+  and nobody is told another person's hunger or thirst.
+  A world with `hunger` is refused if no thing in its file has `food` above zero, or if no thing is a drink.
 - A leaving and an arrival are seen by everyone awake in the place and end their waiting. A `do`, a falling asleep
   and a waking are seen too, and a witness learns of them at its own next turn.
 - A turn's answer follows a schema made for the world: `action` is one of the actions, without `call` where there is
@@ -667,7 +699,10 @@ Things:
   place that never moves: a thing of the place itself or a thing inside a fixed one, and never something a character
   carries or that lies in a thing which can move. `stock` is a
   supply with no count, which taking does not use up. `food` is the calories of one and makes it something to eat
-  or drink; `burns` says that it can burn up. `states` is the list of states it can be in and `state` the one it is
+  or drink. `drink: true` marks each one as a drink and needs `food`, zero for water; what is taken out of a stock
+  that is a drink is a drink too. The field is read but does nothing without `hunger`, and is never shown in a
+  request or in the notation of things. Only a world with `hunger` keeps calories and the drink flag in an `eaten`
+  posting. `burns` says that it can burn up. `states` is the list of states it can be in and `state` the one it is
   in, the first when not given; `fire` is true for what can set things alight, or names the state in which it can.
   `money` marks a count that no deed uses up or makes. `hidden`, `{ spot, minutes }` on a thing of a place itself,
   says where it lies unfound and how long a search finds it. `facts` is what is true of the thing and is not seen
@@ -840,7 +875,7 @@ The journal and the state file:
   reason why the answer could not be used, the world's answer to a deed, a figure's answer to a speech, an arrival, a waking or a falling asleep
   at the limit, a change of the weather, a memory rewrite. A drive is one action record, with the driver, vehicle,
   departure, destination and arrival instant; its arrival is one record of the engine at that instant. A state
-  stopped on the way continues to the same arrival. With no `ways` and none of the three body candidates below, a world without
+  stopped on the way continues to the same arrival. With no `ways`, no `hunger` and none of the three body candidates below, a world without
   `vehicles` keeps format `18`, so its state files open as before. A world with `vehicles`, even an empty list,
   takes `19`; one with a `route` takes `20`,
   since bus positions follow the clock and fares leave the world. A file with another mark is refused as another
@@ -862,12 +897,12 @@ The journal and the state file:
   is continued keeps those names and a journal begun in another file has others. A run with no state file makes one
   for itself. No name is printed, and none is in the journal. A byte copy of a state file has the names of the original. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
   writes nothing to it.
-- The state file's format mark is `30` in a world with `ways`, `23` in a world with traces, `22` with `marks`, `21` with `touch`, and otherwise
+- The state file's format mark is `31` in a world with `hunger`, otherwise `30` in a world with `ways`, `23` in a world with traces, `22` with `marks`, `21` with `touch`, and otherwise
   `18`, `19` or `20` as above: earlier versions ignore those settings and must not continue such a world without
   keeping them. The highest mark that applies is taken, so vehicles with touch take `21` too.
   A state file opens only under the mark of its world file. A file of release 0.1.0 or 0.1.1 for a world with none
   of these settings and no `vehicles` still opens and goes on. A file of either release for a world whose file already had
-  `touch: true`, `marks: true` or a character's `traces` has mark `18` and is refused: that release ignored the
+  `hunger: true`, `touch: true`, `marks: true` or a character's `traces` has mark `18` and is refused: that release ignored the
   setting and kept nothing of the mechanism.
 - With `--run <dir>` the run is kept as an experiment that [the lab](#the-lab) reads: the directory holds the world
   file as it was given, `world.json`; the state file, `state.sqlite`, with everything the point above says of one;

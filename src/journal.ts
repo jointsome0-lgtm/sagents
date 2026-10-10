@@ -339,11 +339,12 @@ function applied(world: World, state: State, record: Record): Event {
       kept.push(lineOf(seq, `${event.clock} ${doer} did (${deed.seconds} s): ${text === null ? closed(deed.text as string) : `${deed.text} Result: ${lists ? closed(text) : text}`}${lists ? ` In the lists: ${lists}` : ''}`));
       while (kept.length > 1 && kept.reduce((sum, line) => sum + line.size, 0) > RESULT_WORDS) kept.shift();
     }
+    for (const law of LAWS) law.after?.(state.laws, event);
     Object.assign(state, { deed: null, seq: seq + 1 });
     return event;
   }
   const actor = next(people), parked = vehicleDue(world, state);
-  const lawDue = LAWS.map(law => law.due(world, state.laws, actor)).find(record => record !== null);
+  const lawDue = LAWS.map(law => law.due?.(world, state.laws, actor) ?? null).find(record => record !== null);
   if (parked && (!lawDue || parked.at < lawDue.at || (parked.at === lawDue.at && lawDue.kind !== 'weather'))) {
     if (!isDeepStrictEqual(record, parked)) return refuse('comes where a vehicle is due to arrive');
     const vehicle = world.places.find(place => place.id === parked.who)!;
@@ -383,8 +384,8 @@ function applied(world: World, state: State, record: Record): Event {
   if (record.kind === 'park') return refuse('is an arrival of a vehicle that is not due');
   // A record the clock brings comes where its law says it is due, and nothing else comes there.
   for (const law of LAWS) {
-    const put = law.due(world, state.laws, actor);
-    if (!put) continue;
+    const put = law.due?.(world, state.laws, actor);
+    if (!put || !law.put) continue;
     if (!isDeepStrictEqual(record, put)) return refuse('comes where the rules put a record of their own by the clock');
     const { event, lines } = law.put(world, state.laws, people, put);
     for (const [id, line] of lines) remember(minds.get(id)!, { ...lineOf(seq, line.text), ...(line.idle ? { idle: true as const } : {}) });
