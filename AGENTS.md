@@ -5,7 +5,9 @@ Orientation for AI coding assistants and people working in this project. Keep it
 ## What this is
 
 sagents runs story agents: models with tools for an interactive story where a coding agent has tools for a repository.
-[README.md](README.md) says what is written and what is only planned. README points at code by a symbol and its file.
+[README.md](README.md) says what is written and what is only planned, with the long accounts of the judge and of
+the lab in [docs/judge.md](docs/judge.md) and [docs/lab.md](docs/lab.md) and what was measured in
+[docs/measured.md](docs/measured.md). These pages point at code by a symbol and its file.
 `npm run pointers` checks that every pointer still names a top-level declaration of its file. Run it after a rename.
 Today the code is the two model connections
 (`src/chatgpt.ts` for a ChatGPT plan, `src/compatible.ts` for a chat completions server), the choice between them by
@@ -29,7 +31,7 @@ reads the experiments under the directories it is given and writes nothing, `ser
 under a token, `open.ts` writes the one temporary file that takes the browser there, and the page is the plain
 `page.html`, `app.css`, `app.js`, `strings.js`, `map.js` and `core.js`, which `npm run check` does not check.
 Nothing in `src/` but the command line, `numbers.ts` and the test of `kept.ts` imports from `lab/`, and `lab/` asks
-no model. What may leave the lab is listed in [README.md](README.md#the-lab); keep that list true.
+no model. What may leave the lab is listed in [docs/lab.md](docs/lab.md); keep that list true.
 
 On the ChatGPT plan connection, a message the service marks as interim (`commentary`) is left out where the service
 gives the pieces of text with the place of their message in the answer; a piece without that place is kept as text
