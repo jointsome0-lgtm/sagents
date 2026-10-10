@@ -1,7 +1,7 @@
 // The time of a live world, with no model in it: the story's clock in whole seconds since its start, the time as
 // someone with no clock at hand can tell it, and how long speech and a walk between two places take.
 import { secondsOfDay } from './reading.ts';
-import { MAX_SECONDS, MAX_SLEEP, MAX_WORDS } from './world.ts';
+import { MAX_SECONDS, MAX_SLEEP, MAX_WORDS, namesOf } from './world.ts';
 import type { Person, Vehicle, World } from './world.ts';
 
 // The story's clock at so many seconds from its start, as a time of day. From the second day on it names the day.
@@ -55,9 +55,10 @@ export function lasting(world: World, actor: Person, kind: 'do' | 'wait' | 'slee
   return Math.max(1, Math.min(kind === 'sleep' ? MAX_SLEEP : MAX_SECONDS, span - off + ((mixed ^ (mixed >>> 16)) >>> 0) % (2 * off + 1)));
 }
 
-export const speechSeconds = (world: World, words: number) => Math.max(2, Math.ceil(words / world.wordsPerMinute * 60));
+const rateOf = (world: World, who: string) => namesOf(world).find(person => person.id === who)?.wordsPerMinute ?? world.wordsPerMinute;
+export const speechSeconds = (world: World, who: string, words: number) => Math.max(2, Math.ceil(words / rateOf(world, who) * 60));
 // How many words one speech may hold when so many seconds are left before the horizon.
-export const wordLimit = (world: World, secondsLeft: number) => Math.max(1, Math.min(MAX_WORDS, Math.floor(secondsLeft * world.wordsPerMinute / 60)));
+export const wordLimit = (world: World, who: string, secondsLeft: number) => Math.max(1, Math.min(MAX_WORDS, Math.floor(secondsLeft * rateOf(world, who) / 60)));
 
 // `minutesTo` is read both ways. A pair that is not listed takes the straight line between the two at the world's
 // pace when both say where they lie, as whole minutes above ten and tenths of a minute up to there, and the world's

@@ -612,7 +612,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
       count.do += 1;
       if (event.says !== undefined) {
         // The words said with a deed hold the doer and those who hear them as a speech does, and the deed lasts as long at least.
-        const ends = event.at + speechSeconds(world, wordsOf(event.says).length);
+        const ends = event.at + speechSeconds(world, event.who, wordsOf(event.says).length);
         law('limit', sizeOf(event.says) <= Math.min(SAYS_WORDS, record.kind === 'act' ? record.limit : 0) && event.at + event.seconds >= ends, seq);
         for (const id of [event.who, ...event.heard]) held.set(id, Math.max(held.get(id) ?? 0, ends));
         count.spoken += 1;

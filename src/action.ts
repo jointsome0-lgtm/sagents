@@ -139,7 +139,7 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
   actor.began = now;
   if (action.action === 'say' || action.action === 'call') {
     Object.assign(event, cut(action.text as string, limit));
-    event.seconds = speechSeconds(world, wordsOf(event.text as string).length);
+    event.seconds = speechSeconds(world, actor.id, wordsOf(event.text as string).length);
     if (action.action === 'say') event.to = action.to;
     const listeners = [...here];
     const callee = people.find(person => person.id === action.to);
@@ -177,7 +177,7 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
   } else if (action.action === 'do' && action.says !== undefined) {
     // Words said with a deed are a speech of that moment, cut at the turn's limit: they hold those who hear them
     // until they end, and the deed lasts at least as long as they take.
-    const said = cut(action.says, limit), ends = now + speechSeconds(world, wordsOf(said.text).length);
+    const said = cut(action.says, limit), ends = now + speechSeconds(world, actor.id, wordsOf(said.text).length);
     Object.assign(event, { says: said.text, cut: said.cut, seconds: Math.max(event.seconds, ends - now) });
     for (const listener of here) {
       listener.listening = Math.max(listener.listening, ends);

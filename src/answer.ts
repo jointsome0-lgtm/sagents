@@ -166,7 +166,7 @@ export function reply(world: World, people: Person[], things: Things, said: Even
   const made = settled(world, people, things, said, { moves });
   if ('code' in made) return made;
   keep(things, said.place, made);
-  const seconds = text === null ? 0 : speechSeconds(world, wordsOf(text).length), end = said.at + said.seconds + seconds;
+  const seconds = text === null ? 0 : speechSeconds(world, said.to as string, wordsOf(text).length), end = said.at + said.seconds + seconds;
   const hearers = text === null && !made.moved.length ? [] : people.filter(person => person.id === said.who || said.heard.includes(person.id));
   for (const hearer of text === null ? [] : hearers) {
     hearer.listening = Math.max(hearer.listening, end);

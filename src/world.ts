@@ -41,14 +41,14 @@ export const LOST_SECONDS = 30;
 // a smear of food, a stain, wet hair. The world file gives how they begin, and they then belong to the run's state
 // (`answer.ts`): one stays on its person, wherever that person goes, until the world's answer to a deed takes it off.
 // A world in which no character has the field, null here, keeps no traces at all; an empty list turns them on.
-export type Figure = { id: string; name: string; looks: string | null; facts: string | null };
+export type Figure = { id: string; name: string; looks: string | null; facts: string | null; wordsPerMinute?: number };
 export type Vehicle = { at: string | null; heading: { from: string; to: string; at: number } | null; faster: number; seats: number; drivers: string[] | null; reach: string[];
   route?: string[]; leaves?: string[]; stands?: number; fare?: { name: string; n: number }; departure?: { to: string; at: number } };
 export type Place = { id: string; name: string; about: string; facts: string | null; things: Thing[]; open: boolean; clock: boolean;
   crowd: string | null; figures: Figure[];
   at: [number, number] | null; minutesTo: { [place: string]: number }; nextDoor: string[]; vehicle?: Vehicle };
 export type Character = { id: string; name: string; place: string; sheet: string; memory: string | null; facts: string | null; looks: string | null; pose: string | null;
-  carries: Thing[]; clock: boolean; marks: Given[]; traces: string[] | null };
+  carries: Thing[]; clock: boolean; marks: Given[]; traces: string[] | null; wordsPerMinute?: number };
 // The most words each of these texts may hold, in the world file and in the world's answer alike; `feels` is of one
 // line of what a deed makes a body feel, `beyond` of what of a deed is heard next door and `touch` of with what and
 // where one person touches another, which only an answer holds.
@@ -106,6 +106,11 @@ export type Person = { id: string; place: string | null; heading: string | null;
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const factsOf = (value: unknown, field: string) => boundedOf(value, field, MAX_FACTS);
+const rateOf = (value: unknown, field: string, absent: number) => {
+  const rate = amountOf(value, field, absent);
+  durationOf(Math.max(2, Math.ceil(MAX_WORDS / rate * 60)), field);
+  return rate;
+};
 // An id names one thing: a place's, a character's and a figure's are all different, since the rules keep the things
 // of a place and of a person, and take the `to` of a move, under them alike. None is what the rules themselves name
 // there: a way out of the world, a thing's label, or a name that every object of the language has. In a world that
@@ -149,7 +154,8 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
       const name = `${field}.figures[${at}]`;
       if (!isObject(figure)) return refuse(name, 'must be an object');
       return { id: figure.id as string, name: textOf(figure.name, `${name}.name`), looks: boundedOf(figure.looks, `${name}.looks`, LIMITS.looks),
-        facts: factsOf(figure.facts, `${name}.facts`) };
+        facts: factsOf(figure.facts, `${name}.facts`),
+        ...(figure.wordsPerMinute === undefined ? {} : { wordsPerMinute: rateOf(figure.wordsPerMinute, `${name}.wordsPerMinute`, wordsPerMinute) }) };
     });
     const at = place.at === undefined || place.at === null ? null : place.at;
     if (at !== null && !(Array.isArray(at) && at.length === 2 && at.every(part => typeof part === 'number' && Number.isFinite(part)))) {
@@ -201,7 +207,8 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
       place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), memory: boundedOf(character.memory, `${field}.memory`, longWords), facts: factsOf(character.facts, `${field}.facts`),
       looks: boundedOf(character.looks, `${field}.looks`, LIMITS.looks), pose: boundedOf(character.pose, `${field}.pose`, LIMITS.pose),
       carries: within(readThings(character.carries, `${field}.carries`, labels, false, 1, false, value.hunger === true), MAX_ON_PERSON, `${field}.carries`),
-      clock: character.clock === true, traces, marks: readGiven(character.marks, `${field}.marks`) });
+      clock: character.clock === true, traces, marks: readGiven(character.marks, `${field}.marks`),
+      ...(character.wordsPerMinute === undefined ? {} : { wordsPerMinute: rateOf(character.wordsPerMinute, `${field}.wordsPerMinute`, wordsPerMinute) }) });
     if (value.marks !== true && characters[index].marks.length) return refuse(`${field}.marks`, 'needs the setting `marks` of the world file');
   }
   for (const [index, place] of places.entries()) {

@@ -761,7 +761,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       return person !== actor && person.place === place
         ? [`- ${tagged(character)}${person.asleep ? ', asleep' : ''}${LAWS.map(law => law.seen?.(world, state.laws, person, now) ?? '').join('')}.${seen(character, person)}${onOf(state, person.id, 'On them')}${carries('Carries', person.id, false)}`] : [];
     });
-    const limit = pause ? MAX_WORDS : wordLimit(world, horizon - now);
+    const limit = pause ? MAX_WORDS : wordLimit(world, who, horizon - now);
     const spot = world.places.find(item => item.id === place)!;
     const body = `${part('Your pose', actor.pose)}${onOf(state, who, 'On you')}${carries('You carry', who, true)}`.slice(1);
     // The touches of the place, one line each. Each of the two is told its kind, its force and how long it has

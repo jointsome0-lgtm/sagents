@@ -200,7 +200,11 @@ The rules of time and hearing:
   together are both there when either looks around. On GPT-6 Luna, in a scene where two leave together, 81 requests, both were in the place before anyone took a turn in 4 leavings of 4, against a turn between the two arrivals in 4 of 4 on the engine before; the rule changes no text that a model reads, so it was played on no second model. A state file
   written under the earlier order, where a turn could come between two arrivals of one instant, is of another
   version and is refused.
-- Speech lasts as long as its words take at the world's `wordsPerMinute`, 130 by default. A `say` or a `call` holds at
+- Speech lasts as long as its words take at the speaker's own `wordsPerMinute`, or the world's rate when it has none,
+  130 by default. A character or a figure may have the field, a number above zero with the same bounds as the world's:
+  the longest speech must fit a whole number of seconds from 1 to 1000000000000. A `say`, a `call`, the `says` of a deed
+  and a figure's answer use the rate of whoever speaks; a turn's word limit uses its character's rate.
+  It is checked with stand-ins only and played on no model: no text that a model reads changes with it. A `say` or a `call` holds at
   most 65 words. A longer one is cut. So are a note and the text of a `do`, a `gesture` at 12 words, and the `says` of a `do` at 20 and at the turn's limit. A deed lasts at least as long as its `says` take, and they hold those who hear them as a speech does.
 - Everyone in the speaker's place hears a `say` and is held until it ends, so people in one place take turns.
 - A place of a world file may list `nextDoor`, the ids of the places that share a door or a thin wall with it. Two
@@ -663,7 +667,8 @@ The world answers a deed:
 People of a place whom nobody plays:
 
 - A place of a world file may have `crowd`, a text of who is around as anyone there sees them (60 words at most), and
-  `figures`, a list of `{ id, name, looks, facts }`: those of them who have a name. A figure has no sheet, no memory
+  `figures`, a list of `{ id, name, looks, facts, wordsPerMinute }`: those of them who have a name, with `wordsPerMinute`
+  optional for the figure's own speech rate, otherwise the world's. A figure has no sheet, no memory
   and no turn, so it costs nothing until someone speaks to it. It stays in its place, never speaks first, wakes
   nobody and follows nobody, and a `call` does not reach it.
 - An id names one thing: the ids of the places, the characters and the figures are all different, and none is
@@ -690,7 +695,8 @@ Things:
 
 - A world file may give a character `looks`, what anyone near sees and what never changes: the body and the face,
   and no clothes, which can be taken off (60 words at most), and `pose`, how and where in its place it is (20).
-  `facts` are for what does not change. All are optional and in the world's language.
+  `facts` are for what does not change. All are optional and in the world's language. A character may also have
+  `wordsPerMinute` for its own speech rate, otherwise the world's.
 - Things are records that the rules keep and count (`src/things.ts`). A place has `things` and a character
   `carries`, each a list of `{ name, … }`, and a thing has one holder: a person, a place or another thing. `holds`,
   a list, makes it a thing that holds others, like a table, a coat with pockets or a bag; `open` says that what it
@@ -778,7 +784,8 @@ Things:
   person's ninth refuses the whole answer, as a thirty-first record on a person does, and the world is asked once
   more with the sentence that says so. An answer without the two fields is unusable. The record keeps both fields
   and the event `traced` and `wiped`, each trace with its person, label and text, so a journal replays exactly and
-  a run continues from any record; the state file's format is 23 in such a world, since earlier versions ignore
+  a run continues from any record; the state file's format is 23 in such a world, or 29 when a speaker has
+  `wordsPerMinute`, since earlier versions ignore
   traces and must not continue it without keeping them. Every turn says, right after a person's looks and pose,
   what is on them, `On them: …`, and what is on the
   resident itself, `On you: …`, with no label, as it stands at that turn: a trace that is gone is told no more, and
@@ -875,7 +882,7 @@ The journal and the state file:
   reason why the answer could not be used, the world's answer to a deed, a figure's answer to a speech, an arrival, a waking or a falling asleep
   at the limit, a change of the weather, a memory rewrite. A drive is one action record, with the driver, vehicle,
   departure, destination and arrival instant; its arrival is one record of the engine at that instant. A state
-  stopped on the way continues to the same arrival. With no `ways`, no `hunger` and none of the three body candidates below, a world without
+  stopped on the way continues to the same arrival. With no `ways`, no `hunger`, no speaker's `wordsPerMinute` and none of the three body candidates below, a world without
   `vehicles` keeps format `18`, so its state files open as before. A world with `vehicles`, even an empty list,
   takes `19`; one with a `route` takes `20`,
   since bus positions follow the clock and fares leave the world. A file with another mark is refused as another
@@ -897,12 +904,13 @@ The journal and the state file:
   is continued keeps those names and a journal begun in another file has others. A run with no state file makes one
   for itself. No name is printed, and none is in the journal. A byte copy of a state file has the names of the original. A new or empty file becomes a state file; an SQLite database of anything else is refused, and sagents
   writes nothing to it.
-- The state file's format mark is `31` in a world with `hunger`, otherwise `30` in a world with `ways`, `23` in a world with traces, `22` with `marks`, `21` with `touch`, and otherwise
+- The state file's format mark is `31` in a world with `hunger`, otherwise `30` in a world with `ways`, `29` when any character or figure has `wordsPerMinute`, `23` in a world with traces,
+  `22` with `marks`, `21` with `touch`, and otherwise
   `18`, `19` or `20` as above: earlier versions ignore those settings and must not continue such a world without
-  keeping them. The highest mark that applies is taken, so vehicles with touch take `21` too.
+  keeping them. The highest mark that applies is taken, so vehicles with touch take `21` too, and a speaker's rate takes `29` before those and after `ways` and `hunger`.
   A state file opens only under the mark of its world file. A file of release 0.1.0 or 0.1.1 for a world with none
   of these settings and no `vehicles` still opens and goes on. A file of either release for a world whose file already had
-  `hunger: true`, `touch: true`, `marks: true` or a character's `traces` has mark `18` and is refused: that release ignored the
+  `hunger: true`, `touch: true`, `marks: true`, a character's `traces` or a speaker's `wordsPerMinute` has mark `18` and is refused: that release ignored the
   setting and kept nothing of the mechanism.
 - With `--run <dir>` the run is kept as an experiment that [the lab](#the-lab) reads: the directory holds the world
   file as it was given, `world.json`; the state file, `state.sqlite`, with everything the point above says of one;
