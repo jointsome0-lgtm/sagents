@@ -12,7 +12,7 @@ const STRETCH = /^(?:usage-part(\d+)\.jsonl|part(\d+)\.events\.jsonl)$/;
 const failed = (error: unknown, code: string) => error instanceof Error && 'code' in error && error.code === code;
 
 // runLive sends one request at a time, so a usage row belongs to the last onAsk.
-export function keepRun(dir: string, world: string, environment?: string) {
+export function keepRun(dir: string, world: string, environment?: string, untakenText = false) {
   const kept = join(dir, 'world.json');
   let names: string[];
   try {
@@ -30,10 +30,12 @@ export function keepRun(dir: string, world: string, environment?: string) {
   const state = openState(join(dir, 'state.sqlite'), world, environment);
   try {
     const stretch = `part${Math.max(0, ...names.map(name => { const found = STRETCH.exec(name); return found ? Number(found[1] ?? found[2]) : 0; })) + 1}`;
-    const events = join(dir, `${stretch}.events.jsonl`), usage = join(dir, `usage-${stretch}.jsonl`);
-    for (const path of [events, usage]) writeFileSync(path, '', { flag: 'wx' });
+    const events = join(dir, `${stretch}.events.jsonl`), usage = join(dir, `usage-${stretch}.jsonl`), untaken = join(dir, `untaken-${stretch}.jsonl`);
+    for (const path of [events, usage, untaken]) writeFileSync(path, '', { flag: 'wx' });
     let asked: { kind: string; who: string | null; name: string } | null = null, sent = 0;
     const onAsk: NonNullable<Live['onAsk']> = (kind, who, name) => { asked = { kind, who, name }; };
+    const onUntaken: NonNullable<Live['onUntaken']> = (kind, cause, entry, answer) => appendFileSync(untaken, `${JSON.stringify({ n: sent, kind, cause,
+      ...(untakenText && entry !== null ? { entry } : {}), ...(untakenText && answer !== null ? { answer } : {}) })}\n`);
     const count = (respond: Player['respond']): Player['respond'] => async request => {
       const row: { [field: string]: unknown } = { n: sent += 1, at: new Date().toISOString(), kind: asked?.kind ?? 'other', who: asked?.who ?? null, model: asked?.name ?? request.model };
       asked = null;
@@ -56,7 +58,7 @@ export function keepRun(dir: string, world: string, environment?: string) {
         throw error;
       } finally { appendFileSync(usage, `${JSON.stringify(row)}\n`); }
     };
-    return { state, stretch, count, onAsk, onEvent: (event: Event) => appendFileSync(events, `${JSON.stringify(event)}\n`), close: () => state.close() };
+    return { state, stretch, count, onAsk, onUntaken, onEvent: (event: Event) => appendFileSync(events, `${JSON.stringify(event)}\n`), close: () => state.close() };
   } catch (error) {
     state.close();
     if (failed(error, 'EEXIST') || failed(error, 'EACCES')) throw new KeptError('The run directory cannot be made, read or written.');

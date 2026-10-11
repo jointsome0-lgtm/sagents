@@ -22,7 +22,8 @@ export function marked(world: World): Traces | null {
   return traces;
 }
 export const labelsOn = (traces: Traces, people: string[]) => people.flatMap(id => traces.of.get(id)!.map(trace => trace.label));
-export type Rejected = Refused | { code: 'traces'; entry: { of: string; text: string } };
+export const TRACE_CODES = ['traces'] as const;
+export type Rejected = Refused | { code: typeof TRACE_CODES[number]; entry: { of: string; text: string } };
 
 // Repeating a trace's wording is not evidence of a second trace.
 function retraced(traces: Traces, present: string[], { traces: left = [], wipes = [] }: Partial<Answer>): Traces & { traced: Trace[]; wiped: Trace[] } | Rejected {

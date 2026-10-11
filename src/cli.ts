@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { createChatgpt, ModelError, signIn, SignInError } from './chatgpt.ts';
 import type { Message, Request } from './chatgpt.ts';
 import { JournalError, StateError } from './journal.ts';
-import { linesOf, runLive } from './live.ts';
+import { linesOf, runLive, UNTAKEN_CAUSES } from './live.ts';
 import type { Player } from './live.ts';
 import { modelFor } from './model.ts';
 import { environmentOf, isEnvironmentName, readWorld } from './laws.ts';
@@ -17,7 +17,7 @@ const USAGE = `sagents login [--new]          sign in with ChatGPT in the browse
 sagents status [<model>]       whether this computer is signed in, and whether the plan's list of models has the model
 sagents ask [--timeout <s>]    one request as JSON on stdin, one JSON line on stdout
 sagents live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-model <id>] [--minutes <n>] [--calls <n>] [--tokens <n>]
-                  [--state <file> | --run <dir>] [--environment <name>] [--json]
+                  [--state <file> | --run <dir>] [--untaken-text] [--environment <name>] [--json]
                                the characters of a world file, each played by the model, under the story's clock;
                                --cast gives one character a model of its own; --world-model answers what comes of a deed;
                                with --state the world is kept in that file and continues from it;
@@ -234,7 +234,7 @@ else if (command === 'numbers') {
 } else if (command === 'live') {
   try {
     const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, 'world-model': { type: 'string' }, minutes: { type: 'string' }, calls: { type: 'string' }, tokens: { type: 'string' },
-      state: { type: 'string' }, run: { type: 'string' }, environment: { type: 'string' }, json: { type: 'boolean' } }, 1);
+      state: { type: 'string' }, run: { type: 'string' }, 'untaken-text': { type: 'boolean' }, environment: { type: 'string' }, json: { type: 'boolean' } }, 1);
     const minutes = Number(given?.values.minutes ?? 30);
     const calls = Number(given?.values.calls ?? 60);
     const ceiling = given?.values.tokens === undefined ? undefined : Number(given.values.tokens);
@@ -277,7 +277,8 @@ else if (command === 'numbers') {
         names.set(id, name);
       }
       if (typeof given.values.state === 'string' && typeof given.values.run === 'string') throw new OptionError('`--state` and `--run` cannot be given together: a run directory keeps its own state file.');
-      const kept = typeof given.values.run === 'string' ? (await import('./kept.ts')).keepRun(given.values.run, source, environmentSource) : undefined;
+      if (given.values['untaken-text'] === true && typeof given.values.run !== 'string') throw new OptionError('`--untaken-text` needs `--run`: the answer text is kept in the run directory.');
+      const kept = typeof given.values.run === 'string' ? (await import('./kept.ts')).keepRun(given.values.run, source, environmentSource, given.values['untaken-text'] === true) : undefined;
       const state = kept?.state ?? (typeof given.values.state === 'string' ? (await import('./state.ts')).openState(given.values.state, source, environmentSource) : undefined);
       try {
         const players = new Map<string, Player>();
@@ -292,7 +293,7 @@ else if (command === 'numbers') {
           cast: Object.fromEntries([...names].map(([id, name]) => [id, playerOf(name)])),
           worldPlayer: typeof given.values['world-model'] === 'string' ? playerOf(given.values['world-model']) : undefined, minutes, calls, tokens: ceiling, journal: state, pause: state !== undefined,
           // state.ts keeps the cache name across starts; an unsaved run needs its own.
-          cache: state?.cache ?? randomUUID(), onAsk: kept?.onAsk,
+          cache: state?.cache ?? randomUUID(), onAsk: kept?.onAsk, onUntaken: kept?.onUntaken,
           // Save the event before showing it so visible progress is already kept.
           onEvent: (event, by) => { kept?.onEvent(event); for (const line of json ? [JSON.stringify({ ...event, by })] : linesOf(world, event)) console.log(line); } });
         const played = Math.round(seconds / 6) / 10;
@@ -300,9 +301,16 @@ else if (command === 'numbers') {
         const tokens = (tally: { inputTokens: number; cachedInputTokens: number; outputTokens: number }) => `${tally.inputTokens} input tokens, ${tally.cachedInputTokens} of them cached, ${tally.outputTokens} output tokens`;
         const failure = { ...(totals.httpStatus ? { httpStatus: totals.httpStatus } : {}), ...(totals.providerCode ? { providerCode: totals.providerCode } : {}), ...(totals.param ? { param: totals.param } : {}) };
         console.log(json ? JSON.stringify({ status: totals.status, reason: totals.reason, ...failure, minutes: played, calls: totals.calls, invalid: totals.invalid, overlong: totals.overlong, declined: totals.declined,
-          rewrites: totals.rewrites, lost: totals.lost, refused: totals.refused, void: totals.void, unreported: totals.unreported, inputTokens: totals.inputTokens, cachedInputTokens: totals.cachedInputTokens, outputTokens: totals.outputTokens, models: totals.models, kinds: totals.kinds, endpoints: totals.endpoints })
+          rewrites: totals.rewrites, lost: totals.lost, refused: totals.refused, void: totals.void, causes: totals.causes, unreported: totals.unreported, inputTokens: totals.inputTokens, cachedInputTokens: totals.cachedInputTokens, outputTokens: totals.outputTokens, models: totals.models, kinds: totals.kinds, endpoints: totals.endpoints })
           : `${totals.status} (${[totals.reason, ...Object.values(failure)].join(' ')}): ${played} story minutes, ${totals.calls} calls, ${totals.invalid} invalid, ${totals.overlong} of them cut at the output limit, ${totals.declined} of them declined by the service, ${totals.rewrites} memory rewrites, ${
             totals.lost} lost, ${totals.refused} answers of the world refused, ${totals.void} deeds left with nothing, ${tokens(totals)}${unreported(totals.unreported)}`);
+        if (!json) {
+          const causes = (['world', 'reply'] as const).map(kind => {
+            const counts = UNTAKEN_CAUSES.filter(cause => totals.causes[kind][cause]).map(cause => `${cause} ${totals.causes[kind][cause]}`);
+            return counts.length ? `${kind} ${counts.join(', ')}` : '';
+          }).filter(Boolean);
+          if (causes.length) console.log(`not taken: ${causes.join('; ')}`);
+        }
         const models = Object.entries(totals.models);
         const answeredBy = (name: string) => Object.hasOwn(totals.endpoints, name) ? `, answered by ${Object.entries(totals.endpoints[name]).map(([endpoint, count]) => `${endpoint} ${count}`).join(', ')}` : '';
         if (!json && (models.length > 1 || Object.keys(totals.endpoints).length)) {

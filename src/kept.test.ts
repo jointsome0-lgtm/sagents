@@ -12,7 +12,7 @@ import { test } from 'node:test';
 
 import { openLab } from '../lab/data.ts';
 import { keepRun } from './kept.ts';
-import { runLive, WORLD_INSTRUCTIONS } from './live.ts';
+import { runLive, UNTAKEN_CAUSES, WORLD_INSTRUCTIONS } from './live.ts';
 import type { Request } from './chatgpt.ts';
 import { readWorld } from './laws.ts';
 import { JournalError, memoryStore, replay, refused, worldOf } from './journal.ts';
@@ -36,7 +36,8 @@ test('live --run keeps each start as a stretch of one world that the lab reads, 
   const first = start('night-station');
   assert.equal(first.status, 0, first.stderr);
   const one = kept();
-  assert.deepEqual(Object.keys(one), ['part1.events.jsonl', 'usage-part1.jsonl', 'world.json']);
+  assert.deepEqual(Object.keys(one), ['part1.events.jsonl', 'untaken-part1.jsonl', 'usage-part1.jsonl', 'world.json']);
+  assert.equal(one['untaken-part1.jsonl'], '');
   assert.equal(one['world.json'], readFileSync(example('night-station'), 'utf8'));
   // A row for every request, with the counted fields and nothing else: no text of a request or of an answer.
   assert.equal(rows('usage-part1.jsonl').length, 3);
@@ -53,7 +54,8 @@ test('live --run keeps each start as a stretch of one world that the lab reads, 
   const second = start('night-station');
   assert.equal(second.status, 0, second.stderr);
   const two = kept();
-  assert.deepEqual(Object.keys(two), ['part1.events.jsonl', 'part2.events.jsonl', 'usage-part1.jsonl', 'usage-part2.jsonl', 'world.json']);
+  assert.deepEqual(Object.keys(two), ['part1.events.jsonl', 'part2.events.jsonl', 'untaken-part1.jsonl', 'untaken-part2.jsonl', 'usage-part1.jsonl', 'usage-part2.jsonl', 'world.json']);
+  assert.equal(two['untaken-part2.jsonl'], '');
   for (const name of Object.keys(one)) assert.equal(two[name], one[name], name);
   assert.ok(rows('part2.events.jsonl')[0].at >= rows('part1.events.jsonl').at(-1).at);
 
@@ -72,6 +74,33 @@ test('live --run keeps each start as a stretch of one world that the lab reads, 
   assert.deepEqual([listed.single, listed.experiments.length, listed.experiments[0].shape, listed.experiments[0].rehearsal, listed.experiments[0].stretches.map(stretch => stretch.name), listed.experiments[0].usage],
     [true, 1, 'world', false, ['part1', 'part2'], { requests: 6, failed: 0, input: 600, cached: 240, output: 60 }]);
   assert.equal(listed.experiments[0].stretches.reduce((sum, stretch) => sum + stretch.events, 0), rows('part1.events.jsonl').length + rows('part2.events.jsonl').length);
+});
+
+test('untaken answers keep only codes unless the run asks to keep their text', async () => {
+  const file = { title: 'Untaken', about: 'A synthetic room.', clock: '09:00',
+    places: [{ id: 'hall', name: 'Hall', about: 'A room.' }], characters: [{ id: 'ada', name: 'Ada', place: 'hall', sheet: 'Ada.' }] };
+  const entry = { what: 'ABSENT-THING', n: 1, to: 'hall' };
+  const action = JSON.stringify({ action: 'do', text: 'DEED-TEXT', seconds: 1, note: 'PRIVATE-NOTE' });
+  const answer = JSON.stringify({ search: false, finds: [], moves: [entry], sets: [], poses: [], wakes: [], feels: [], beyond: null, result: 'REFUSED-TEXT' });
+  const unread = 'UNREAD-TEXT';
+  for (const text of [false, true]) {
+    const dir = mkdtempSync(join(tmpdir(), 'sagents-untaken-')), kept = keepRun(dir, JSON.stringify(file), undefined, text);
+    const answers = [action, answer, unread];
+    try {
+      await runLive({ world: readWorld(file), model: 'stand-in', respond: kept.count(async () => ({ text: answers.shift()!, usage: null })),
+        journal: kept.state, onAsk: kept.onAsk, onUntaken: kept.onUntaken, onEvent: kept.onEvent, calls: 3, minutes: 1 });
+    } finally { kept.close(); }
+    const saved = readFileSync(join(dir, 'untaken-part1.jsonl'), 'utf8'), rows = saved.trim().split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(rows.map(({ n, kind, cause }) => ({ n, kind, cause })), [{ n: 2, kind: 'world', cause: 'what' }, { n: 3, kind: 'world', cause: 'unread' }]);
+    for (const row of rows) assert.ok(UNTAKEN_CAUSES.includes(row.cause));
+    if (text) {
+      assert.deepEqual(rows[0], { n: 2, kind: 'world', cause: 'what', entry, answer });
+      assert.deepEqual(rows[1], { n: 3, kind: 'world', cause: 'unread', answer: unread });
+    } else {
+      for (const row of rows) assert.deepEqual(Object.keys(row), ['n', 'kind', 'cause']);
+      for (const words of [entry.what, entry.to, action, 'DEED-TEXT', 'PRIVATE-NOTE', answer, 'REFUSED-TEXT', unread]) assert.ok(!saved.includes(words));
+    }
+  }
 });
 
 // These ways must survive every pause, including one before the rules take the go. The café's byte hashes below
