@@ -240,3 +240,33 @@ test('ways replay and continue as goes, and a world without ways keeps its reque
     assert.equal(database.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '18');
   } finally { database.close(); }
 });
+
+test('a kept run stopped during a road deed continues to the uninterrupted records and events', async () => {
+  const file = { title: 'Road', about: 'A synthetic walk.', clock: '09:00', legMinutes: 10, travelMinutes: 35,
+    places: [{ id: 'a', name: 'A', about: 'A room.' }, { id: 'b', name: 'B', about: 'A room.' }],
+    characters: [{ id: 'ada', name: 'Ada', place: 'a', sheet: 'Ada.' }] };
+  const world = readWorld(file), text = JSON.stringify(file), dir = join(mkdtempSync(join(tmpdir(), 'sagents-road-')), 'run');
+  const script = () => {
+    const actions = [{ action: 'go', place: 'b' }, { action: 'do', text: 'Look at the sky', seconds: 120 }];
+    return async (request: Request) => ({ usage: null, text: JSON.stringify(request.system!.includes('You are Ada')
+      ? actions.shift() ?? (request.messages[0].content.includes('You are in B (b)') ? { action: 'wait', seconds: 3600 } : { action: 'go', place: 'b' })
+      : { search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], feels: [], beyond: null, result: null }) });
+  };
+  const respond = script(), first = keepRun(dir, text);
+  try {
+    await runLive({ world, respond, model: 'stand-in', journal: first.state, onEvent: first.onEvent, calls: 2, minutes: 36, pause: true });
+    assert.equal(replay(world, first.state.entries()).deed?.onWay?.behind, 600);
+  } finally { first.close(); }
+  const continued = keepRun(dir, text), whole = memoryStore();
+  try {
+    await runLive({ world, respond, model: 'stand-in', journal: continued.state, onEvent: continued.onEvent, minutes: 28, calls: 20, pause: true });
+    await runLive({ world, respond: script(), model: 'stand-in', journal: whole, minutes: 38, calls: 20, pause: true });
+    assert.deepEqual([...continued.state.entries()], whole.all);
+    assert.equal(whole.all.find(entry => entry.event.kind === 'arrive')!.event.at, 2220);
+    assert.deepEqual(replay(world, continued.state.entries()), replay(world, whole.all));
+    const events = ['part1.events.jsonl', 'part2.events.jsonl'].flatMap(name => readFileSync(join(dir, name), 'utf8').trim().split('\n').map(line => JSON.parse(line)));
+    assert.deepEqual(events, whole.all.map(entry => entry.event));
+  } finally { continued.close(); }
+  const meta = new DatabaseSync(join(dir, 'state.sqlite'), { readOnly: true });
+  try { assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '44'); } finally { meta.close(); }
+});

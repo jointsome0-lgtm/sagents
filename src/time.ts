@@ -1,6 +1,6 @@
 import { secondsOfDay } from './reading.ts';
 import { MAX_SECONDS, MAX_SLEEP, MAX_WORDS, namesOf } from './world.ts';
-import type { Person, Vehicle, World } from './world.ts';
+import type { Person, Vehicle, Walk, World } from './world.ts';
 
 export function clockAt(world: World, at: number): string {
   const [hours, minutes] = world.clock.split(':').map(Number);
@@ -26,7 +26,7 @@ export function sensed(world: World, at: number, open: boolean): string {
 }
 // Residents must receive time only in this form.
 export function timeFor(world: World, id: string, place: string | null, at: number): string {
-  return hasClock(world, id, place) ? clockAt(world, at) : `[${sensed(world, at, world.places.some(item => item.id === place && item.open))}]`;
+  return hasClock(world, id, place) ? clockAt(world, at) : `[${sensed(world, at, world.legMinutes !== undefined && place === null || world.places.some(item => item.id === place && item.open))}]`;
 }
 
 export const DRIFT = { sleep: { part: 10, most: 1800 }, wait: { part: 20, most: 180 }, do: { part: 20, most: 180 } };
@@ -83,4 +83,28 @@ export function busAt(world: World, bus: Vehicle, now: number): Vehicle {
       departure: { to: bus.route![(index + 2) % bus.route!.length], at: began + stop.at + bus.stands! } };
   }
   return { ...bus, at: bus.route![0], heading: null, departure: { to: bus.route![1], at: (next === undefined ? day + 86_400 + times[0] : day + next) - secondsOfDay(world.clock) } };
+}
+
+export function walkAt(walk: Walk, now: number): Walk {
+  const legs = walk.legs.map(leg => ({ ...leg }));
+  let passed = Math.max(0, Math.min(now, walk.arrival) - walk.since);
+  while (legs.length > 1 && passed >= legs[0].seconds - legs[0].behind) {
+    passed -= legs[0].seconds - legs[0].behind;
+    legs.shift();
+  }
+  legs[0].behind = Math.min(legs[0].seconds, legs[0].behind + passed);
+  return { ...walk, legs, since: Math.max(now, walk.since) };
+}
+export const wayAt = (walk: Walk, now: number) => {
+  const [leg] = walkAt(walk, now).legs;
+  return { from: leg.from, to: leg.to, behind: leg.behind, ahead: leg.seconds - leg.behind };
+};
+export const legAt = (world: World, walk: Walk, now: number) => walk.arrival - now - world.legMinutes! * 60 >= 60 ? now + world.legMinutes! * 60 : walk.arrival;
+export function turnSeconds(world: World, walk: Walk, to: string, now: number): number {
+  const { legs: [leg] } = walkAt(walk, now);
+  if (to === walk.legs.at(-1)!.to) return Math.max(0, walk.arrival - now);
+  if (to === leg.from) return leg.behind;
+  const back = leg.behind + travelSeconds(world, leg.from, to);
+  const ahead = leg.seconds - leg.behind + (to === leg.to ? 0 : travelSeconds(world, leg.to, to));
+  return Math.min(back, ahead);
 }

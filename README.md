@@ -181,6 +181,7 @@ beginning with a letter, unique across those four lists. It cannot be `eaten`, `
 | `characters` | Required nonempty list of character objects. | The people whom models play, in their starting order. |
 | `wordsPerMinute` | Number above zero, default 130. A 65-word speech, rounded up with a two-second minimum, must fit the duration bound. | The speech rate when a character or figure has no rate of its own. |
 | `travelMinutes` | Number above zero, default 5; rounded seconds with a one-second minimum must fit the duration bound. | The walk time when neither a listed time nor coordinates give one. |
+| `legMinutes` | Whole number from 1 to 60, absent for off. | A turn after each part of a walk, when at least one minute remains. |
 | `walkMetresPerMinute` | Number above zero, default 80. | The pace used with coordinates. Every unlisted pair's distance must be finite and its walk fit the duration bound. |
 | `remote` | Nonempty text or null, absent for none. | The means of remote contact, such as a telephone. Without it there is no `call`. |
 | `shortWords` | Positive safe whole number, default 2000. | The recent-memory limit that starts a rewrite; waiting calls may require several rewrites. |
@@ -217,6 +218,7 @@ beginning with a letter, unique across those four lists. It cannot be `eaten`, `
 | `figures` | List of figure objects, default empty. | Named people who answer a speech addressed to them. |
 | `at` | Two finite numbers `[x, y]`, east and north in metres, or null; absent for none. | When both ends have coordinates and neither lists a time, the straight-line walk at the world's pace, in whole minutes above ten or tenths up to ten, with a one-second minimum. |
 | `minutesTo` | Object from another place's id to a number above zero, default empty; rounded seconds with a one-second minimum must fit the duration bound. | Overrides coordinates and the world's fallback time. The departing place's value wins if both ends list the pair. This can make the two directions differ. |
+| `alongTo` | Object from another ordinary place's id to nonempty text of at most 60 words, absent for none. | What the world reads for a deed along that way with `legMinutes`. Either end supplies it; the departing end wins when both list it. |
 | `nextDoor` | List of other ordinary place ids, default empty. | A door or thin wall that can carry a deed's sound. Either end listing the pair makes it mutual. Speech itself never passes it. |
 
 ##### Character
@@ -413,6 +415,7 @@ as `declined` are in the [table of reasons](#what-works-today).
 In text output each event has a line with clock, place, who and what. Further lines show found, moved and changed
 things, poses, touches, private feelings, lasting feelings, traces left or wiped, sound next door, words with a
 deed and a private note. A gesture stands in brackets before speech. A wait without a note prints nothing.
+A turn on the way has the way, its direction and the minutes still ahead in place of a place.
 A rewrite is shown whole, across all its lines, marked private like a note. `linesOf` in `src/live.ts` holds this
 transcript. The totals give status and reason; HTTP status, provider code and field name when present, never the
 service's words (`failed (provider_failed 502 bad_gateway)`; `httpStatus`, `providerCode` and `param` in JSON).
@@ -444,6 +447,7 @@ would ignore settings and lose their state.
 | Condition | Format |
 | --- | --- |
 | `deedEnds` | `45` |
+| `legMinutes` | `44` |
 | `stableFirst` | `43` |
 | `oneSchema` | `40` |
 | `fixedSchema` | `39` |
@@ -591,7 +595,9 @@ A deed lasts at least as long as its words, and they hold listeners like speech.
 `own` in `src/journal.ts` tells only the doer of a cut deed, on its own line like cut speech: `Your deed was longer than the limit: only its first words were done.`
 [Speaker rates were checked with stand-ins](docs/measured.md#speech-rates), with no changed instruction text.
 The walking fields above give the time. Walking hears nothing,
-cannot stop and takes no turn on the way.
+cannot stop and takes no turn on the way without `legMinutes`. With it, long walks take turns in parts;
+speech leaves arrival unchanged, and a deed or wait stops the walker for its seconds before another part.
+Vehicles, boarding and getting out keep their own rules.
 
 A `do` or `wait` lasts chosen whole `seconds`, at most an hour, or `until` the next occurrence of a time of day such as `06:30`;
 a `sleep` lasts at most 12 hours. `until` wins over seconds. An excessive span is capped without losing the turn;
@@ -627,6 +633,19 @@ in the place but the doer: they remember `X stopped after 62 of 600 s: TEXT. It 
 result lines, also when the result has no words and changes nothing and when no time was spent.
 Without the setting the requests and journal stay unchanged.
 
+##### Walks in parts
+
+`deedEnds` and `legMinutes` cannot be set together yet.
+
+`walkAt`, `legAt` and `turnSeconds` in `src/time.ts`, with `together` in `src/action.ts`, keep a walk's progress and
+company. Walkers on the same way in the same direction are together when their arrivals differ by at most a minute.
+They hear speech and see deeds as people in one place do; a stop that puts the arrival farther apart leaves one behind.
+`go` walks on or turns elsewhere, back in the time walked or by the shorter route through either endpoint.
+Sleep is refused until arrival, and forced sleep waits for it. `roadDeedOf` in `src/live.ts` gives the world only
+these walkers, what they carry and wear, the weather and the way's description; nothing can be taken from a place
+or left on the way. `advance` in `src/journal.ts` keeps way lines in memories and an optional `onWay` in events,
+and rebuilds progress from kept actions. Passing walkers in the other direction is not built.
+
 ##### Time without a clock
 
 `hasClock`, `timeFor`, `sensed` and `DRIFT` in `src/time.ts` keep clock knowledge local.
@@ -635,7 +654,7 @@ part of day, `Now evening, as far as you can tell: no clock is at hand.`, and a 
 stays speech. Memories keep the time as their owner could tell it when it happened, even after losing a clock.
 Open-sky cues begin at 05:00 early morning, 07:00 morning, 10:00 late morning, 12:00 around midday,
 14:00 afternoon, 16:00 late afternoon, 18:00 early evening, 20:00 late evening and 23:00 night.
-Under a roof or on the way they are 05:00 morning, 11:00 the middle of the day, 15:00 afternoon,
+Under a roof or on a walk without `legMinutes` they are 05:00 morning, 11:00 the middle of the day, 15:00 afternoon,
 18:00 evening and 23:00 night. Later days are named. With a clock, `until` is an alarm at that time.
 Without one, replayable drift is at most a tenth of the span and half an hour for sleep, a twentieth and three
 minutes for deed or wait, never outside the action's allowed span. Its own line says `until about 06:00`.
@@ -962,8 +981,8 @@ thousands of steps with answers of every kind, checking laws from the journal al
   Every neighbour hears the same `beyond`, the doer is not told who heard it, and hearing is the model's judgement.
 - Doors have no open, shut or bolted state. Description is all the world knows, every `go` passes, and sound does
   not depend on doors. There is no shop, prices, manufacture or taking, giving and eating without the world.
-- Walking is straight at one pace for everyone, whatever terrain or tiredness. It cannot be interrupted,
-  perceives nothing and receives no later weather notices. Carried things go along regardless of size.
+- Walking is at one pace for everyone, whatever terrain or tiredness. Without `legMinutes` it cannot be interrupted
+  and perceives nothing. Walkers receive no later weather notices between turns. Carried things go along regardless of size.
   A resident names a thing in words, and the world must find its label.
 - A handed-over, lost or stopped watch still tells its original owner time; a removed place clock stays there.
   Seconds are exact for all; an early-woken sleeper is not told by how much. Tiredness is one count, changes no

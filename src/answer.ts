@@ -1,7 +1,7 @@
 import { cut, isObject, wordsOf } from './reading.ts';
-import { attend, awakeIn } from './action.ts';
+import { attend, awakeIn, presentAt } from './action.ts';
 import { speechSeconds } from './time.ts';
-import { keep, MAX_MOVES, MAX_SETS, settle, sought } from './things.ts';
+import { all, keep, MAX_MOVES, MAX_SETS, settle, SINKS, sought } from './things.ts';
 import type { Move, Refused, Setting, Things } from './things.ts';
 import { readTouches } from './touch.ts';
 import type { Change, Touch } from './touch.ts';
@@ -114,11 +114,20 @@ export function readReply(answer: string, allowed?: Allowed): { text: string | n
   return moves && { text: line(value.reply, MAX_WORDS) || null, moves };
 }
 
-const settled = (world: World, people: Person[], things: Things, deed: Event, { moves, sets = [], search = false, finds = [] }: Partial<Answer> & { moves: Move[] }) =>
-  settle(things, deed.place, people.filter(person => person.place === deed.place).map(person => person.id),
+const hereAt = (people: Person[], deed: Event) => presentAt(people, deed).map(person => person.id);
+const settled = (world: World, people: Person[], things: Things, deed: Event, { moves, sets = [], search = false, finds = [] }: Partial<Answer> & { moves: Move[] }) => {
+  const present = hereAt(people, deed);
+  if (deed.onWay) {
+    const into = [...present, ...all(present.flatMap(id => things.people.get(id)!)).filter(thing => thing.holds).map(thing => thing.label), ...(deed.kind === 'do' ? SINKS : [])];
+    const entry = moves.find(move => !into.includes(move.to));
+    if (entry) return { code: 'to' as const, entry };
+  }
+  const made = settle(deed.onWay ? { ...things, places: new Map(things.places).set(deed.place, []) } : things, deed.place, present,
     new Map([...namesOf(world), ...world.places].map(item => [item.id, item.name])),
-    [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do', world.hunger === true);
-const hereAt = (people: Person[], deed: Event) => people.filter(person => person.place === deed.place).map(person => person.id);
+    deed.onWay ? [] : [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do', world.hunger === true);
+  if (deed.onWay && !('code' in made)) made.lists.delete(deed.place);
+  return made;
+};
 export function refusal(world: World, people: Person[], things: Things, deed: Event, answer: Partial<Answer> & { moves: Move[] }, traces: Traces | null = null): Rejected | null {
   const made = settled(world, people, things, deed, answer), marks = traces && retraced(traces, hereAt(people, deed), answer);
   return 'code' in made ? made : marks && 'code' in marks ? marks : null;
@@ -150,15 +159,15 @@ export function result(world: World, people: Person[], things: Things, deed: Eve
     traces.next = marks.next;
   }
   const doer = people.find(person => person.id === deed.who)!, { moved, set, found } = made;
-  if (search) things.searched.set(`${deed.who} ${deed.place}`, (things.searched.get(`${deed.who} ${deed.place}`) ?? 0) + deed.seconds);
-  const placed = world.ways && answer.goes !== null ? poses.filter(pose => pose.of !== deed.who) : poses;
+  if (search && !deed.onWay) things.searched.set(`${deed.who} ${deed.place}`, (things.searched.get(`${deed.who} ${deed.place}`) ?? 0) + deed.seconds);
+  const placed = world.ways && !deed.onWay && answer.goes !== null ? poses.filter(pose => pose.of !== deed.who) : poses;
   for (const pose of placed) people.find(person => person.id === pose.of)!.pose = pose.text || null;
   for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + (world.deedEnds ? 0 : deed.seconds));
-  const doors = world.places.find(place => place.id === deed.place)!.nextDoor;
+  const doors = deed.onWay ? [] : world.places.find(place => place.id === deed.place)!.nextDoor;
   const nearby = beyond === null ? [] : people.filter(person => !person.asleep && doors.includes(person.place!));
   for (const hearer of nearby) attend(hearer, deed.at);
   return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
-    heard: !world.deedEnds && text === null && !moved.length && !set.length && !found.length ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null,
-    wakes, search, finds, moved, set, poses: placed, feels, beyond, ...(world.ways ? { goes: answer.goes } : {}), nearby: nearby.map(person => person.id), found, ...(answer.touches ? { touches: answer.touches } : {}), ...(answer.lingers ? { lingers: answer.lingers } : {}),
+    heard: !world.deedEnds && text === null && !moved.length && !set.length && !found.length ? [] : (deed.onWay ? presentAt(people, deed).filter(person => person !== doer) : awakeIn(people, deed.place, doer)).map(person => person.id), note: null,
+    wakes, search, finds, moved, set, poses: placed, feels, beyond, ...(world.ways && !deed.onWay ? { goes: answer.goes } : {}), ...(deed.onWay ? { onWay: deed.onWay } : {}), nearby: nearby.map(person => person.id), found, ...(answer.touches ? { touches: answer.touches } : {}), ...(answer.lingers ? { lingers: answer.lingers } : {}),
     ...(marks ? { traced: marks.traced, wiped: marks.wiped } : {}) };
 }

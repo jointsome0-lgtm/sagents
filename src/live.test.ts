@@ -1056,3 +1056,15 @@ test('a world file with traces over their limits is refused by the field, and an
   // A world whose file gives nobody `traces` keeps none, and an id like a trace's label is as good as any there.
   assert.equal(replay(readWorld({ ...file(undefined, 'm3'), characters: [{ id: 'm3', name: 'Ada', place: 'hall', sheet: 'S' }] }), []).traces, null);
 });
+
+test('a 35-minute walk takes exactly three turns in ten-minute parts without delaying arrival', async () => {
+  const walking = { ...world, legMinutes: 10, travelMinutes: 35, characters: [world.characters[0]] };
+  const journal = memoryStore(), requests: Request[] = [];
+  await runLive({ world: walking, model: 'stand-in', journal, minutes: 36, pause: true,
+    respond: async request => { requests.push(request); return { usage: null, text: act('go', { place: 'blue' }) }; } });
+  const turns = journal.all.filter(entry => entry.event.onWay);
+  assert.deepEqual(turns.map(entry => entry.event.at), [600, 1200, 1800]);
+  assert.ok(turns.every(entry => entry.record.kind === 'act' && entry.event.kind === 'go'));
+  assert.equal(journal.all.find(entry => entry.event.kind === 'arrive')!.event.at, 2100);
+  assert.equal(requests.filter(request => /Now .* You are walking/.test(request.messages[0].content)).length, 3);
+});
