@@ -75,8 +75,9 @@ const DEED_CUT = 'Your deed was longer than the limit: only its first words were
 const NOTHING = 'Nothing came of it that could be noticed.';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
+const tasted = (doer: string, left?: number) => `was eaten or drunk in part by ${doer}${left === undefined ? '.' : left === 2 ? ': two thirds of it are left.' : left === 1 ? ': a third of it is left.' : ': nothing of it is left.'}`;
 const told = (event: Event, doer: string) => [
-  ...(event.moved ?? []).filter(posting => posting.out !== posting.into).map(({ name, n, to, out, into }) => `${name}${n === null ? '' : ` ×${n}`} ${
+  ...(event.moved ?? []).filter(posting => posting.out !== posting.into).map(({ name, n, to, out, into, left, thirds }) => to === 'tasted' && thirds !== undefined ? `${name} ${tasted(doer, left)}` : `${name}${n === null ? '' : ` ×${n}`} ${
     to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went from ${out} to ${into}`}.`),
   ...(event.set ?? []).map(({ name, state }) => `${name} is now ${state}.`),
   ...(event.found ?? []).map(({ name, spot }) => `${name} was found: ${spot}.`)].join(' ');
@@ -84,7 +85,7 @@ const told = (event: Event, doer: string) => [
 const listed = (world: World, things: Things, event: Event, doer: string) => {
   const within = [...(event.onWay ? [] : things.places.get(event.place)!), ...[...things.people.values()].flat()];
   const holder = (id: string) => { const one = [...world.characters, ...world.places].find(item => item.id === id); return one ? `${one.name} (${id})` : `${id} ${all(within).find(thing => thing.label === id)?.name ?? ''}`.trim(); };
-  return [...(event.moved ?? []).map(({ what, name, n, to, as }) => `${as ?? what} ${name}${n === null ? '' : ` ×${n}`} ${
+  return [...(event.moved ?? []).map(({ what, name, n, to, as, left, thirds }) => to === 'tasted' && thirds !== undefined ? `${as ?? what} ${name} ${tasted(doer, left)}` : `${as ?? what} ${name}${n === null ? '' : ` ×${n}`} ${
     to === 'eaten' ? `was eaten or drunk up by ${doer}` : to === 'burned' ? 'burned up' : `went to ${holder(to)}`}.`),
   ...(event.set ?? []).map(({ what, name, state }) => `${what} ${name} is now ${state}.`),
   ...(event.found ?? []).map(({ what, name, spot }) => `${what} ${name} was found: ${spot}.`),

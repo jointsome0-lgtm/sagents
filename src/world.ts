@@ -28,7 +28,7 @@ export const LIMITS = { looks: 60, pose: 20, feels: 20, beyond: 20, crowd: 60, t
 export const MAX_TRACES = 8;
 // Requests list traces in one sentence, so a trace must not end with a stop.
 export const traceOf = (text: string) => wordsOf(text).join(' ').replace(/[.;]+$/, '');
-export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null; touch: boolean; marks: boolean; ways?: true; deedEnds?: true; hunger?: true; stableFirst?: true; fixedSchema?: true; oneSchema?: true;
+export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null; touch: boolean; marks: boolean; ways?: true; portions?: true; deedEnds?: true; hunger?: true; stableFirst?: true; fixedSchema?: true; oneSchema?: true;
   legMinutes?: number; vehicles?: Place[]; travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
@@ -53,10 +53,10 @@ const rateOf = (value: unknown, field: string, absent: number) => {
 };
 // A move's `to` takes a place's id, a person's, a thing's label or a way out of the world alike, and figures are
 // named beside people, so an id is none of the others and none of the rules' own names.
-function idOf(value: unknown, field: string, taken: string[], traced: boolean): string {
+function idOf(value: unknown, field: string, taken: string[], traced: boolean, portions = false): string {
   if (typeof value !== 'string' || !ID.test(value)) return refuse(field, 'must be a short id of Latin letters, digits, `_` and `-`');
   if (traced && /^m\d+$/.test(value)) return refuse(field, 'must not be a label of a trace like `m7`, in a world whose characters have `traces`');
-  if (SINKS.includes(value) || /^t\d+$/.test(value) || value in {}) return refuse(field, 'must not be `eaten`, `burned`, a label of a thing like `t7` or a name every object has like `constructor`');
+  if (SINKS.includes(value) || (portions && value === 'tasted') || /^t\d+$/.test(value) || value in {}) return refuse(field, `must not be ${portions ? '`eaten`, `tasted`, `burned`' : '`eaten`, `burned`'}, a label of a thing like \`t7\` or a name every object has like \`constructor\``);
   if (taken.includes(value)) return refuse(field, 'repeats an id');
   taken.push(value);
   return value;
@@ -74,6 +74,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
   if (value.touch !== undefined && typeof value.touch !== 'boolean') return refuse('touch', 'must be true or false');
   if (value.fixedSchema !== undefined && value.fixedSchema !== true) return refuse('fixedSchema', 'must be true or absent');
   if (value.deedEnds !== undefined && typeof value.deedEnds !== 'boolean') return refuse('deedEnds', 'must be true or false');
+  if (value.portions !== undefined && typeof value.portions !== 'boolean') return refuse('portions', 'must be true or false');
   if (value.ways !== undefined && typeof value.ways !== 'boolean') return refuse('ways', 'must be true or false');
   if (value.stableFirst !== undefined && typeof value.stableFirst !== 'boolean') return refuse('stableFirst', 'must be true or false');
   if (value.oneSchema !== undefined && value.oneSchema !== true) return refuse('oneSchema', 'must be true or absent');
@@ -110,7 +111,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
       durationOf(Math.max(1, Math.round(minutes * 60)), name);
       return [to, minutes];
     }));
-    places.push({ id: idOf(place.id, `${field}.id`, taken, traced), name: textOf(place.name, `${field}.name`),
+    places.push({ id: idOf(place.id, `${field}.id`, taken, traced, value.portions === true), name: textOf(place.name, `${field}.name`),
       about: textOf(place.about, `${field}.about`), facts: factsOf(place.facts, `${field}.facts`),
       things: within(readThings(place.things, `${field}.things`, labels, true, 1, true, value.hunger === true), MAX_IN_PLACE, `${field}.things`), open: place.open === true, clock: place.clock === true,
       crowd: boundedOf(place.crowd, `${field}.crowd`, LIMITS.crowd), figures, at: at as [number, number] | null, minutesTo, nextDoor: (place.nextDoor ?? []) as string[],
@@ -149,7 +150,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
       return text ? text : refuse(`${field}.traces[${at}]`, 'must be a text that is not empty');
     });
     if (traces && new Set(traces).size !== traces.length) return refuse(`${field}.traces`, 'must not hold one text twice');
-    characters.push({ id: idOf(character.id, `${field}.id`, taken, traced), name: textOf(character.name, `${field}.name`),
+    characters.push({ id: idOf(character.id, `${field}.id`, taken, traced, value.portions === true), name: textOf(character.name, `${field}.name`),
       place: character.place as string, sheet: textOf(character.sheet, `${field}.sheet`), memory: boundedOf(character.memory, `${field}.memory`, longWords), facts: factsOf(character.facts, `${field}.facts`),
       looks: boundedOf(character.looks, `${field}.looks`, LIMITS.looks), pose: boundedOf(character.pose, `${field}.pose`, LIMITS.pose),
       carries: within(readThings(character.carries, `${field}.carries`, labels, false, 1, false, value.hunger === true), MAX_ON_PERSON, `${field}.carries`),
@@ -158,7 +159,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
     if (value.marks !== true && characters[index].marks.length) return refuse(`${field}.marks`, 'needs the setting `marks` of the world file');
   }
   for (const [index, place] of places.entries()) {
-    for (const [at, figure] of place.figures.entries()) idOf(figure.id, `places[${index}].figures[${at}].id`, taken, traced);
+    for (const [at, figure] of place.figures.entries()) idOf(figure.id, `places[${index}].figures[${at}].id`, taken, traced, value.portions === true);
   }
   const vehicles: Place[] = [];
   if (value.vehicles !== undefined) {
@@ -197,7 +198,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
           bus.fare = { name, n: fare.n };
         }
       }
-      vehicles.push({ id: idOf(vehicle.id, `${field}.id`, taken, traced), name: textOf(vehicle.name, `${field}.name`),
+      vehicles.push({ id: idOf(vehicle.id, `${field}.id`, taken, traced, value.portions === true), name: textOf(vehicle.name, `${field}.name`),
         about: boundedOf(textOf(vehicle.about, `${field}.about`), `${field}.about`, 60)!, facts: null,
         things: within(readThings(vehicle.things, `${field}.things`, labels, true, 1, true, value.hunger === true), MAX_IN_PLACE, `${field}.things`),
         open: vehicle.open === true, clock: false, crowd: null, figures: [], at: null, minutesTo: {}, nextDoor: [],
@@ -207,7 +208,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
   }
   const core = { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute, remote: typeof value.remote === 'string' ? value.remote : null, touch: value.touch === true, marks: value.marks === true,
-    ...(value.deedEnds === true ? { deedEnds: true as const } : {}), ...(value.ways === true ? { ways: true as const } : {}), ...(value.stableFirst === true ? { stableFirst: true as const } : {}), ...(value.fixedSchema === true ? { fixedSchema: true as const } : {}), ...(value.oneSchema === true ? { oneSchema: true as const } : {}), travelMinutes,
+    ...(value.deedEnds === true ? { deedEnds: true as const } : {}), ...(value.portions === true ? { portions: true as const } : {}), ...(value.ways === true ? { ways: true as const } : {}), ...(value.stableFirst === true ? { stableFirst: true as const } : {}), ...(value.fixedSchema === true ? { fixedSchema: true as const } : {}), ...(value.oneSchema === true ? { oneSchema: true as const } : {}), travelMinutes,
     walkMetresPerMinute, shortWords: countOf(value.shortWords, 'shortWords', 2000),
     ...(value.legMinutes === undefined ? {} : { legMinutes: value.legMinutes as number }), longWords, places, characters, ...(value.vehicles === undefined ? {} : { vehicles }) };
   for (const [index, place] of vehicles.entries()) {

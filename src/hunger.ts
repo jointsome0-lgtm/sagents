@@ -1,4 +1,5 @@
 import type { Law } from './laws.ts';
+import { THIRDS } from './things.ts';
 import { refuse } from './reading.ts';
 
 const FED_START = 10_800;
@@ -39,14 +40,15 @@ export const hunger: Law<'hunger', 'fed'> = {
     // Charge the elapsed time at the rate before the event changed whether the person was asleep.
     Object.assign(count, countsAt(count, event.kind === 'wake', event.at));
     if (event.kind !== 'result') return;
-    let calories = 0;
+    let calories = 0, meal = false;
     for (const posting of event.moved ?? []) {
-      if (posting.to !== 'eaten') continue;
-      const n = posting.n ?? 1;
-      if (posting.food! > 0) calories += posting.food! * n;
-      if (posting.drink) count.water = Math.min(WATER_LIMIT, Math.max(THIRSTY, count.water) + DRINK_SECONDS * n);
+      if (posting.to !== 'eaten' && posting.to !== 'tasted') continue;
+      const n = posting.n ?? 1, amount = posting.thirds === undefined ? n : posting.thirds / THIRDS;
+      if (posting.thirds !== undefined && posting.food! >= MEAL_CALORIES) meal = true;
+      if (posting.food! > 0) calories += posting.thirds === undefined ? posting.food! * n : posting.food! * posting.thirds / THIRDS;
+      if (posting.drink) count.water = Math.min(WATER_LIMIT, Math.max(THIRSTY, count.water) + DRINK_SECONDS * amount);
     }
-    if (calories > 0) count.fed = Math.min(FED_LIMIT, (calories >= MEAL_CALORIES ? Math.max(0, count.fed) : count.fed) + CALORIE_SECONDS * calories);
+    if (calories > 0) count.fed = Math.min(FED_LIMIT, (calories >= MEAL_CALORIES || meal ? Math.max(0, count.fed) : count.fed) + CALORIE_SECONDS * calories);
   },
   turn(world, parts, actor, now) {
     if (!world.hunger) return null;

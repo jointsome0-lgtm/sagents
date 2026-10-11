@@ -118,13 +118,13 @@ const hereAt = (people: Person[], deed: Event) => presentAt(people, deed).map(pe
 const settled = (world: World, people: Person[], things: Things, deed: Event, { moves, sets = [], search = false, finds = [] }: Partial<Answer> & { moves: Move[] }) => {
   const present = hereAt(people, deed);
   if (deed.onWay) {
-    const into = [...present, ...all(present.flatMap(id => things.people.get(id)!)).filter(thing => thing.holds).map(thing => thing.label), ...(deed.kind === 'do' ? SINKS : [])];
+    const into = [...present, ...all(present.flatMap(id => things.people.get(id)!)).filter(thing => thing.holds).map(thing => thing.label), ...(deed.kind === 'do' ? [...SINKS, ...(world.portions ? ['tasted'] : [])] : [])];
     const entry = moves.find(move => !into.includes(move.to));
     if (entry) return { code: 'to' as const, entry };
   }
   const made = settle(deed.onWay ? { ...things, places: new Map(things.places).set(deed.place, []) } : things, deed.place, present,
     new Map([...namesOf(world), ...world.places].map(item => [item.id, item.name])),
-    deed.onWay ? [] : [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do', world.hunger === true);
+    deed.onWay ? [] : [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do', world.hunger === true, world.portions === true);
   if (deed.onWay && !('code' in made)) made.lists.delete(deed.place);
   return made;
 };

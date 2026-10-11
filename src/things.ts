@@ -1,17 +1,18 @@
 import { amountOf, boundedOf, durationOf, isObject, MAX_FACTS, refuse, textOf } from './reading.ts';
 
 export const MAX_MOVES = 12, MAX_SETS = 6, MAX_STOCK = 20, MAX_DEPTH = 4, MAX_ON_PERSON = 30, MAX_IN_PLACE = 60;
+export const THIRDS = 3;
 export const NAME_WORDS = 8, SPOT_WORDS = 20, MAX_STATES = 4;
 // Keep combined counts and stock additions well inside the exact whole numbers.
 export const MAX_N = 1_000_000_000;
 
-export type Thing = { label: string; name: string; facts: string | null; n: number | null; fixed: boolean; open: boolean; stock: boolean; food: number | null; drink?: true; burns: boolean;
+export type Thing = { label: string; name: string; facts: string | null; n: number | null; fixed: boolean; open: boolean; stock: boolean; food: number | null; drink?: true; left?: 2 | 1; burns: boolean;
   fire: boolean | string; states: string[] | null; state: string | null; money: boolean; holds: Thing[] | null; hidden: { spot: string; minutes: number } | null };
 export type Things = { places: Map<string, Thing[]>; people: Map<string, Thing[]>; next: number; searched: Map<string, number> };
 export type Move = { what: string; n: number; to: string };
 export type Setting = { what: string; state: string };
 export const SINKS = ['eaten', 'burned'];
-export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string; sink?: 'fare'; food?: number; drink?: true };
+export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string; sink?: 'fare'; food?: number; drink?: true; thirds?: number; left?: 2 | 1 | 0 };
 // Refuse moves that all stay put, or the words could claim a move the lists never took.
 export const CODES = ['what', 'hidden', 'fixed', 'n', 'to', 'inside', 'sink', 'full', 'same', 'state'] as const;
 export type Refused = { code: typeof CODES[number]; entry: Move | Setting };
@@ -65,12 +66,14 @@ export function readThings(value: unknown, field: string, labels: { next: number
 
 export const all = (things: Thing[]): Thing[] => things.flatMap(thing => [thing, ...all(thing.holds ?? [])]);
 export const lit = (thing: Thing) => thing.fire === true || (thing.fire !== false && thing.fire === thing.state);
-export const written = (thing: Thing): string => `${thing.label} ${thing.name}${thing.n === null ? '' : ` ×${thing.n}`}${
-  [thing.fixed && 'fixed', thing.open && 'open', thing.stock && 'stock', thing.food !== null && 'food', thing.burns && 'burns', lit(thing) && 'fire',
+export const written = (thing: Thing, portions = false): string => `${thing.label} ${thing.name}${thing.n === null ? '' : ` ×${thing.n}`}${
+  [thing.fixed && 'fixed', thing.open && 'open', thing.stock && 'stock', thing.food !== null && 'food', portions && thing.left && (thing.left === 2 ? 'two thirds left' : 'a third left'), thing.burns && 'burns', lit(thing) && 'fire',
     thing.states && `state: ${thing.state} (${thing.states.join('/')})`].filter(Boolean).map(mark => `, ${mark}`).join('')}${
-  thing.holds ? ` [${thing.holds.map(written).join('; ')}]` : ''}`;
-export const shown = (things: Thing[], own: boolean, level = 1): string => things.map(thing =>
-  `${thing.name}${thing.n === null ? '' : ` ×${thing.n}`}${thing.holds?.length && (own ? level < 3 : thing.open) ? ` [${shown(thing.holds, own, level + 1)}]` : ''}`).join('; ');
+  thing.holds ? ` [${thing.holds.map(thing => written(thing, portions)).join('; ') || (portions ? 'empty' : '')}]` : ''}`;
+export const shown = (things: Thing[], own: boolean, level = 1, portions = false): string => things.map(thing =>
+  `${thing.name}${thing.n === null ? '' : ` ×${thing.n}`}${portions && thing.left ? `, ${thing.left === 2 ? 'two thirds left' : 'a third left'}` : ''}${
+    thing.holds && (own ? level < 3 : thing.open) && (thing.holds.length || portions)
+      ? ` [${shown(thing.holds, own, level + 1, portions) || 'empty'}]` : ''}`).join('; ');
 // requestLimit() in live.ts needs a per-record bound in characters.
 export const RECORD = NAME_WORDS * 10 + (MAX_STATES + 1) * 31 + 90;
 export const stocked = (world: { places: { id: string; things: Thing[] }[]; characters: { id: string; carries: Thing[] }[] }): Things =>
@@ -85,10 +88,10 @@ export function sought(things: Things, deed: { who: string; place: string; secon
 type Slot = { thing: Thing; list: Thing[]; key: string; top: Thing; level: number; root: string };
 const height = (thing: Thing): number => 1 + Math.max(0, ...(thing.holds ?? []).map(height));
 const alike = (one: Thing, other: Thing) => one.name === other.name && one.food === other.food && one.burns === other.burns && one.money === other.money
-  && one.fire === other.fire && one.fixed === other.fixed && one.facts === other.facts && one.drink === other.drink;
+  && one.fire === other.fire && one.fixed === other.fixed && one.facts === other.facts && one.drink === other.drink && one.left === other.left;
 
 // refusal() in answer.ts relies on things staying unchanged here; keep() applies the result.
-export function settle(things: Things, place: string, present: string[], names: Map<string, string>, found: string[], moves: Move[], sets: Setting[], sinks = true, hunger = false): Settled | Refused {
+export function settle(things: Things, place: string, present: string[], names: Map<string, string>, found: string[], moves: Move[], sets: Setting[], sinks = true, hunger = false, portions = false): Settled | Refused {
   const lists = new Map<string, Thing[]>([[place, structuredClone(things.places.get(place)!)], ...present.map((id): [string, Thing[]] => [id, structuredClone(things.people.get(id)!)])]);
   let next = things.next;
   const settled: Settled = { moved: [], set: [], found: [], lists, next };
@@ -115,8 +118,9 @@ export function settle(things: Things, place: string, present: string[], names: 
     const thing = slot.thing;
     if (slot.top.hidden) return { code: 'hidden', entry };
     if (thing.fixed) return { code: 'fixed', entry };
-    if (entry.n < 1 || entry.n > (thing.stock ? MAX_STOCK : thing.n ?? 1)) return { code: 'n', entry };
-    const sink = sinks && SINKS.includes(entry.to), into = slots.get(entry.to);
+    const tasted = portions && sinks && entry.to === 'tasted', before = thing.left ?? THIRDS;
+    if ((tasted && entry.n !== 1) || entry.n < 1 || entry.n > (thing.stock ? MAX_STOCK : thing.n ?? 1)) return { code: 'n', entry };
+    const sink = tasted || (sinks && SINKS.includes(entry.to)), into = slots.get(entry.to);
     const target = sink ? null : lists.get(entry.to) ?? into?.thing.holds ?? null;
     if (!sink && !target) return { code: 'to', entry };
     if (into?.top.hidden) return { code: 'hidden', entry };
@@ -124,13 +128,25 @@ export function settle(things: Things, place: string, present: string[], names: 
     const whole = !thing.stock && entry.n === (thing.n ?? 1);
     if (into && (into.thing === thing || all(thing.holds ?? []).includes(into.thing))) return { code: 'inside', entry };
     if (target && (into ? into.level : 0) + (whole ? height(thing) : 1) > MAX_DEPTH) return { code: 'inside', entry };
-    if (sink && (thing.money || (entry.to === 'eaten' ? thing.food === null : !thing.burns || ![...slots.values()].some(other => lit(other.thing) && !other.top.hidden)))) {
+    if (sink && (thing.money || (entry.to === 'eaten' || tasted ? thing.food === null : !thing.burns || ![...slots.values()].some(other => lit(other.thing) && !other.top.hidden)))) {
       return { code: 'sink', entry };
     }
     const out = said(slots, slot.key), where = sink ? '' : said(slots, entry.to);
-    if (whole) slot.list.splice(slot.list.indexOf(thing), 1);
-    else if (!thing.stock) (thing.n as number) -= entry.n;
     let as: string | null = null;
+    const left = before - 1 as 2 | 1 | 0;
+    if (tasted) {
+      if (!thing.stock) {
+        if (thing.n !== null && thing.n > 1) {
+          thing.n -= 1;
+          if (left) {
+            as = `t${next++}`;
+            slot.list.splice(slot.list.indexOf(thing) + 1, 0, { ...thing, label: as, n: 1, left });
+          }
+        } else if (left) thing.left = left;
+        else slot.list.splice(slot.list.indexOf(thing), 1);
+      }
+    } else if (whole) slot.list.splice(slot.list.indexOf(thing), 1);
+    else if (!thing.stock) (thing.n as number) -= entry.n;
     if (target) {
       const twin = thing.n === null && !thing.stock ? undefined : target.find(item => item.n !== null && !item.hidden && alike(item, thing));
       if (twin) (twin.n as number) += entry.n;
@@ -139,7 +155,8 @@ export function settle(things: Things, place: string, present: string[], names: 
     }
     for (const [id, list] of lists) if (all(list).length > (id === place ? MAX_IN_PLACE : MAX_ON_PERSON)) return { code: 'full', entry };
     settled.moved.push({ what: thing.label, name: thing.name, n: thing.n === null && !thing.stock ? null : entry.n, from: slot.key, to: entry.to, as, stock: thing.stock, out, into: where,
-      ...(hunger && entry.to === 'eaten' ? { food: thing.food!, ...(thing.drink ? { drink: true as const } : {}) } : {}) });
+      ...(portions && tasted ? { thirds: 1, ...(!thing.stock ? { left } : {}) } : portions && entry.to === 'eaten' && thing.left ? { thirds: thing.left * entry.n } : {}),
+      ...(hunger && (entry.to === 'eaten' || tasted) ? { food: thing.food!, ...(thing.drink ? { drink: true as const } : {}) } : {}) });
   }
   if (moves.length && !settled.moved.length) return { code: 'same', entry: moves[0] };
   for (const entry of sets) {

@@ -190,6 +190,7 @@ beginning with a letter, unique across those four lists. It cannot be `eaten`, `
 | `touch` | Boolean, default false. | Keeps touches between two people as state. Sleep does not end them; crossing a place's boundary does. |
 | `marks` | Boolean, default false. | Keeps lasting feelings of a body, including temporary relief. It changes no body or ability. |
 | `deedEnds` | Boolean, default false. | Gives deeds a start and an end, as described under Action spans. |
+| `portions` | Boolean, default false. | Lets food be eaten or drunk in thirds, with parts and empty containers shown in the lists. Works without hunger. |
 | `ways` | Boolean, default false. | Lets the world name a deed's way to another place; the rules then take an ordinary `go`. |
 | `fixedSchema` | Only true or absent, default off. | Keeps deed and figure reply schemas fixed for this world, with the values allowed now in the request text and checked by the engine. |
 | `hunger` | Only true or absent, default off. | Turns on hunger and thirst together. The world must contain a thing with `food` above zero and a thing with `drink: true`, anywhere in its lists. It causes no fainting, illness or death. |
@@ -446,6 +447,7 @@ would ignore settings and lose their state.
 
 | Condition | Format |
 | --- | --- |
+| `portions` | `46` |
 | `deedEnds` | `45` |
 | `legMinutes` | `44` |
 | `stableFirst` | `43` |
@@ -550,7 +552,7 @@ Answer texts are cut at their word limits. An empty `beyond` is null, and an emp
 | --- | --- |
 | `search` | Whether the deed searched the place. The rules count its seconds. |
 | `finds` | Labels of hidden things whose exact spot the deed went straight to. Unknown labels are dropped. |
-| `moves` | Entries `{ what, n, to }`: thing label, count and destination, a person here, this place, a container label, `eaten` or `burned`. No `from`; the rules already know it. |
+| `moves` | Entries `{ what, n, to }`: thing label, count and destination, a person here, this place, a container label, `eaten` or `burned`, and with portions `tasted` for a third of one food, with `n` 1. No `from`; the rules already know it. |
 | `sets` | Entries `{ what, state }`, changing a thing to one of its states. |
 | `poses` | Entries `{ of, text }`, where and how a person here is; 20 words. A pose names no other place. |
 | `touches` | Only with touch, after `poses`, before `wakes`; entries `{ of, to, kind, force, text }` described below. |
@@ -713,20 +715,33 @@ order, the whole answer or none. A whole record keeps its label and contents; a 
 another record, the rest stays, and compatible counts at a holder merge. A stock is unchanged. Labels `t1`, `t2`
 and on follow file order and are never reused or shown to residents. The world reads notation such as
 `t8 parka [t9 cigarettes ×17, burns; t10 lighter, fire]`, under `Things here`, `Carries`, and brackets for contents.
+With portions, `written` and `shown` in `src/things.ts` add `two thirds left` or `a third left`
+after food in the world's notation and after the name and count for residents. Empty containers read `[empty]`;
+residents see it only where they could see contents, through two levels of their own things or open things of others.
 There is no model-maintained list or count.
 
 An answer is refused for its first unknown or unfound hidden thing, fixed thing, excess count or more than 20
 from stock, invalid holder, self-containment or nesting beyond four, non-food eaten, nonburnable burned or burning
 without fire, money eaten or burned, more than 30 records on a person or 60 in a place, or invalid state.
+With `portions`, `tasted` also refuses non-food or money and any `n` other than 1; a figure's reply has no sinks.
+The id `tasted` is reserved with `eaten` and `burned` only with the setting.
 Moves all to their current holders refuse it because prose could claim a move that did not happen; beside an
 actual move they are passed over. A refusal changes nothing and is not journalled. The world gets the same
 request once more with a sentence naming the entry and cause in its instructions' words. After the second,
 nothing comes of the deed or speech; totals count `refused` and `void`.
 
-Only stock creates things; only eating, burning and fares remove them. For each name, what remains plus what was
-eaten, burned or paid, minus stock additions, equals what the file gave. Money plus fares never changes.
+Only stock creates things; only eating, burning and fares remove them. With `portions`, tasting the last third
+also removes a thing; tasting stock takes nothing from it. A thing with a part left still counts as one,
+and a third tasted from a pile splits off one record beside it without merging; moves merge only equal parts.
+For each name, what remains plus what was eaten, burned or paid, minus stock additions, equals what the file gave. Money plus fares never changes.
+With portions the balance counts food in thirds: remaining food uses `(left ?? 3) × (n ?? 1)`, eating and
+tasting use `thirds` or three times the count, and burning uses the part before the move. Stock additions
+use the same units, including a third tasted from stock.
 Events hold `moved` postings with source, destination and amount, `set` and `found`; eaten postings name the eater,
-and only with hunger keep calories and drink. Residents receive one line from postings with names and no labels;
+and only with hunger keep calories and drink. With portions, `Posting` in `src/things.ts` adds `thirds`
+for a tasting or eating what is left, and `left` after tasting non-stock. `listed` in `src/journal.ts`
+keeps the label of a split part; tasted lines say how much is left, without a count.
+Residents receive one line from postings with names and no labels;
 `told` in `src/journal.ts` leaves out a move whose two ends it names alike, such as into the doer's own pocket,
 which the world's earlier-deed line keeps. The invariant checks count from these postings.
 
@@ -897,7 +912,9 @@ person is, for eight hours; it is an engine record, no model asked, witnessed as
 ##### Hunger and thirst
 
 `hunger` in `src/hunger.ts` accounts only for the doer's accepted `eaten` postings, never words or a figure's
-answer. Everyone begins fed for 3 hours and not thirsty for 2. Both fall by a second per waking second, half per
+answer. With `portions` it also counts `tasted`: a third gives a third of the calories and drink time;
+eating a remaining part gives its remaining thirds. A part of a food whose whole has at least 100 calories
+also lifts a negative fed count to zero. Everyone begins fed for 3 hours and not thirsty for 2. Both fall by a second per waking second, half per
 sleeping second, below zero when needed. A deed's calories count together: at least 100 first lifts a negative
 count to zero; each calorie then adds 36 seconds, up to 10 hours. Smaller meals add time without that lift.
 Thus an awake hour uses 100 calories, 600 holds 6 hours from zero or less, and 400 after waking hungry holds 4.

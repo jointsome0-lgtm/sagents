@@ -107,6 +107,47 @@ test('a pending meal survives a kept stop with the same result, memories, histor
   } finally { rmSync(directory, { recursive: true }); }
 });
 
+test('portions keep lists, fed counts, memories and requests through a stopped run', async () => {
+  for (const settings of [{}, { deedEnds: true, stableFirst: true, fixedSchema: true, oneSchema: true }]) {
+    const file = { title: 'Thirds', about: 'An invented supper.', clock: '09:00', portions: true, hunger: true, ...settings,
+      places: [{ id: 'kitchen', name: 'Kitchen', about: 'A kitchen.', clock: true,
+        things: [{ name: 'plate', holds: [{ name: 'soup', food: 450, drink: true }] }] }],
+      characters: [{ id: 'anna', name: 'Anna', place: 'kitchen', sheet: 'SHEET-ANNA' }] };
+    const world = readWorld(file), source = JSON.stringify(file);
+    const script = () => standIn({ anna: [...Array.from({ length: 3 }, () => act('do', { memory: null, text: 'tastes soup', seconds: 1 })),
+      act('wait', { memory: null, seconds: 600 })],
+      world: Array.from({ length: 3 }, () => came({ moves: [{ what: 't2', n: 1, to: 'tasted' }], result: 'Soup is swallowed.' })) });
+    const whole = memoryStore(), full = script();
+    await runLive({ world, journal: whole, respond: full.respond, model: 'stand-in', calls: 7, minutes: 100, pause: true });
+    const directory = mkdtempSync(join(tmpdir(), 'sagents-portions-'));
+    try {
+      const path = join(directory, 'state.sqlite'), split = script();
+      let journal = openState(path, source);
+      try {
+        await runLive({ world, journal, respond: split.respond, model: 'stand-in', calls: 4, minutes: 100, pause: true });
+        const state = replay(world, journal.entries()), elapsed = world.deedEnds ? 2 : 1;
+        assert.equal(state.things.places.get('kitchen')![0].holds![0].left, 1);
+        assert.deepEqual(state.laws.fed!.get('anna'), { fed: 21_600 - elapsed, water: 14_400 - elapsed, since: elapsed });
+        assert.match(state.minds.get('anna')!.lines.at(-1)!.text, /a third of it is left/);
+      } finally { journal.close(); }
+      const meta = new DatabaseSync(path, { readOnly: true });
+      try { assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '46'); } finally { meta.close(); }
+      journal = openState(path, source);
+      try {
+        await runLive({ world, journal, respond: split.respond, model: 'stand-in', calls: 3, minutes: 100, pause: true });
+        const entries = [...journal.entries()], state = replay(world, entries), elapsed = world.deedEnds ? 3 : 2;
+        assert.deepEqual(entries, whole.all);
+        assert.deepEqual(state, replay(world, whole.all));
+        assert.deepEqual(split.sent, full.sent);
+        assert.deepEqual(state.things.places.get('kitchen')![0].holds, []);
+        assert.deepEqual(state.laws.fed!.get('anna'), { fed: 27_000 - elapsed, water: 18_000 - elapsed, since: elapsed });
+        assert.match(full.sent.anna[3].messages[0].content, /nothing of it is left/);
+        assert.match(full.sent.world[2].messages[0].content, /soup, food, a third left/);
+      } finally { journal.close(); }
+    } finally { rmSync(directory, { recursive: true }); }
+  }
+});
+
 test('optional hunger leaves old journals alone and keeps fed counts through a stopped run', async () => {
   const file = { title: 'Kitchen', about: 'A quiet kitchen.', clock: '15:30', dayStart: '15:30',
     places: [{ id: 'kitchen', name: 'Kitchen', about: 'A kitchen.', clock: true, things: [
