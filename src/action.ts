@@ -1,7 +1,7 @@
 import { all } from './things.ts';
 import type { Things } from './things.ts';
 import { cut, isObject, wordsOf } from './reading.ts';
-import { clockAt, driveSeconds, figureHere, lasting, secondsUntil, speechSeconds, travelSeconds, walkAt, legAt } from './time.ts';
+import { clockAt, driveSeconds, figureChangeIn, figureHere, lasting, secondsUntil, speechSeconds, travelSeconds, walkAt, legAt } from './time.ts';
 import { GESTURE_WORDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, SAYS_WORDS } from './world.ts';
 import type { Event, Kind, Person, Place, World } from './world.ts';
 
@@ -184,6 +184,7 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
   } else if (action.action === 'wait') {
     event.heard = [];
     if (pending) event.seconds = refused ? Math.min(event.seconds, pending.at + pending.seconds - now) : pending.at + pending.seconds - now;
+    else if (!walk && actor.place !== null) event.seconds = Math.min(event.seconds, figureChangeIn(world, actor.place, now));
   } else if (action.action === 'sleep') Object.assign(actor, { asleep: true, pose: null });
   // Interrupting for every silent deed would cost a model call for each waiting witness.
   if (walk) {

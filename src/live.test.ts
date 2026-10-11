@@ -62,7 +62,7 @@ Means of remote contact: telephone.
 You are Boris (boris).
 SHEET-BORIS`;
 
-test('figure hours take format 48 before other settings and refuse an older mark', () => {
+test('figure hours take format 49 before other settings and refuse an older mark', () => {
   const directory = mkdtempSync(join(tmpdir(), 'sagents-figure-hours-'));
   try {
     const path = join(directory, 'state.sqlite'), source = JSON.stringify({ title: 'Market', about: 'An invented market.', clock: '11:58', portions: true, deedEnds: true,
@@ -73,8 +73,8 @@ test('figure hours take format 48 before other settings and refuse an older mark
     openState(path, source).close();
     const meta = new DatabaseSync(path);
     try {
-      assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '48');
-      meta.prepare("UPDATE meta SET value = '46' WHERE key = 'format'").run();
+      assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '49');
+      meta.prepare("UPDATE meta SET value = '48' WHERE key = 'format'").run();
     } finally { meta.close(); }
     assert.throws(() => openState(path, source), /written by another version of `live`/);
   } finally { rmSync(directory, { recursive: true }); }

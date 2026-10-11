@@ -263,6 +263,8 @@ A call cannot reach it. Asking it to answer costs a request even when it says no
 is away, cannot be seen or heard and does not answer. Requests give only its name and hours in the away line;
 its looks and facts are withheld. A figure here with hours has `Here from F to T.` after its list line.
 `hoursOf` and `awayOf` in `src/live.ts` build these additions. No arrival or departure is saved or asks a model.
+A resident's wait in the place ends at the next coming or going if it would last longer, through `figureChangeIn`
+in `src/time.ts` and `apply` in `src/action.ts`; a wait on a walk, in a vehicle or continuing a deed keeps its span.
 Past speech and answers keep the figure's name and speech rate, through `namesOf` and `figuresOf` in `src/world.ts`,
 which still include every figure of the file. A file without hours keeps its requests and saved state unchanged.
 
@@ -458,7 +460,7 @@ would ignore settings and lose their state.
 
 | Condition | Format |
 | --- | --- |
-| Any figure has `hours` | `48` |
+| Any figure has `hours` | `49` |
 | `prices` | `47` |
 | `portions` | `46` |
 | `deedEnds` | `45` |

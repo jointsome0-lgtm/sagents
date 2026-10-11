@@ -10,7 +10,7 @@ const FORMAT = '18', VEHICLES_FORMAT = '19', BUSES_FORMAT = '20';
 // Earlier engines would ignore these settings and continue without keeping their state.
 const TOUCH_FORMAT = '21', MARKS_FORMAT = '22', TRACES_FORMAT = '23', SPEECH_FORMAT = '29', WAYS_FORMAT = '30', HUNGER_FORMAT = '31', FIXED_SCHEMA_FORMAT = '39';
 const STABLE_FIRST_FORMAT = '43', LEGS_FORMAT = '44';
-const ONE_SCHEMA_FORMAT = '40', DEED_ENDS_FORMAT = '45', PORTIONS_FORMAT = '46', PRICES_FORMAT = '47', FIGURE_HOURS_FORMAT = '48';
+const ONE_SCHEMA_FORMAT = '40', DEED_ENDS_FORMAT = '45', PORTIONS_FORMAT = '46', PRICES_FORMAT = '47', FIGURE_HOURS_FORMAT = '49';
 const formatOf = (world: string) => {
   try {
     const file = JSON.parse(world);

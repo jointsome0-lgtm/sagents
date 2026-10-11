@@ -65,6 +65,13 @@ export function figureHere(world: World, figure: Figure, at: number): boolean {
 export function secondsUntil(world: World, at: number, until: string): number {
   return (secondsOfDay(until) - sinceMidnight(world, at) % 86_400 + 86_400 - 1) % 86_400 + 1;
 }
+export function figureChangeIn(world: World, place: string, now: number): number {
+  let seconds = Infinity;
+  for (const figure of world.places.find(item => item.id === place)?.figures ?? []) {
+    if (figure.hours) seconds = Math.min(seconds, ...figure.hours.map(time => secondsUntil(world, now, time)));
+  }
+  return seconds;
+}
 
 export function busRound(world: Distances, bus: Vehicle) {
   let at = 0;
