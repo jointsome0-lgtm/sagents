@@ -153,12 +153,12 @@ export function result(world: World, people: Person[], things: Things, deed: Eve
   if (search) things.searched.set(`${deed.who} ${deed.place}`, (things.searched.get(`${deed.who} ${deed.place}`) ?? 0) + deed.seconds);
   const placed = world.ways && answer.goes !== null ? poses.filter(pose => pose.of !== deed.who) : poses;
   for (const pose of placed) people.find(person => person.id === pose.of)!.pose = pose.text || null;
-  for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + deed.seconds);
+  for (const sleeper of people) if (wakes.includes(sleeper.id)) sleeper.freeAt = Math.min(sleeper.freeAt, deed.at + (world.deedEnds ? 0 : deed.seconds));
   const doors = world.places.find(place => place.id === deed.place)!.nextDoor;
   const nearby = beyond === null ? [] : people.filter(person => !person.asleep && doors.includes(person.place!));
   for (const hearer of nearby) attend(hearer, deed.at);
   return { at: deed.at, clock: deed.clock, kind: 'result', who: deed.who, place: deed.place, to: null, text, seconds: 0, cut: false,
-    heard: text === null && !moved.length && !set.length && !found.length ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null,
+    heard: !world.deedEnds && text === null && !moved.length && !set.length && !found.length ? [] : awakeIn(people, deed.place, doer).map(person => person.id), note: null,
     wakes, search, finds, moved, set, poses: placed, feels, beyond, ...(world.ways ? { goes: answer.goes } : {}), nearby: nearby.map(person => person.id), found, ...(answer.touches ? { touches: answer.touches } : {}), ...(answer.lingers ? { lingers: answer.lingers } : {}),
     ...(marks ? { traced: marks.traced, wiped: marks.wiped } : {}) };
 }

@@ -33,7 +33,9 @@ in it is called invented or lost; a field the instructions do not explain is no 
 The judge writes `notes`, `says` and `summary` in the task's language, whatever language the run is in and wherever
 its story is set.
 `INSTRUCTIONS` in `src/eval.ts` explains when deeds, waits and sleep end early, so an action before its
-original span has passed is no fault. The judge is
+original span has passed is no fault. For a world with deed ends `instructionsOf` in `src/eval.ts` gives that
+setting's rules in their place: a wait ends early, a deed goes on unless its doer's turn stops it, and a waking
+comes at the world's answer. The judge is
 told to read the whole run in order
 with `show` unless the task says otherwise, to use `log` to find a place by, and not to hand in a finding already
 kept.

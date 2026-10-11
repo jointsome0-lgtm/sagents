@@ -121,6 +121,7 @@ const whoNode = (head, id, figure) => { head.append(figure ? el('span', 'dot') :
 const build = rec => {
   const event = rec.e, kind = str(event.kind), node = el('div', `ev k-${/^[a-z]+$/.test(kind) ? kind : 'other'}`), body = el('div', 'b'), head = el('div', 'h');
   const who = str(event.who), to = event.to == null ? null : str(event.to), spent = duration(event.seconds);
+  const settled = kind === 'result' && event.worked !== undefined && event.planned !== undefined;
   let text = event.text == null ? null : str(event.text), missing = '', slim = false, timed = false;
   if (ACTORS.includes(kind) && who !== '') { person(who); node.classList.add(tone(who)); }
   spot(str(event.place));
@@ -128,6 +129,7 @@ const build = rec => {
   if (kind === 'say') { whoNode(head, who); if (to !== null) head.append(el('span', '', `→ ${personName(to)}`)); }
   else if (kind === 'call') { whoNode(head, who); head.append(el('span', '', `${TXT.calls} → ${personName(to ?? '')}`)); }
   else if (kind === 'do') { whoNode(head, who); head.append(el('span', '', TXT.does)); timed = true; }
+  else if (kind === 'stop') { whoNode(head, who); head.append(el('span', '', TXT.stops)); slim = true; text = null; }
   else if (kind === 'drive') { whoNode(head, who); head.append(el('span', '', `${TXT.drives} ${placeName(event.place)} → ${placeName(to ?? '')}`)); slim = timed = true; text = null; }
   else if (kind === 'park') { head.append(el('span', 'who', placeName(who)), el('span', '', TXT.pullsUp)); slim = true; text = null; }
   else if (kind === 'go') { whoNode(head, who); head.append(el('span', '', `${event.transfer ? TXT.crosses : TXT.goes} → ${placeName(to ?? '')}`)); slim = timed = true; text = null; }
@@ -142,6 +144,10 @@ const build = rec => {
   // A kind this page does not know, of another version of the engine: its own name, and whom or what it names.
   else { if (who !== '') whoNode(head, who); head.append(el('span', '', `${kind}${to === null ? '' : ` → ${holder(to)}`}`)); timed = true; }
   if (spent && (timed || kind === 'say' || kind === 'call')) head.append(el('span', 'dur', spent));
+  if (settled) {
+    head.append(el('span', 'dur', TXT.worked(event.worked, event.planned)));
+    if (event.worked < event.planned) head.append(el('span', '', TXT.cutShort));
+  }
   if (event.cut) head.append(el('span', '', TXT.cut));
   if (event.place) { const where = el('span', 'pl', placeName(str(event.place))); if (list(event.heard).length) where.title = `${TXT.heardBy}: ${list(event.heard).map(personName).join(', ')}`; head.append(where); }
   rec.head = head;
@@ -181,7 +187,7 @@ const build = rec => {
   if (event.beyond != null) line(TXT.beyond, `${str(event.beyond)}${list(event.nearby).length ? ` (${list(event.nearby).map(personName).join(', ')})` : ''}`);
   // A field this page does not know, of another version of the engine, is one line under the field's own name,
   // with what it holds as it stands: nothing of an event is left out without a word.
-  for (const [key, value] of Object.entries(event)) if (!KNOWN.has(key) && value != null && value !== '' && value !== false && !(Array.isArray(value) && !value.length)) line(key, typeof value === 'string' ? value : JSON.stringify(value));
+  for (const [key, value] of Object.entries(event)) if (!KNOWN.has(key) && !(settled && ['worked', 'planned'].includes(key)) && value != null && value !== '' && value !== false && !(Array.isArray(value) && !value.length)) line(key, typeof value === 'string' ? value : JSON.stringify(value));
   if (lines.length) { const box = el('div', 'lists'); box.append(...lines); body.append(box); }
   if (event.note) body.append(rec.note = words('note', str(event.note)));
   if (slim) node.classList.add('slim');

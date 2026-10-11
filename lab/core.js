@@ -38,7 +38,7 @@ export const keeps = (event, chosen, places) => (!places.size || inPlaces(event,
 
 // ---- The numbers of a run, from its usage rows (as `usageRow` of the data module gives them) and its events.
 export const KINDS = ['turn', 'world', 'reply', 'memory'];
-export const ACTORS = ['say', 'call', 'do', 'drive', 'go', 'arrive', 'wait', 'sleep', 'wake', 'memory', 'result'];
+export const ACTORS = ['say', 'call', 'do', 'stop', 'drive', 'go', 'arrive', 'wait', 'sleep', 'wake', 'memory', 'result'];
 export const median = values => { if (!values.length) return null; const sorted = [...values].sort((one, other) => one - other), mid = sorted.length >> 1; return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2; };
 const sums = () => ({ requests: 0, failed: 0, input: 0, cached: 0, output: 0, reasoning: 0, ms: [], models: new Set() });
 const count = (into, row) => { into.requests += 1; if (row.failed) into.failed += 1; into.input += row.input; into.cached += row.cached; into.output += row.output; into.reasoning += row.reasoning;

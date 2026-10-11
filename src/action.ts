@@ -96,7 +96,7 @@ export const attend = (person: Person, now: number) => { person.freeAt = Math.ma
 export const awakeIn = (people: Person[], place: string, but: Person) => people.filter(person => person !== but && person.place === place && !person.asleep);
 export const sleepersNear = (people: Person[], place: Place) => people.filter(person => person.asleep && (person.place === place.id || place.nextDoor.includes(person.place!)));
 
-export function apply(world: World, people: Person[], actor: Person, action: Action, now: number, limit: number): Event {
+export function apply(world: World, people: Person[], actor: Person, action: Action, now: number, limit: number, pending?: Event, refused = false): Event {
   const place = actor.place as string;
   const here = awakeIn(people, place, actor);
   const event: Event = { at: now, clock: clockAt(world, now), kind: action.action, who: actor.id, place, to: null, text: action.text,
@@ -104,6 +104,7 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
     heard: here.map(person => person.id),
     note: action.note, ...(action.gesture === undefined ? {} : { gesture: action.gesture }), ...(action.deedCut ? { deedCut: true } : {}) };
   actor.began = now;
+  if (pending && ['do', 'go', 'sleep'].includes(action.action)) return { at: now, clock: event.clock, kind: 'stop', who: actor.id, place, to: null, text: null, seconds: 0, cut: false, heard: [], note: action.note };
   if (action.action === 'say' || action.action === 'call') {
     Object.assign(event, cut(action.text as string, limit));
     event.seconds = speechSeconds(world, actor.id, wordsOf(event.text as string).length);
@@ -146,10 +147,12 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
       attend(listener, now);
     }
     actor.speaking = ends;
-  } else if (action.action === 'wait') event.heard = [];
-  else if (action.action === 'sleep') Object.assign(actor, { asleep: true, pose: null });
+  } else if (action.action === 'wait') {
+    event.heard = [];
+    if (pending) event.seconds = refused ? Math.min(event.seconds, pending.at + pending.seconds - now) : pending.at + pending.seconds - now;
+  } else if (action.action === 'sleep') Object.assign(actor, { asleep: true, pose: null });
   // Interrupting for every silent deed would cost a model call for each waiting witness.
-  actor.freeAt = now + event.seconds;
+  actor.freeAt = Math.max(now + event.seconds, pending && action.action !== 'wait' ? pending.at + pending.seconds : 0);
   return event;
 }
 

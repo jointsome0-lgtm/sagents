@@ -32,10 +32,10 @@ export type Record = { kind: 'act'; who: string; at: number; limit: number; acti
   | LawRecord;
 // Replay must not depend on which model answered.
 export type Entry = { seq: number; record: Record; event: Event; by: string | null };
-// live.ts must answer deed before appending another record.
+// An immediate reply or a stopped deed must be answered before another record.
 // Use marksAt() in marks.ts for expiry since the last result.
 export type State = { places: Place[]; vehicleLines?: Map<string, Map<string, string>>; people: Person[]; minds: Map<string, Mind>; seq: number; deed: Event | null; results: Map<string, Line[]>;
-  said: Map<string, Line[]>; things: Things; laws: Parts; touches: Touch[]; marks: Mark[]; traces: Traces | null; ways?: Map<string, { place: string; seq: number }>; buses?: { at: number; passed: string[]; waiting: Set<string>; doors: Map<string, { place: string; at: number }> } };
+  pending?: Map<string, { event: Event; seq: number }>; said: Map<string, Line[]>; things: Things; laws: Parts; touches: Touch[]; marks: Mark[]; traces: Traces | null; ways?: Map<string, { place: string; seq: number }>; buses?: { at: number; passed: string[]; waiting: Set<string>; doors: Map<string, { place: string; at: number }> } };
 export const RESULT_WORDS = 400;
 export const SAID_WORDS = 300;
 // state.ts must append a step's entries together or not at all.
@@ -104,12 +104,12 @@ function perceived(world: World, event: Event, viewer: string, when: string): st
       : event.kind === 'go' ? `${who} leaves towards ${named(world.places, event.to)}.`
         : event.kind === 'arrive' ? `${who} arrives.`
           : event.kind === 'sleep' ? `${who} falls asleep.`
-            : event.kind === 'wake' ? `${who} wakes.` : `${who} does (${event.seconds} s): ${event.text}`;
+            : event.kind === 'wake' ? `${who} wakes.` : world.deedEnds ? `${who} begins, for ${event.seconds} s: ${event.text}` : `${who} does (${event.seconds} s): ${event.text}`;
   return [...(event.says === undefined ? [] : [`${who} says: "${event.says}"`]), what].map(line => `${when} ${line}`);
 }
 
 function own(world: World, event: Event, when: string, span = `${event.seconds} s`): string[] {
-  const what = event.transfer ? world.places.find(place => place.id === event.to)?.vehicle
+  const what = event.kind === 'stop' ? null : event.transfer ? world.places.find(place => place.id === event.to)?.vehicle
     ? `You get into ${named(world.places, event.to)}.` : `You get out of ${named(world.places, event.place)}.`
     : event.kind === 'drive' ? `You drive ${named(world.places, event.place)} towards ${named(world.places, event.to)}.`
     : event.kind === 'say' ? `You say${toFigure(world, event)}${gestured(event)}: "${event.text}"`
@@ -118,8 +118,8 @@ function own(world: World, event: Event, when: string, span = `${event.seconds} 
         : event.kind === 'arrive' ? `You arrive in ${named(world.places, event.place)}.`
           : event.kind === 'sleep' ? `You lie down to sleep (${span}).`
             : event.kind === 'wake' ? 'You wake.'
-              : event.kind === 'do' ? `You do (${span}): ${event.text}` : `You wait (${span}).`;
-  return [...(event.says === undefined ? [] : [`You say: "${event.says}"`]), what, ...(event.moved?.some(posting => posting.sink === 'fare') ? [`You pay ${event.moved.reduce((sum, posting) => sum + posting.n!, 0)} ${event.moved[0].name}.`] : []), ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : []), ...(event.deedCut ? [DEED_CUT] : [])].map(line => `${when} ${line}`);
+              : event.kind === 'do' ? world.deedEnds ? `You begin, ${span.startsWith('until') ? span : `for ${span}`}: ${event.text}` : `You do (${span}): ${event.text}` : `You wait (${span}).`;
+  return [...(event.says === undefined ? [] : [`You say: "${event.says}"`]), ...(what === null ? [] : [what]), ...(event.moved?.some(posting => posting.sink === 'fare') ? [`You pay ${event.moved.reduce((sum, posting) => sum + posting.n!, 0)} ${event.moved[0].name}.`] : []), ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : []), ...(event.deedCut ? [DEED_CUT] : [])].map(line => `${when} ${line}`);
 }
 
 export const worldOf = (world: World, state: State, at = state.buses?.at ?? 0): World => {
@@ -137,6 +137,22 @@ export function wayDue(world: World, state: State, actor: Person): Extract<Recor
     ? { vehicle: actor.place, from: vehicle.at!, to: action.place!, at: actor.freeAt + driveSeconds(world, vehicle.at!, action.place!, vehicle.faster) } : undefined;
   return { kind: 'act', who: actor.id, at: actor.freeAt, limit: MAX_WORDS, action, fromDeed: way.seq,
     ...(drive ? { drive } : {}), ...(action === 'fare' ? { place: way.place } : {}) };
+}
+export const stoppedOf = (deed: Event) => `stopped after ${deed.worked} of ${deed.planned} s: ${deed.worked! < deed.planned! ? `${closed(deed.text!)} It was cut short.` : deed.text}`;
+const settlement = (world: World, pending: { event: Event; seq: number }, at: number): Event => ({ ...pending.event,
+  at, clock: clockAt(world, at), seconds: Math.min(at, pending.event.at + pending.event.seconds) - pending.event.at,
+  ofDeed: pending.seq, worked: Math.min(at, pending.event.at + pending.event.seconds) - pending.event.at, planned: pending.event.seconds });
+export function settlementDue(world: World, state: State): Event | null {
+  if (!state.pending) return null;
+  const actor = next(state.people), at = actor.freeAt;
+  const law = LAWS.map(law => law.due?.(world, state.laws, actor)).find(record => record != null);
+  const parked = vehicleDue(world, state);
+  if (parked || law?.kind === 'weather' || actor.place === null || actor.asleep) return null;
+  const due = [...state.pending.values()].filter(({ event }) => {
+    const person = state.people.find(person => person.id === event.who)!;
+    return person.freeAt === at && (at >= event.at + event.seconds || LAWS.some(law => law.due?.(world, state.laws, person)?.kind === 'spent'));
+  }).sort((a, b) => a.seq - b.seq)[0];
+  return due ? settlement(world, due, at) : null;
 }
 function doorsOf(places: Place[]): Place[] {
   return places.map(place => ({ ...place, nextDoor: places.filter(other => other !== place && (place.vehicle
@@ -185,6 +201,7 @@ export function begin(world: World): State {
   const state: State = { places: world.places, people: start(world), minds: new Map(world.characters.map(character => [character.id, { ...blank(), long: character.memory ?? '' }])), seq: 0, deed: null,
     results: new Map(world.places.map(place => [place.id, []])), said: new Map(world.places.map(place => [place.id, []])), things: stocked(world), laws: beginLaws(world), touches: [], traces: traced(world),
     marks: world.characters.flatMap(({ id, marks }) => marks.map(({ zone, kind, level, text }) => ({ of: id, zone, kind, layers: [{ level, text, since: null, until: null }] }))),
+    ...(world.deedEnds ? { pending: new Map() } : {}),
     ...(world.ways ? { ways: new Map() } : {}),
     ...(world.vehicles?.length ? { vehicleLines: new Map(world.characters.map(character => [character.id, new Map()])) } : {}),
     ...(world.vehicles?.some(place => place.vehicle?.route) ? { buses: { at: 0, passed: [], waiting: new Set(), doors: new Map() } } : {}) };
@@ -195,6 +212,11 @@ export function begin(world: World): State {
 // After a refused record, the state may be partly changed and must not be used.
 export function advance(world: World, state: State, record: Record): Event {
   const event = applied(worldOf(world, state, record.at), state, record);
+  // The world must answer at the deed's end even while its doer is speaking or listening.
+  for (const { event: deed } of state.pending?.values() ?? []) {
+    const doer = state.people.find(person => person.id === deed.who)!;
+    doer.freeAt = Math.min(doer.freeAt, deed.at + deed.seconds);
+  }
   if (state.buses) {
     // Weather must leave bus arrivals due at its instant; parking closes it only for its own bus.
     const passed = state.buses.at === record.at ? state.buses.passed : [];
@@ -221,7 +243,7 @@ function applied(world: World, state: State, record: Record): Event {
   const { people, minds, seq } = state;
   const refuse = (problem: string): never => { throw new JournalError(`The journal cannot be used: record ${seq} ${problem}.`); };
   const when = (id: string, at: number) => timeFor(world, id, people.find(person => person.id === id)!.place, at);
-  const deed = state.deed;
+  const deed = state.deed ?? settlementDue(world, state);
   if (deed?.kind === 'say' || record.kind === 'reply') {
     if (!deed || record.kind !== 'reply' || record.who !== deed.who || record.at !== deed.at || record.figure !== deed.to) return refuse('is not a figure\'s answer to a speech to it just before');
     const { text, moves } = record;
@@ -235,6 +257,8 @@ function applied(world: World, state: State, record: Record): Event {
       if (text !== null) remember(minds.get(id)!, lineOf(seq, `${when(id, end)} ${figure} answers ${id === deed.who ? 'you' : speaker}: "${text}"`));
       if (moved) remember(minds.get(id)!, lineOf(seq, `${when(id, end)} ${moved}`));
     }
+    const pending = state.pending?.get(deed.who)?.event;
+    if (pending) people.find(person => person.id === deed.who)!.freeAt = Math.max(people.find(person => person.id === deed.who)!.freeAt, pending.at + pending.seconds);
     const kept = state.said.get(deed.place)!;
     kept.push(lineOf(seq, `${event.clock} ${speaker} to ${figure}: "${deed.text}" ${text === null ? `${figure} did not answer.` : `${figure}: "${text}"`}`));
     while (kept.length > 1 && kept.reduce((sum, line) => sum + line.size, 0) > SAID_WORDS) kept.shift();
@@ -246,7 +270,7 @@ function applied(world: World, state: State, record: Record): Event {
     const spot = world.places.find(place => place.id === deed.place)!, sleepers = sleepersNear(people, spot).map(person => person.id);
     const present = people.filter(person => person.place === deed.place).map(person => person.id);
     const held = world.touch ? state.touches.filter(touch => present.includes(touch.of)) : undefined;
-    const end = deed.at + deed.seconds, lasting = world.marks ? { marks: marksAt(state.marks, deed.at).filter(mark => present.includes(mark.of)), at: deed.at, end } : undefined;
+    const end = deed.at + (world.deedEnds ? 0 : deed.seconds), lasting = world.marks ? { marks: marksAt(state.marks, deed.at).filter(mark => present.includes(mark.of)), at: deed.at, end } : undefined;
     const extra = { ...(state.traces ? { traces: record.traces, wipes: record.wipes } : {}), ...(world.ways ? { goes: record.goes } : {}) };
     const { text, wakes, moves, sets, poses, feels, beyond, search, finds, touches, lingers } = record,
       answer = { text, wakes, moves, sets, poses, feels, beyond, search, finds, ...(touches === undefined ? {} : { touches }), ...(lingers === undefined ? {} : { lingers }), ...extra };
@@ -255,25 +279,28 @@ function applied(world: World, state: State, record: Record): Event {
       || (beyond !== null && !spot.nextDoor.length)) {
       return refuse('holds an answer of the world that the deed cannot have');
     }
+    if (deed.worked === 0 && (text !== null || wakes.length || moves.length || sets.length || poses.length || feels.length || beyond !== null || search || finds.length
+      || touches?.length || lingers?.length || record.traces?.length || record.wipes?.length || record.goes != null)) return refuse('gives a result to a deed with no time spent');
     const event = result(world, people, state.things, deed, answer, state.traces);
     if ('code' in event) return refuse('holds an answer that the rules of things refuse');
+    if (world.deedEnds) Object.assign(event, { ofDeed: deed.ofDeed, worked: deed.worked, planned: deed.planned });
     if (world.ways && answer.goes !== null) state.ways!.set(deed.who, { place: answer.goes!, seq });
     if (touches) state.touches = touched(state.touches, touches, deed.at);
     if (lingers) state.marks = marked(state.marks, lingers, deed.at, end);
     const doer = named(world.characters, deed.who), moved = told(event, doer);
     // A feeling must reach only its owner, never another memory or the place's lines for the world.
     const felt = (id: string) => feels.filter(entry => entry.of === id).map(entry => `You feel: ${entry.text}`);
-    const lines = [...(text === null ? moved || felt(deed.who).length ? [] : [NOTHING] : [`What came of it: ${text}`]), ...(moved ? [moved] : []), ...felt(deed.who)];
+    const lines = [...(world.deedEnds ? [`You ${stoppedOf(deed)}`] : []), ...(text === null ? moved || felt(deed.who).length ? [] : [NOTHING] : [`What came of it: ${text}`]), ...(moved ? [moved] : []), ...felt(deed.who)];
     remember(minds.get(deed.who)!, ...lines.map(line => lineOf(seq, `${when(deed.who, event.at)} ${line}`)));
     for (const { id } of people) {
       if (id === deed.who) continue;
-      const lines = [...(event.heard.includes(id) ? [...(text === null ? [] : [`What came of what ${doer} did: ${text}`]), ...(moved ? [moved] : [])] : []), ...felt(id)];
+      const lines = [...(event.heard.includes(id) ? [...(world.deedEnds ? [`${doer} ${stoppedOf(deed)}`] : []), ...(text === null ? [] : [`What came of what ${doer} did: ${text}`]), ...(moved ? [moved] : [])] : []), ...felt(id)];
       remember(minds.get(id)!, ...lines.map(line => lineOf(seq, `${when(id, event.at)} ${line}`)));
     }
     // Someone next door, including a sleeper woken there, must learn only the sound.
     const from = named(world.places, deed.place);
     for (const id of event.nearby!) remember(minds.get(id)!, lineOf(seq, `${when(id, event.at)} From ${from}, next door: ${beyond}`));
-    for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, deed.at + deed.seconds)} ${present.includes(id) ? `${doer} woke you by this: ${deed.text}`
+    for (const id of record.wakes) minds.get(id)!.waiting.push(lineOf(seq, `${when(id, end)} ${present.includes(id) ? `${doer} woke you by this: ${deed.text}`
       : `Something from ${from}, next door, woke you${beyond === null ? '.' : `: ${beyond}`}`}`));
     const lists = listed(world, state.things, event, doer);
     if (text !== null || lists) {
@@ -283,6 +310,8 @@ function applied(world: World, state: State, record: Record): Event {
       while (kept.length > 1 && kept.reduce((sum, line) => sum + line.size, 0) > RESULT_WORDS) kept.shift();
     }
     for (const law of LAWS) law.after?.(state.laws, event);
+    state.pending?.delete(deed.who);
+    if (world.deedEnds) attend(people.find(person => person.id === deed.who)!, event.at);
     Object.assign(state, { deed: null, seq: seq + 1 });
     return event;
   }
@@ -375,23 +404,26 @@ function applied(world: World, state: State, record: Record): Event {
     const drive = vehicle && action.action === 'go' && action.place !== vehicle.at ? { vehicle: actor.place!, from: vehicle.at!, to: action.place!,
       at: record.at + driveSeconds(world, vehicle.at!, action.place!, vehicle.faster) } : undefined;
     if (!isDeepStrictEqual(record.drive, drive)) return refuse('holds a drive different from the one its character takes');
-    event = apply(world, people, actor, action, record.at, record.limit);
+    const pending = state.pending?.get(actor.id)?.event;
+    event = apply(world, people, actor, action, record.at, record.limit, pending, typeof record.action === 'string');
     if (way) {
       event.fromDeed = way.fromDeed;
       state.ways!.delete(actor.id);
     }
     const fare = event.transfer ? world.places.find(place => place.id === event.to)?.vehicle?.fare : undefined;
     if (fare) event.moved = pay(state.things, actor.id, fare.name, fare.n, named(world.characters, actor.id));
-    if (drive) state.places = doorsOf(world.places.map(place => place.id === drive.vehicle ? { ...place,
+    if (drive && event.kind !== 'stop') state.places = doorsOf(world.places.map(place => place.id === drive.vehicle ? { ...place,
       vehicle: { ...place.vehicle!, at: null, heading: { from: drive.from, to: drive.to, at: drive.at } } } : place));
     if (event.kind === 'go') state.touches = state.touches.filter(touch => touch.of !== actor.id && touch.to !== actor.id);
     // The actor may have left; its memory must use the place where it acted.
     const told = timeFor(world, actor.id, event.place, event.at);
-    const span = action.until === null || hasClock(world, actor.id, event.place) ? undefined : `until about ${action.until}`;
+    const span = (pending && action.action === 'wait') || action.until === null || hasClock(world, actor.id, event.place) ? undefined : `until about ${action.until}`;
     const lines = (reason ? [`${told} ${refused(world, reason, record.place)}`] : own(world, event, told, span)).map(line => lineOf(seq, line));
     if (event.kind === 'sleep') lines[0].idle = true;
     remember(mind, ...lines);
-    if (event.kind === 'do' || (event.kind === 'say' && event.to !== null)) state.deed = event;
+    if (event.kind === 'do' && state.pending) state.pending.set(actor.id, { event, seq });
+    else if (event.kind === 'stop') state.deed = settlement(world, state.pending!.get(actor.id)!, record.at);
+    else if (event.kind === 'do' || (event.kind === 'say' && event.to !== null)) state.deed = event;
   } else {
     // Fold the sleeper's earlier lines before waking so it wakes with only its long-term memory.
     const due = record.kind === 'wake' ? actor.asleep && idle(mind) : actor.place === null;

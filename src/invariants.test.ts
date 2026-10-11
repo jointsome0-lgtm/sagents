@@ -20,7 +20,8 @@ import { readWorld } from './laws.ts';
 import { SINKS } from './things.ts';
 import type { Thing } from './things.ts';
 import { clockAt, speechSeconds } from './time.ts';
-import { GESTURE_WORDS, MAX_SECONDS, MAX_SLEEP, SAYS_WORDS, sizeOf, wordsOf } from './world.ts';
+import { GESTURE_WORDS, LOST_SECONDS, MAX_SECONDS, MAX_SLEEP, SAYS_WORDS, sizeOf, wordsOf } from './world.ts';
+import type { Event } from './world.ts';
 
 const PLACES = 6, PEOPLE = 30;
 // The weather changes every ten minutes of the story, from the fifth on; every third change does not get under a roof.
@@ -103,6 +104,11 @@ export const LAWS = {
   lore: 'The facts of a thing reach the world only in a request that lists the thing, wherever it then is, in the line of the place and each text once, and no resident is sent any.',
   door: 'What of a deed is heard next door is told only to those awake in a place next door to the deed\'s, and to a sleeper there whom the deed wakes, in one line that names the deed\'s place and holds nothing else of the deed, and it ends their waiting; the world is told who is next door to a deed by name, awake or asleep, and is never told what was heard; of a deed in a place with no place next door nothing is heard.',
   earlier: 'A place keeps for the world the latest of what came of the deeds done in it and shows it at every request there: for each deed the world\'s words and after them what the rules moved, set and found, a line also when there were no words, and no line for a deed that left neither.',
+};
+const SPAN_LAWS = {
+  deed: 'Every deed is answered once by the world, at its end when its seconds are over, earlier when its doer stops it or falls asleep at the limit of being awake, and by nothing else; everyone awake in its place but the doer perceives the answer; and while it goes on a wait lasts to its end and a refused answer costs the lost seconds or the seconds to that end.',
+  order: 'Nobody takes a turn at an instant before everyone who arrives or wakes at that instant has done so, except that a waking brought by the answer to a deed cut short at that instant comes after the turns taken before that answer.',
+  waking: 'A sleeper wakes only when its sleep ends or a deed\'s result wakes it at the moment of its result, and a deed wakes nobody outside its place and the places next door to it.',
 };
 const law = (name: keyof typeof LAWS, holds: boolean, record: number) => assert.ok(holds, `Law broken at record ${record}: ${LAWS[name]}`);
 
@@ -255,7 +261,32 @@ function standIn(record: () => number) {
   return { seen, respond };
 }
 
-test('thousands of steps of any answers leave a journal in which every law of the world holds', async () => {
+const originalWorld = world, originalSource = source;
+for (const deedEnds of [false, true]) test(deedEnds ? 'thousands of steps with deed ends leave a journal in which every law holds'
+  : 'thousands of steps of any answers leave a journal in which every law of the world holds', async t => {
+  const file = deedEnds ? JSON.stringify({ ...JSON.parse(originalSource), deedEnds: true }) : originalSource;
+  const played = deedEnds ? readWorld(JSON.parse(file), JSON.parse(ENVIRONMENT)) : originalWorld;
+  const laws = deedEnds ? { ...LAWS, ...SPAN_LAWS } : LAWS;
+  const law = (name: keyof typeof LAWS, holds: boolean, record: number) => {
+    if (!holds && deedEnds) {
+      t.diagnostic(`seed 2166136261; ${journal.all.length} records; walked through ${record}; ${JSON.stringify(spans)}`);
+      for (const entry of journal.all.slice(Math.max(0, record - 3), record + 3)) t.diagnostic(JSON.stringify(entry));
+      const linked = journal.all[record]?.event.ofDeed;
+      if (linked !== undefined) t.diagnostic(JSON.stringify(journal.all[linked]));
+    }
+    assert.ok(holds, `Law broken at record ${record}: ${laws[name]}`);
+  };
+  const world = played, source = file;
+  const pending = new Map<string, Entry>(), answered = new Set<number>();
+  const spans = { starts: 0, do: 0, go: 0, sleep: 0, spent: 0, whole: 0, heldEnds: 0, waits: 0, refused: 0, heardResults: 0, wakingResults: 0, afterCut: 0, resumed: 0 };
+  const wokenByCut = new Map<string, { at: number; seq: number }>();
+  let turnSeq = -1;
+  const stop = (name: keyof typeof LAWS, event: Event, seq: number) => {
+    const deed = pending.get(event.who), next = journal.all[seq + 1];
+    law(name, event.seconds === 0 && !!deed && deed.event.at <= event.at && event.at < deed.event.at + deed.event.seconds, seq);
+    law(name, next?.record.kind === 'result' && next.event.ofDeed === deed!.seq && next.event.at === event.at, seq);
+    if (event.at === deed!.event.at) law(name, next.by === null && next.event.text === null && !next.event.moved!.length && !next.event.wakes!.length, seq);
+  };
   const journal = memoryStore();
   const { seen, respond } = standIn(() => journal.all.length);
   const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, failedRun: Infinity, declinedRun: Infinity });
@@ -329,7 +360,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
   for (const { seq, record, event } of journal.all) {
     law('time', event.at >= at, seq);
     // A sleeper a deed wakes is told the moment the deed ends, and an answer is heard from the moment its speech ends.
-    const ends = record.kind === 'result' || record.kind === 'reply' ? [clockAt(world, journal.all[seq - 1].event.at + journal.all[seq - 1].event.seconds)] : [];
+    const ends = event.ofDeed !== undefined ? [event.clock] : record.kind === 'result' || record.kind === 'reply' ? [clockAt(world, journal.all[seq - 1].event.at + journal.all[seq - 1].event.seconds)] : [];
     read(event.clock, ...ends);
     // A request made when the journal held this many records shows bodies, belongings and things as they stood then.
     // The world is sent everything of the deed's place and of those in it. A resident is sent its own looks and, for
@@ -414,7 +445,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
         law('weather', isDeepStrictEqual(now, turn && reaches !== null ? [reaches] : []) && words.every(word => felt.get(who)!.has(word)), seq);
       }
     }
-    const before = journal.all[seq - 1]?.event;
+    const previous = journal.all[seq - 1]?.event;
+    const before = event.ofDeed === undefined ? previous : { ...journal.all[event.ofDeed].event, seconds: event.worked! };
     if (record.kind === 'weather') {
       const given = SKIES[sky];
       law('weather', record.n === sky + 1 && record.at === given.at && event.text === given.text && event.indoors === given.indoors, seq);
@@ -425,7 +457,43 @@ test('thousands of steps of any answers leave a journal in which every law of th
       count.weather += 1;
       if (given.indoors === null) count.roofless += 1;
     } else law('weather', event.at < SKIES[sky].at, seq);
-    law('deed', (before?.kind === 'do') === (record.kind === 'result') && (record.kind !== 'result' || (before.who === record.who && before.at === record.at)), seq);
+    if (deedEnds) {
+      const going = pending.get(event.who);
+      if (record.kind === 'act' && going && event.kind === 'wait') {
+        const remaining = going.event.at + going.event.seconds - event.at;
+        const refused = typeof record.action === 'string';
+        law('deed', event.seconds === (refused ? Math.min(LOST_SECONDS, remaining) : remaining), seq);
+        spans[refused ? 'refused' : 'waits'] += 1;
+      }
+      if (event.kind === 'do') {
+        law('deed', !pending.has(event.who), seq);
+        pending.set(event.who, journal.all[seq]);
+        spans.starts += 1;
+      } else if (event.kind === 'stop') {
+        stop('deed', event, seq);
+        law('deed', record.kind === 'act' && typeof record.action !== 'string' && ['do', 'go', 'sleep'].includes(record.action.action), seq);
+        if (record.kind === 'act' && typeof record.action !== 'string') spans[record.action.action as 'do' | 'go' | 'sleep'] += 1;
+      } else if (record.kind === 'result') {
+        const deed = pending.get(record.who);
+        law('deed', !!deed && event.ofDeed === deed.seq && !answered.has(deed.seq) && event.place === deed.event.place, seq);
+        law('deed', event.worked === Math.min(event.at - before.at, deed!.event.seconds) && event.planned === deed!.event.seconds && event.worked! >= 0 && event.worked! <= event.planned!, seq);
+        // A deed ends early by its doer's own stop, or at the turn at which its doer is put to sleep by the limit.
+        const cut = event.worked! < event.planned!, stopped = previous.kind === 'stop' && previous.who === record.who && previous.at === record.at;
+        law('deed', !cut || stopped || debtOf(record.who, event.at) >= limit, seq);
+        if (cut && !stopped) spans.spent += 1;
+        answered.add(event.ofDeed!);
+        pending.delete(record.who);
+        if (event.worked === event.planned) {
+          law('deed', event.at === deed!.event.at + deed!.event.seconds, seq);
+          spans.whole += 1;
+          if ((held.get(record.who) ?? 0) > event.at) spans.heldEnds += 1;
+        }
+        law('deed', isDeepStrictEqual(event.heard, world.characters.map(({ id }) => id).filter(id => id !== record.who && !away.has(id) && !asleep.has(id) && place.get(id) === event.place)), seq);
+        spans.heardResults += 1;
+        if (record.wakes.length) spans.wakingResults += 1;
+        if (cut) for (const id of record.wakes) wokenByCut.set(id, { at: event.at, seq });
+      }
+    } else law('deed', (before?.kind === 'do') === (record.kind === 'result') && (record.kind !== 'result' || (before.who === record.who && before.at === record.at)), seq);
     // A figure answers the speech addressed to it just before, where it lives, and nothing else.
     const addressed = before?.kind === 'say' && before.to !== null;
     law('reply', addressed === (record.kind === 'reply'), seq);
@@ -444,7 +512,7 @@ test('thousands of steps of any answers leave a journal in which every law of th
       law('waking', isDeepStrictEqual(event.wakes, record.wakes), seq);
       for (const id of record.wakes) {
         law('waking', asleep.has(id) && (place.get(id) === event.place || beside(id)), seq);
-        sleepEnds.set(id, Math.min(sleepEnds.get(id)!, before.at + before.seconds));
+        sleepEnds.set(id, Math.min(sleepEnds.get(id)!, event.ofDeed === undefined ? before.at + before.seconds : event.at));
         if (beside(id)) knocked.add(`${id} ${event.place} ${record.beyond ?? ''}`);
         else shaken.add(`${id} ${record.who}`);
       }
@@ -498,7 +566,8 @@ test('thousands of steps of any answers leave a journal in which every law of th
         law('felt', owned(of) && !asleep.has(of) && text !== '', seq);
         bodily.add(text);
       }
-      if (event.heard.length || record.feels.length || record.poses.length || record.wakes.length || record.finds.length || record.search) {
+      const noticed = deedEnds ? record.text !== null || event.moved!.length || event.set!.length || event.found!.length : event.heard.length;
+      if (noticed || record.feels.length || record.poses.length || record.wakes.length || record.finds.length || record.search) {
         for (const { of, text } of gave) {
           if (text && owned(of) && !asleep.has(of)) { due.delete(of); due.set(of, text); } else count[!text ? 'feltEmpty' : owned(of) ? 'feltAsleep' : 'feltAway'] += 1;
         }
@@ -554,17 +623,24 @@ test('thousands of steps of any answers leave a journal in which every law of th
       // A turn of someone else at the instant at which someone came or woke: that one was there to be seen.
       if (record.at === came.at && record.who !== came.who) count.met += 1;
       turned = record.at;
+      turnSeq = seq;
     }
     if (record.kind === 'arrive' || record.kind === 'wake') {
-      law('order', record.at > turned, seq);
+      const caused = deedEnds && record.kind === 'wake' && wokenByCut.get(record.who);
+      if (caused && record.at === turned) {
+        law('order', caused.at === record.at && caused.seq > turnSeq, seq);
+        spans.afterCut += 1;
+      } else law('order', record.at > turned, seq);
+      if (record.kind === 'wake') wokenByCut.delete(record.who);
       came = { at: record.at, who: record.who };
     }
     if (record.kind === 'act') {
       law('absent', !away.has(record.who) && !asleep.has(record.who), seq);
       law('speech', record.at >= (held.get(record.who) ?? 0), seq);
-      if (typeof record.action === 'string') count[record.action as keyof typeof count] += 1;
+      if (event.kind === 'stop') stop('limit', event, seq);
+      else if (typeof record.action === 'string') count[record.action as keyof typeof count] += 1;
       else if (record.action.until !== null) count.until += 1;
-      else if (record.action.capped) {
+      else if (record.action.capped && !(deedEnds && event.kind === 'wait' && pending.has(record.who))) {
         // A span that was cut lasts the longest one.
         law('limit', event.seconds === (event.kind === 'sleep' ? MAX_SLEEP : MAX_SECONDS), seq);
         count.capped += 1;
@@ -662,15 +738,18 @@ test('thousands of steps of any answers leave a journal in which every law of th
     // Many of the runs are one call long, so that some stop between a deed and the world's answer to it. Every other
     // one is two calls long: an answer that cannot be used is asked for once more, and a run of one call stops there.
     const stops: string[] = [], caches = new Set<string>();
+    let going = false;
     for (const calls of [300, ...Array.from({ length: 60 }, (_, index) => 1 + index % 2), 250, 310]) {
       const state = openState(path, source, ENVIRONMENT);
       try {
         // Two runs cannot write one file, and a file does not take another world.
         assert.throws(() => openState(path, source, ENVIRONMENT), StateError);
         caches.add(state.cache);
+        if (going) spans.resumed += 1;
         let last = '';
         await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, failedRun: Infinity, declinedRun: Infinity, onEvent: event => { last = event.kind; } });
         stops.push(last);
+        if (deedEnds) going = !!replay(world, [...state.entries()]).pending?.size;
       } finally { state.close(); }
     }
     assert.ok(stops.includes('do'), 'no run stopped between a deed and its result');
@@ -697,4 +776,9 @@ test('thousands of steps of any answers leave a journal in which every law of th
       assert.ok(continued.length > 800);
     } finally { state.close(); }
   } finally { rmSync(directory, { recursive: true }); }
+  if (deedEnds) {
+    for (const [kind, times] of Object.entries(spans)) assert.ok(times > 0, `${kind} happened ${times} times`);
+    assert.equal(spans.starts, answered.size + pending.size);
+    t.diagnostic(`${journal.all.length} records; ${JSON.stringify(spans)}; ${pending.size} deeds still going`);
+  }
 });

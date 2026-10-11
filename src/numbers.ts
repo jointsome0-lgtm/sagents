@@ -60,16 +60,31 @@ export function numbersOf(dir: string): Numbers {
   put('story minutes', minutes === null ? null : Math.round(minutes * 10) / 10);
   put('story minutes for 100 requests', minutes === null || requests === null || requests === 0 ? null : Math.round(minutes * 1000 / requests) / 10);
 
-  const actions = events.filter(event => KINDS.includes(event.kind as Kind) || event.kind === 'drive');
+  const kindsOfAction = world.deedEnds === true ? [...KINDS, 'stop'] : KINDS;
+  const actions = events.filter(event => kindsOfAction.includes(event.kind as Kind) || event.kind === 'drive');
   const count = (kind: Kind) => actions.filter(event => event.kind === kind || (kind === 'go' && event.kind === 'drive')).length;
   put('actions of residents', eventsKnown ? actions.length : null);
   for (const kind of KINDS) put(`actions: ${kind}`, eventsKnown ? count(kind) : null);
+  if (world.deedEnds === true) put('actions: stop', eventsKnown ? actions.filter(event => event.kind === 'stop').length : null);
   let led = 0, empty = 0, longest = 0, runs = 0, cut = 0, resultsKnown = eventsKnown, hearingKnown = eventsKnown;
   const streaks = new Map<string, number>();
   const end = (who: string) => { if ((streaks.get(who) ?? 0) >= 2) runs += 1; streaks.delete(who); };
+  const results = new Map<number, Fields>(), pending = new Map<string, number>();
+  if (world.deedEnds === true) for (let n = 0; n < events.length; n += 1) {
+    const event = events[n], who = event.who as string;
+    if (event.kind === 'do') {
+      if (pending.has(who)) resultsKnown = false;
+      pending.set(who, n);
+    } else if (event.kind === 'result') {
+      const linked = Number.isSafeInteger(event.ofDeed) ? event.ofDeed as number : -1;
+      const deed = linked >= 0 && linked < n && events[linked].kind === 'do' && events[linked].who === who ? linked : pending.get(who);
+      if (deed === undefined || deed !== pending.get(who) || results.has(deed)) resultsKnown = false;
+      else { results.set(deed, event); pending.delete(who); }
+    }
+  }
   for (let n = 0; n < events.length; n += 1) {
     const event = events[n], kind = event.kind, who = event.who as string;
-    if (!KINDS.includes(kind as Kind) && kind !== 'drive') continue;
+    if (!kindsOfAction.includes(kind as Kind) && kind !== 'drive') continue;
     if (kind !== 'do') {
       end(who);
       if (kind === 'go' || kind === 'drive') led += 1;
@@ -79,9 +94,9 @@ export function numbersOf(dir: string): Numbers {
       }
       continue;
     }
-    const result = events[n + 1];
+    const result = world.deedEnds === true ? results.get(n) : events[n + 1];
     if (!result) { cut += 1; end(who); continue; }
-    if (result.kind !== 'result' || result.who !== who || result.at !== event.at
+    if (result.kind !== 'result' || result.who !== who || (world.deedEnds !== true && result.at !== event.at)
       || !(result.text === null || typeof result.text === 'string') || typeof result.search !== 'boolean'
       || ![result.moved, result.set, result.found].every(Array.isArray)) { resultsKnown = false; end(who); continue; }
     if (result.text === null && !(result.moved as unknown[]).length && !(result.set as unknown[]).length && !(result.found as unknown[]).length && !result.search) {
@@ -97,6 +112,9 @@ export function numbersOf(dir: string): Numbers {
   put('deeds without a result (%)', share(resultsKnown ? empty : null, eventsKnown ? count('do') - cut : null));
   put('longest row without a result', resultsKnown ? longest : null);
   put('rows of two or more without a result', resultsKnown ? runs : null);
+  const planned = events.filter(event => event.kind === 'result' && event.planned !== undefined);
+  if (world.deedEnds === true && planned.length) put('deeds cut short', resultsKnown && planned.every(event => amount(event.worked) && amount(event.planned))
+    ? planned.filter(event => (event.worked as number) < (event.planned as number)).length : null);
 
   const places = world.places.filter(object), vehicles = (Array.isArray(world.vehicles) ? world.vehicles : []).filter(object), ids = new Set([...places, ...vehicles].map(place => place.id));
   const visited = new Set(world.characters.filter(object).map(person => person.place).filter(place => ids.has(place)));

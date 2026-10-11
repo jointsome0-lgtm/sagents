@@ -188,6 +188,7 @@ beginning with a letter, unique across those four lists. It cannot be `eaten`, `
 | `vehicles` | List of at most 6 vehicle objects, absent or empty for none. | Moving places. An empty list still selects the vehicle state format. |
 | `touch` | Boolean, default false. | Keeps touches between two people as state. Sleep does not end them; crossing a place's boundary does. |
 | `marks` | Boolean, default false. | Keeps lasting feelings of a body, including temporary relief. It changes no body or ability. |
+| `deedEnds` | Boolean, default false. | Gives deeds a start and an end, as described under Action spans. |
 | `ways` | Boolean, default false. | Lets the world name a deed's way to another place; the rules then take an ordinary `go`. |
 | `fixedSchema` | Only true or absent, default off. | Keeps deed and figure reply schemas fixed for this world, with the values allowed now in the request text and checked by the engine. |
 | `hunger` | Only true or absent, default off. | Turns on hunger and thirst together. The world must contain a thing with `food` above zero and a thing with `drink: true`, anywhere in its lists. It causes no fainting, illness or death. |
@@ -434,13 +435,15 @@ A new or empty file becomes a state file; an unrelated SQLite database is refuse
 Each record is saved with its event, one at a time. Opening replays every record and requires the same event.
 The hash of the world file's content and its environment's content binds the file to both; editing or exchanging
 either refuses continuation. A second run on a file in use is refused. A state stopped on the way arrives at the
-same destination and instant when continued. An unfinished deed or addressed speech asks the world first.
+same destination and instant when continued. An unfinished deed or addressed speech asks the world first, except
+that with deed ends a deed still going is rebuilt and continues until its answer is due.
 
 The format is the first applicable row below. A state opens only with its world's mark, since earlier versions
 would ignore settings and lose their state.
 
 | Condition | Format |
 | --- | --- |
+| `deedEnds` | `45` |
 | `stableFirst` | `43` |
 | `oneSchema` | `40` |
 | `fixedSchema` | `39` |
@@ -515,8 +518,9 @@ compared invalid destinations; a server ignoring the schema can still write one,
 description and facts, the place and its facts, listed and hidden things, ordinary other places, the clock, doer,
 deed and span. For people here, awake or asleep, it has name, id, looks, pose, things and facts; for neighbours
 only names, ids and whether awake or asleep, or nobody. It has the crowd and figures with looks and facts,
-recent deeds, and recent speeches to figures and their answers. A vehicle inside has its description and the
-places between which it drives or the stop where it stands; a deed outside sees only vehicles standing there.
+recent deeds, and recent speeches to figures and their answers. With deed ends it describes the place when the
+answer is due, and `doingOf` in `src/live.ts` also lists other deeds still going here. A vehicle inside has its
+description and the places between which it drives or the stop where it stands; a deed outside sees only vehicles standing there.
 It has optional traces, touches and lasting feelings as described below. It has no sheet, note, memory or speech
 between residents. [The port's deed checks](docs/measured.md#deed-requests-on-the-main-line) do not measure what
 these mechanisms change in a story.
@@ -571,6 +575,9 @@ memories at that time. A deed's request includes what figures promised, too.
 `next`, `apply`, `arrive`, `wake` and `attend` in `src/action.ts` keep residents taking turns in time order.
 Arrivals come before waking and both before turns at one instant, so two who walk together are both there before
 either looks around. [The arrival check](docs/measured.md#arrivals-at-one-instant) covered this order on one model.
+With deed ends one waking can come after a turn of its instant: the one that the answer to a deed cut short at
+that instant brings, since that answer follows the turn that cut the deed; every later turn of the instant comes
+after it.
 The clock displays whole seconds and names the day from day 2. Everyone awake in the speaker's place hears a
 `say` and is held until it ends. A `call` reaches its recipient anywhere, with only the caller's half heard by
 those near the caller. A sleeper or traveller gets its waiting calls on waking or arrival.
@@ -589,12 +596,36 @@ cannot stop and takes no turn on the way.
 A `do` or `wait` lasts chosen whole `seconds`, at most an hour, or `until` the next occurrence of a time of day such as `06:30`;
 a `sleep` lasts at most 12 hours. `until` wins over seconds. An excessive span is capped without losing the turn;
 the resident reads the seconds with no cut warning and the action record has `capped`, never sent in a request.
-A deed and wait end early with speech, a call to the resident, leaving or arrival nearby, sound next door, or a
-weather record reaching the place, even with unchanged text. Freedom waits for speaking and listening to end.
-A deed is nevertheless credited whole at once: the world answers its whole span and a search counts it all.
-A sleeper sees and hears nothing, interrupts nobody, and wakes early only by the world's `wakes`. It wakes at
-the deed's intended end or its already earlier waking time. Others see deeds, falling asleep and waking at their
+A deed's doer and a waiter get a turn early with speech, a call to the resident, leaving or arrival nearby, sound
+next door, or a weather record reaching the place, even with unchanged text. Freedom waits for speaking and
+listening to end. Without deed ends the deed is credited whole at once: the world answers its whole span.
+A sleeper sees and hears nothing, interrupts nobody, and wakes early only by the world's `wakes`. Without deed
+ends it wakes at the deed's intended end or its already earlier waking time; with deed ends it wakes when the
+result is written, or at its already earlier waking time. Others see deeds, falling asleep and waking at their
 own next turn; leaving and arrival also end their waits.
+
+With `deedEnds: true`, `apply` in `src/action.ts`, `settlementDue` and `applied` in `src/journal.ts` and `runLive`
+in `src/live.ts` keep at most one deed going per person. A `do` starts it without asking the world. `own` and
+`perceived` in `src/journal.ts` tell the doer `You begin, for 600 s: TEXT`, or `You begin, until about 10:30: TEXT`,
+and witnesses `X begins, for 600 s: TEXT`. At a turn before the end, `runLive` tells the doer
+`You are still doing, 62 of 600 s so far: TEXT. To go on with it, answer wait: a do, a go or a sleep would stop it.`
+and `doingOf` in `src/live.ts` tells others here `X is still doing: TEXT.` Speech, a call and a wait leave it
+going. That wait lasts to the deed's end whatever span was asked: its event holds those seconds, its doer reads
+`You wait (8 s).` with no `until about` form, and the action record keeps the span given. An answer that the rules
+refuse or cannot use stops nothing, a refused `go` included: it costs 30 seconds or the seconds to the deed's end,
+whichever is less, and its event holds them. Another `do`, `go` or `sleep` only stops the deed, without taking
+that action, and the doer chooses again after its result. A doer who gets a turn at or past `spentHours` with a
+deed going has it answered at that turn, cut short, and then falls asleep. `advance` in `src/journal.ts` has the
+world answer a whole deed at exactly its end, even while its doer is speaking or listening; the doer's next turn
+then waits for that speech to end. `deedOf` in `src/live.ts` and `stoppedOf` in `src/journal.ts` tell the world
+`Now 10:30:00. X stopped after 600 of 600 s: TEXT`, or
+`Now 10:21:02. X stopped after 62 of 600 s: TEXT. It was cut short.` Its answer takes effect then, including
+moves, eating, finds, waking and sound next door. The doer remembers
+`You stopped after 62 of 600 s: TEXT. It was cut short.` before the result. A deed stopped with no time spent
+gets an empty result without a world request. `result` in `src/answer.ts` gives every result to everyone awake
+in the place but the doer: they remember `X stopped after 62 of 600 s: TEXT. It was cut short.` before any
+result lines, also when the result has no words and changes nothing and when no time was spent.
+Without the setting the requests and journal stay unchanged.
 
 ##### Time without a clock
 
@@ -684,8 +715,8 @@ which the world's earlier-deed line keeps. The invariant checks count from these
 
 `result` in `src/answer.ts` adds a searching deed's seconds to a time kept per person and place, across deeds and
 after leaving; `sought` in `src/things.ts` reads it and says what a search finds now. The world's `search` credits
-the whole deed's seconds, so a ten-minute hidden backpack can be found in one search or several. The request
-separates what this deed finds if a search from what no search finds yet; the model does not count time.
+the whole deed's seconds without deed ends, and the seconds actually spent with it, so a ten-minute hidden
+backpack can be found in one search or several. The request separates what this deed finds if a search from what no search finds yet; the model does not count time.
 Alternatively `finds` judges a deed straight to the named spot, however short, not merely the thing's name or
 another spot. Found things and contents become visible to all; only an answer finding one can move it or its
 contents. Nobody is told search progress or that more is hidden. Nothing checks the model's judgement of search
@@ -694,8 +725,8 @@ or direct reach, nor that its result does not mention something still hidden.
 ##### Earlier deeds
 
 `earlierOf` in `src/live.ts` and `advance` in `src/journal.ts` keep the latest 400 words of deeds in each place,
-and always its newest line. A line has clock, doer, deed, span, `Result:` words and `In the lists:` postings,
-including things found, eaten, burned or changed. Each move names its label and the destination exactly as a
+and always its newest line. A line has the result's clock, doer, deed, credited span, `Result:` words and
+`In the lists:` postings, including things found, eaten, burned or changed. Each move names its label and the destination exactly as a
 request names that holder, never its source (`t38 camera went to t1 long table.`, `t15 key to the shed went to
  t33 hiking jacket.`). Names alone made a weak model mistake a jacket for its owner. Entries without prose still
 leave a line; neither entries nor prose leaves none. Feelings and sound next door leave none of it in that
@@ -704,9 +735,9 @@ their effect on a whole run was not measured.
 
 ##### World retries
 
-`runLive` in `src/live.ts` and `advance` in `src/journal.ts` require a result immediately after its deed, or a
-reply immediately after addressed speech. No other record can intervene. Unreadable or cut world answers are
-asked once more; unreadable replies leave silence, deeds leave nothing. Retries are local to a start: a pause
+`runLive` in `src/live.ts` and `advance` in `src/journal.ts` require a result immediately after its deed without
+deed ends, and after a stop with it; replies immediately follow addressed speech. No other record can intervene
+at those points. Unreadable or cut world answers are asked once more; unreadable replies leave silence, deeds leave nothing. Retries are local to a start: a pause
 at the call cap resets the two-ask count and loses the refusal explanation. Declines follow the separate stop
 rule above. The doer and awake witnesses get the result on their next turns, without interruption; a sleeper
 woken here learns who woke it and by what deed.
@@ -741,7 +772,7 @@ sleepers allowed; `kind` is `touch`, `press`, `squeeze`, `hold`, `embrace`, `rub
 `force` is `light`, `firm` or `hard`; `text` says with what body part and where on the other body, naming
 neither, at most 15 words. A touch that holds needs no entry. `MAX_TOUCHES` is 8 per place. Entries run in
 order; endings make room; later per pair wins. Invalid ids, kind, force, empty text, endings without a touch
-and ninth beginnings are dropped. A changed kind or force restarts the touch at the deed's start; otherwise its
+and ninth beginnings are dropped. A changed kind or force restarts the touch at the result's moment; otherwise its
 start stays and only the text changes. Leaving, boarding or getting out
 ends touches in `applied` in `src/journal.ts`; sleep, driving and arrival keep them. Holding someone back or
 keeping touch while walking together is not built.
@@ -762,8 +793,8 @@ adds no memory line; result and feeling tell its beginning.
 With marks on, `lingers` is required; without it the request and saved form stay unchanged. It uses the initial
 mark's fields plus `of`, a person here, `minutes`, null or a whole number from 1 to 1440, and `level` also allows
 `none`. Text has 15 words; none needs no text. Null lasts indefinitely; a number lasts that many minutes after
-the deed's end, then restores what was there, including an older temporary layer. Up to 3 layers (`MAX_LAYERS`)
-keep relief or worsening; layers expiring before the new one are dropped. A change to a part already feeling
+the deed's intended end without deed ends, or its result's moment with it, then restores what was there,
+including an older temporary layer. Up to 3 layers (`MAX_LAYERS`) keep relief or worsening; layers expiring before the new one are dropped. A change to a part already feeling
 something needs an entry, such as cream on a burn, cold water, a muscle rub or a blow on a bruise.
 Invalid person, zone, kind, level, minutes, empty text except none, ending a missing mark, a fourth layer or a
 seventh mark is dropped. Later entry per person, zone and kind wins. No entry leaves it unchanged; only entries
@@ -810,9 +841,8 @@ limits stay with that entry.
 without ways. Only the world's fourth instruction paragraph, first-field point, other-place line and last
 request sentence change; residents and figure requests do not. Result records and events keep the way as `goes`,
 another place id or null, whatever the answer's field is called. `result` in `src/answer.ts` drops the doer's
-pose for a named way; other entries work normally. At the doer's next free moment, the deed's end or an earlier
-interruption, the rules check and take that `go` without asking a model. Travel, notices, seats, drivers, fares
-and touch endings use ordinary `go` rules. A refusal leaves the deed as it was and takes the ordinary
+pose for a named way; other entries work normally. At the doer's next free moment after the result, the rules
+check and take that `go` without asking a model. Travel, notices, seats, drivers, fares and touch endings use ordinary `go` rules. A refusal leaves the deed as it was and takes the ordinary
 thirty-second wait and refusal sentence; either way the pending way is used up. Clock laws and vehicle arrivals
 precede it.
 Action records and events have `fromDeed`, the result's sequence number, and null `by`. Rebuilding from
@@ -853,7 +883,7 @@ sleeping second, below zero when needed. A deed's calories count together: at le
 count to zero; each calorie then adds 36 seconds, up to 10 hours. Smaller meals add time without that lift.
 Thus an awake hour uses 100 calories, 600 holds 6 hours from zero or less, and 400 after waking hungry holds 4.
 Water with zero calories feeds nobody; each drink first lifts negative thirst to zero and adds 3 hours up to 6;
-a drink with calories feeds too. Effects begin at the deed's recorded moment and replay from the journal;
+a drink with calories feeds too. Effects begin at the result's recorded moment and replay from the journal;
 this law writes no record of its own. [The hunger checks](docs/measured.md#hunger-and-thirst) explain why a fine
 body adds no line: a resident used `You are not hungry.` to refuse an agreed supper.
 
@@ -911,8 +941,10 @@ sheet. [This guard has stand-in checks](docs/measured.md#memory-script-guard), n
 
 `Record`, `advance` and `replay` in `src/journal.ts` make the append-only records the world's only state.
 Actions or their refusal reasons, results, replies, arrivals, waking, sleep at the limit, weather and rewrites
-are records, each with its derived event. A drive records driver, vehicle, departure, destination and arrival,
-with one engine arrival record. Every journal prefix rebuilds a whole world through the same rules that play it.
+are records, each with its derived event. With deed ends, a stopping action is an action record whose event is
+`stop`; a result event holds `ofDeed`, the deed's record number, and `worked` and `planned`, seconds spent and
+seconds chosen. An unanswered start remains pending when the run pauses. A drive records driver, vehicle,
+departure, destination and arrival, with one engine arrival record. Every journal prefix rebuilds a whole world through the same rules that play it.
 `LAWS` in `src/invariants.test.ts` gives each invariant in one sentence; `npm test` plays thirty characters for
 thousands of steps with answers of every kind, checking laws from the journal alone, naming law and record on failure.
 
@@ -969,7 +1001,11 @@ chooses the connection as in `live`, and every request counts toward `--calls`, 
 names the task and the kinds of finding, as [examples/eval-questions.json](examples/eval-questions.json) does; a
 finding is kept only when its quote stands in a record that it names. Past `--window` words, 6,000 by default, the
 oldest answers leave the judge's view. One JSON report goes to stdout, or to `--out`, which must name a file that
-does not exist. [docs/judge.md](docs/judge.md) says the rest: what is read, what the judge is told, its tools, how
+does not exist. `instructionsOf` in `src/eval.ts` joins the judge's rules. Without deed ends it gives `INSTRUCTIONS`;
+with them it says that interruptions give the doer a turn while the deed goes on, and waking takes effect at
+the result's moment. It adds `DEED_ENDS_INSTRUCTIONS` for starts, later results, stops, waits to the deed's end,
+refused answers and falling asleep at the limit of being awake.
+[docs/judge.md](docs/judge.md) says the rest: what is read, what the judge is told, its tools, how
 quotes are compared and findings taken back, the limits and the report.
 
 ### Numbers of kept runs
@@ -992,12 +1028,14 @@ The rows are:
 - Story minutes from the first event to the end of the last, and story minutes for 100 requests, both to one
   decimal.
 - Actions of residents, all and by kind: `say`, `call`, `go`, `do`, `wait`, `sleep`. Driving counts as going.
+  With deed ends a `stop` counts too and has its own `actions: stop` row.
 - Actions that led somewhere, and their share of all actions as a whole percent: a speech or call somebody
-  heard, a going that set out, or a deed with a result. Waiting and sleeping never count.
+  heard, a going that set out, or a deed with a result. Waiting, sleeping and stopping never count.
 - Deeds without a result and their share of deeds as a whole percent, the longest row of them by one resident,
   and how many rows of two or more there were. A result has null text, nothing moved, set or found, and is no
   search for the deed to count as without a result. Another action of that resident or a deed with a result
-  ends its row; another resident's action does not.
+  ends its row, including a `stop` with deed ends; another resident's action does not.
+- Deeds cut short, only when result events carry `planned`; these have `worked` below `planned`.
 - Places residents were in, including their starting places and door crossings, and how many the world has,
   including vehicles. Setting out alone does not count the destination as visited.
 - Input tokens, cached input tokens and their share of input as a whole percent, output tokens, and mean input
@@ -1009,10 +1047,12 @@ The rows are:
 
 Nothing is estimated: `-` means a missing number. A gap in the numbered stretches leaves their totals unknown.
 Missing, unreadable, unfinished or damaged event files leave
-the event counts unknown; a deed at the very end, cut before its result, is left out of the deed counts and of
-the two shares; any other deed without its following result, or without the result's counted fields, leaves
-the deed counts and actions that led somewhere unknown. Missing or damaged usage files leave requests and
-tokens unknown. A token total or mean is missing when any request in it has no count, including a failed
+the event counts unknown. Without deed ends, a deed at the very end, cut before its result, is left out of the
+deed counts and of the two shares; any other deed without its following result leaves those counts unknown.
+With deed ends, results pair by `ofDeed` when it names a start in the joined events, otherwise by the doer, who
+has at most one deed going. Starts still going at the end are left out of the same counts and shares. Missing
+counted result fields leave the deed counts and actions that led somewhere unknown. Missing or damaged usage
+files leave requests and tokens unknown. A token total or mean is missing when any request in it has no count, including a failed
 request; a zero denominator leaves a rate or share missing. A mean for a kind outside a run's two commonest is
 missing in that column. A run with only its state file has no event or request counts here. To give those numbers
 without opening SQLite it would need the kept event and usage files too. These numbers compare what a change of

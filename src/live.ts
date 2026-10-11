@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
 import type { Request, Result } from './chatgpt.ts';
-import { advance, memoryStore, replay, RESULT_WORDS, standingAt, SAID_WORDS, wayDue, vehicleDue, vehicleView, worldOf } from './journal.ts';
+import { advance, memoryStore, replay, RESULT_WORDS, standingAt, SAID_WORDS, settlementDue, stoppedOf, wayDue, vehicleDue, vehicleView, worldOf } from './journal.ts';
 import type { Record, State, Store } from './journal.ts';
 import { idle, oldest, readMemory, sameScript } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
@@ -22,14 +22,14 @@ import { CHARS_PER_WORD, GESTURE_WORDS, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_TRAC
 import type { Event, Person, Place, World } from './world.ts';
 
 // Journal records contain private text; resident requests may include only their owner's sheet, memory and perceived events.
-const residentInstructionsOf = (traces: boolean, oneSchema = false) => `You are one person in a story that several people live through together. You are that person and not a narrator.
+const residentInstructionsOf = (traces: boolean, oneSchema = false, deedEnds = false) => `You are one person in a story that several people live through together. You are that person and not a narrator.
 
 Each turn you take exactly one action and answer with one JSON object. Every field is there; a field the action does not use is null.${oneSchema ? '\n- memory: null unless the turn asks you to rewrite your memory.' : ''}
 - note: with any action, and written before you choose it, a private line you keep for yourself: not a plan, but what is going on in you right now, what you notice in those with you, what your body feels, what you want and, when something holds you back, what it is. Nobody else ever reads it. Null when you have none.
 - say: you speak \`text\` aloud. Everyone in your place hears it. With \`to\`, the id of one of the people of the place that a turn lists, you speak to that person, who may answer.
 - call: you speak \`text\` to one person, \`to\` (that person's id), by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
 - go: you walk to another place of the list, \`place\` (its id). Moving about inside the place you are in is a do. On the way you hear and see nothing and cannot act.
-- do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it: the world tells you that. A do never takes you to another place: only a go does.
+- do: you do something others can see, \`text\`, for \`seconds\` (1 to ${MAX_SECONDS}). Write what you do, not what comes of it: the world tells you that. A do never takes you to another place: only a go does.${deedEnds ? ' A deed starts now; the world tells what came of it when it ends or is cut short. Saying something, a call or a wait leaves it going. Another do, a go or a sleep only stops it: you are told what came of it and then choose again.' : ''}
 - wait: you stay silent and attentive for \`seconds\` (1 to ${MAX_SECONDS}). The wait ends at once when someone speaks near you, comes or leaves, or when something is heard from next door, so a long wait loses nothing: do not wait in short steps.
 - sleep: you sleep for \`seconds\` (1 to ${MAX_SLEEP}), or \`until\` a time of day. Asleep you hear and see nothing, and only someone's deed can wake you before that time. A call to you, like a call to someone on the way, waits until you can hear it.
 - until: for do, wait and sleep, in place of \`seconds\`: a time of day like 06:30, the next moment the clock shows it. It must fall within the action's span.
@@ -63,7 +63,7 @@ const FELT = 'A line that begins `You feel:` is what your own body tells you, an
 const TOUCH_TOLD = 'A line `You touch …` or `… touches you` is a touch that holds now between you and someone here: its kind, how hard, for how long, and with what and where. It lasts until one of the two lets go, by a do, or leaves the place, so nobody has to renew it.';
 const MARK_TOLD = 'A line like `Your back (burn, strong): …` is a feeling that stays in that part of your body: what kind it is, how strong it is now, and where exactly and what it is like. It is told again on every turn, as it then is, until something that is done to it or time changes it, and nobody else is told it.';
 const instructionsOf = (world: World) => {
-  let text = residentInstructionsOf(traced(world), world.oneSchema).replace(FELT, [FELT, ...(world.touch ? [TOUCH_TOLD] : []), ...(world.marks ? [MARK_TOLD] : [])].join(' '));
+  let text = residentInstructionsOf(traced(world), world.oneSchema, world.deedEnds).replace(FELT, [FELT, ...(world.touch ? [TOUCH_TOLD] : []), ...(world.marks ? [MARK_TOLD] : [])].join(' '));
   if (world.vehicles?.length) text = text.replace('\n- do:', `\n${vehicleRule(world)}\n- do:`);
   return text;
 };
@@ -164,7 +164,7 @@ const notationOf = (traces: boolean) => `Every thing here is listed once, under 
 // `feels`.
 // Two A1 variants with more hints did no better on a weak model, and one did harm.
 // The current wording needs another measurement; the check's harness compares both texts.
-const worldInstructionsOf = (traces: boolean, ways = false) => `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.
+const worldInstructionsOf = (traces: boolean, ways = false, deedEnds = false) => `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.${deedEnds ? ' Give only what could come of the time actually spent, leaving unfinished work undone.' : ''}
 
 You are told what is there, and nothing else exists: a search for something you were not told of finds nothing of the kind. Say what is there as the world itself. Never speak of facts, of what was mentioned or listed, of labels and marks, or of your task.
 
@@ -227,7 +227,7 @@ const TOUCHES = `- touches: the touches between two people here that the deed be
 // Avoid marks here because the thing notation already uses that word.
 const LINGERS = `- lingers: the feelings of a part of a body that outlast the deed, as the deed began, changed or ended them, or an empty list. What is felt only while the deed lasts stays in \`feels\`; an itch, a burn, an ache, a pain or a numbness that is still there after the deed gets an entry here, and so does one listed under \`Feelings that last now\` when the deed eases, worsens or ends it. An entry has \`of\`, the id of a person here; \`zone\`, the part of the body: ${ZONES.slice(0, -1).map(zone => `\`${zone}\``).join(', ')}, or \`${ZONES.at(-1)}\` for the whole of it; \`kind\`: ${MARK_KINDS.slice(0, -1).map(kind => `\`${kind}\``).join(', ')} or \`${MARK_KINDS.at(-1)}\`; \`level\`: \`${LEVELS[0]}\`, \`${LEVELS[1]}\` or \`${LEVELS[2]}\`, or \`none\` when it is gone; \`minutes\`; and \`text\`: where exactly and what it is like, ${MARK_WORDS} words at most, in the language of the world's description, naming nobody, and empty with \`none\`. There is one entry at most for a person, a zone and a kind. With \`minutes\` null the feeling is so from now on. With \`minutes\`, a whole number from 1 to ${MAX_MINUTES}, it is so for that long after the deed and is then, by itself, again as it was before the entry: a salve makes a burn \`faint\` for some minutes and the burn then returns as it was, and a stubbed toe is a \`pain\` for a minute or two where nothing was and is then gone. A feeling listed under \`Feelings that last now\` needs no entry unless the deed changes it: it stays as listed, and leaving it out does not end it. A deed that does something to the very part of the body where a listed feeling sits changes it, at least for a while, and so its entry is due: a cream spread on a burn, cold water on it, a rub of an aching muscle, a blow on a bruise.`;
 const worldTextOf = (world: World) => [...(world.touch ? [['\n- wakes:', TOUCHES]] : []), ...(world.marks ? [['\n- beyond:', LINGERS]] : [])]
-  .reduce((text, [before, point]) => text.replace(before, `\n${point}${before}`), worldInstructionsOf(traced(world), world.ways));
+  .reduce((text, [before, point]) => text.replace(before, `\n${point}${before}`), worldInstructionsOf(traced(world), world.ways, world.deedEnds));
 const aboutOf = (world: World) => `The world: ${world.title}
 ${world.about}${world.facts === null ? '' : `\nFacts: ${world.facts}`}`;
 export const worldSystemOf = (world: World) => `${worldTextOf(world)}\n\n${aboutOf(world)}`;
@@ -258,7 +258,7 @@ function allowedOf(world: World, state: State, place: Place, deed: boolean): All
   const names = namedOf(state, place, deed);
   const moves = { 'moves.what': names.what, 'moves.to': names.to };
   return deed ? {
-    ...(world.ways ? { leads: [place.id, ...waysOf(world, state.people, state.people.find(person => person.id === state.deed!.who)!, state.things)] } : {}),
+    ...(world.ways ? { leads: [place.id, ...waysOf(world, state.people, state.people.find(person => person.id === (state.deed ?? settlementDue(world, state))!.who)!, state.things)] } : {}),
     finds: names.finds, ...moves, 'sets.what': names.stated, 'sets.state': names.states, 'poses.of': names.of,
     ...(world.touch ? { 'touches.of': names.of, 'touches.to': names.of } : {}), wakes: names.wakes, 'feels.of': names.awake,
     ...(world.marks ? { 'lingers.of': names.of } : {}),
@@ -276,7 +276,7 @@ const entries = (properties: object) => ({ type: 'array', items: { type: 'object
 const resultSchemaOf = (state: State, place: Place, world: World) => {
   const { touch, marks } = world;
   const names = namedOf(state, place, true), current = (list: string[]) => world.fixedSchema ? { type: 'string' } : oneOf(list);
-  const properties = { ...(world.ways ? { leads: current([place.id, ...waysOf(world, state.people, state.people.find(person => person.id === state.deed!.who)!, state.things)]) } : {}), search: { type: 'boolean' }, finds: { type: 'array', items: current(names.finds) },
+  const properties = { ...(world.ways ? { leads: current([place.id, ...waysOf(world, state.people, state.people.find(person => person.id === (state.deed ?? settlementDue(world, state))!.who)!, state.things)]) } : {}), search: { type: 'boolean' }, finds: { type: 'array', items: current(names.finds) },
     moves: entries({ what: current(names.what), n: { type: 'integer' }, to: current(names.to) }), sets: entries({ what: current(names.stated), state: current(names.states) }),
     poses: entries({ of: current(names.of), text: { type: 'string' } }),
     ...(touch ? { touches: entries({ of: current(names.of), to: current(names.of), kind: oneOf([...KINDS, NONE]), force: oneOf([...FORCES]), text: { type: 'string' } }) } : {}),
@@ -295,6 +295,11 @@ const hereOf = (world: World, state: State, place: Place) => world.characters.fl
   const person = state.people[index];
   return person.place !== place.id ? [] : [`- ${tagged(character)}, ${person.asleep ? 'asleep' : 'awake'}.${seen(character, person)}${onOf(state, person.id, null)}${
     carriedOf(state.things.people.get(person.id)!)}${part('Facts', character.facts)}`];
+});
+const doingOf = (world: World, state: State, place: string, except?: string) => world.characters.flatMap(character => {
+  const deed = state.pending?.get(character.id)?.event;
+  return deed && character.id !== except && state.people.find(person => person.id === character.id)!.place === place
+    ? [`${character.name} is still doing: ${closed(deed.text!)}`] : [];
 });
 // journal.ts ends a touch when either person leaves, so both ends are in the place found through of.
 const touchesIn = (state: State, place: string) => state.touches.filter(touch => state.people.some(person => person.id === touch.of && person.place === place));
@@ -330,7 +335,7 @@ const placeOf = (state: State, place: Place, deed: boolean) => {
 function replyOf(world: World, state: State, said: Event): string {
   const place = world.places.find(item => item.id === said.place)!;
   return [...placeOf(state, place, false),
-    ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...crowdOf(place),
+    ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...doingOf(world, state, place.id), ...crowdOf(place),
     ...earlierOf(state, place),
     `Now ${said.clock}. ${named(world.characters, said.who)} says to ${tagged(place.figures.find(figure => figure.id === said.to)!)}: "${said.text}"`,
     `What does ${named(place.figures, said.to)} answer?`].join('\n');
@@ -342,16 +347,16 @@ function deedOf(world: World, state: State, deed: Event): string {
   const boards = world.ways && waysOf(world, state.people, state.people.find(person => person.id === deed.who)!, state.things).some(id => world.places.find(item => item.id === id)!.vehicle);
   return [...placeOf(state, place, true), ...(place.vehicle ? [place.vehicle.heading
       ? `This vehicle is driving from ${tagged(world.places.find(item => item.id === place.vehicle!.heading!.from)!)} to ${tagged(world.places.find(item => item.id === place.vehicle!.heading!.to)!)}.`
-      : `This vehicle stands at ${tagged(world.places.find(item => item.id === place.vehicle!.at)!)}.`] : []), ...standingAt(world, state.people, place.id, state.deed?.at ?? state.buses?.at ?? 0),
+      : `This vehicle stands at ${tagged(world.places.find(item => item.id === place.vehicle!.at)!)}.`] : []), ...standingAt(world, state.people, place.id, world.deedEnds ? deed.at : state.deed?.at ?? state.buses?.at ?? 0),
     ...state.things.places.get(place.id)!.filter(thing => thing.hidden).map(thing => `Hidden here (${thing.label}). This deed finds it ${found.includes(thing)
       ? 'if it is a search of the place, or if it goes straight to the spot named' : 'only if it goes straight to the spot named, and not by searching'}: ${thing.hidden!.spot}: ${written(thing)}`),
     ...(world.places.length > 1 ? [`Other places, which ${world.ways ? "a deed reaches only through `leads`" : "nobody reaches by a deed"}: ${world.places.filter(item => item !== place && !item.vehicle).map(tagged).join(', ')}.`] : []),
     ...(place.nextDoor.length ? ['Next door:', ...place.nextDoor.map(id => `- ${tagged(world.places.find(item => item.id === id)!)}: ${world.characters.flatMap((character, index) =>
       state.people[index].place === id ? [`${tagged(character)}, ${state.people[index].asleep ? 'asleep' : 'awake'}`] : []).join('; ') || 'nobody'}.`)] : []),
-    ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place),
+    ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...doingOf(world, state, place.id, deed.who),
     ...(world.touch ? heldOf(state, place, deed.at) : []), ...(world.marks ? lastingOf(state, place, deed.at) : []), ...crowdOf(place),
     ...earlierOf(state, place),
-    `Now ${deed.clock}. ${named(world.characters, deed.who)} does, for ${deed.seconds} s: ${deed.text}`,
+    `Now ${deed.clock}. ${named(world.characters, deed.who)} ${world.deedEnds ? stoppedOf(deed) : `does, for ${deed.seconds} s: ${deed.text}`}`,
     `What comes of it?${world.ways ? ` This place is \`${place.id}\`, and \`leads\` is \`${place.id}\` unless the deed is the way to another place${boards ? ' or into a vehicle that stands here' : ''}.` : ''}`].join('\n');
 }
 
@@ -411,7 +416,9 @@ export function requestLimit(world: World): number {
   const answer = deed + figureInstructionsOf(traced(world)).length - worldTextOf(world).length;
   // Either base request can be longer; cover the larger instruction addition whichever sets the bound.
   const residentText = instructionsOf(world).length - INSTRUCTIONS.length, worldText = worldTextOf(world).length - WORLD_INSTRUCTIONS.length;
-  return Math.max(resident - residentText, deed - worldText, answer) + Math.max(residentText, worldText);
+  const pending = world.deedEnds ? people.reduce((sum, name) => sum + name.length + MAX_WORDS * CHARS_PER_WORD + 200, 0)
+    + 2 * (MAX_WORDS * CHARS_PER_WORD + 2 * longest(people) + 160) : 0;
+  return Math.max(resident - residentText, deed - worldText, answer) + Math.max(residentText, worldText) + pending;
 }
 
 export function linesOf(world: World, event: Event): string[] {
@@ -431,7 +438,8 @@ export function linesOf(world: World, event: Event): string[] {
               : event.kind === 'memory' ? `private memory of ${who}${event.cut ? ' (cut)' : ''}: ${
                 event.text?.replaceAll('\n', '\n         ') ?? 'the rewrite was lost, and what it was to hold is forgotten'}`
                 : event.kind === 'weather' ? `the weather changes: ${event.text}${event.indoors == null ? '' : ` Under a roof: ${event.indoors}`}`
-                : event.kind === 'result' ? `what came of what ${who} did: ${event.text ?? 'nothing that could be noticed'}${
+                : event.kind === 'stop' ? `${who} stops what they were doing`
+                : event.kind === 'result' ? `what came of what ${who} did${event.worked === undefined ? '' : ` (${event.worked} of ${event.planned} s${event.worked < event.planned! ? ', cut short' : ''})`}: ${event.text ?? 'nothing that could be noticed'}${
                   event.wakes?.length ? ` (wakes ${event.wakes.map(id => named(world.characters, id)).join(', ')})` : ''}${event.search ? ' (a search)' : ''}`
                   : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}${event.deedCut ? ' (cut)' : ''}` : `${who} waits (${event.seconds} s)`;
   return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} ${event.place ? `[${named(places, event.place)}] ` : ''}${what}`]),
@@ -586,7 +594,8 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   };
   for (;;) {
     world = worldOf(given, state, state.deed?.at ?? next(state.people).freeAt);
-    const deed = state.deed;
+    const due = settlementDue(world, state);
+    const deed = state.deed ?? (due && due.at < horizon ? due : null);
     if (deed?.kind === 'say') {
       const place = world.places.find(item => item.id === deed.place)!;
       const allowed = world.fixedSchema ? allowedOf(world, state, place, false) : undefined;
@@ -604,15 +613,15 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       const checked = allowed && { ...allowed,
         ...(world.touch ? { 'touches.kind': [...KINDS, NONE], 'touches.force': [...FORCES] } : {}),
         ...(world.marks ? { 'lingers.zone': [...ZONES], 'lingers.kind': [...MARK_KINDS], 'lingers.level': [...LEVELS, NONE] } : {}) };
-      const lasting = world.marks ? { marks: here.flatMap(id => marksOf(state, id, deed.at)), at: deed.at, end: deed.at + deed.seconds } : undefined;
-      const got = await answered(deed, worldSystem, resultSchemaOf(state, place, world), deedOf(world, state, deed), answer => {
+      const lasting = world.marks ? { marks: here.flatMap(id => marksOf(state, id, deed.at)), at: deed.at, end: deed.at + (world.deedEnds ? 0 : deed.seconds) } : undefined;
+      const got = deed.worked === 0 ? { came: null } : await answered(deed, worldSystem, resultSchemaOf(state, place, world), deedOf(world, state, deed), answer => {
         const came = readResult(answer, sleepers, here, hidden, held, lasting, state.traces ? labelsOn(state.traces, here) : undefined, world.ways ? waysOf(world, state.people, state.people.find(person => person.id === deed.who)!, state.things) : undefined, deed.place, checked);
         return came && { ...came, beyond: place.nextDoor.length ? came.beyond : null };
       }, allowed);
       if (!got) return outcome;
       await happened({ kind: 'result', who: deed.who, at: deed.at, ...(got.came ?? { text: null, wakes: [], moves: [], sets: [], poses: [], feels: [], beyond: null, search: false, finds: [], ...(held ? { touches: [] } : {}), ...(lasting ? { lingers: [] } : {}),
-        ...(state.traces ? { traces: [], wipes: [] } : {}), ...(world.ways ? { goes: null } : {}) }) }, judge.name);
-      if (finish('world', null, got.came !== null)) return outcome;
+        ...(state.traces ? { traces: [], wipes: [] } : {}), ...(world.ways ? { goes: null } : {}) }) }, deed.worked === 0 ? null : judge.name);
+      if (deed.worked !== 0 && finish('world', null, got.came !== null)) return outcome;
       continue;
     }
     const actor = next(state.people);
@@ -682,6 +691,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     });
     const limit = pause ? MAX_WORDS : wordLimit(world, who, horizon - now);
     const spot = world.places.find(item => item.id === place)!;
+    const pending = state.pending?.get(who)?.event;
     const body = `${part('Your pose', actor.pose)}${onOf(state, who, 'On you')}${carries('You carry', who, true)}`.slice(1);
     const called = (id: string) => named(world.characters, id);
     const touches = touchesIn(state, place), mine = touches.filter(touch => touch.of === who || touch.to === who);
@@ -693,10 +703,11 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       `${nowOf(world, actor, now)} You are in ${tagged(spot)}${spot.vehicle ? spot.vehicle.heading
         ? `, on the way to ${tagged(world.places.find(place => place.id === spot.vehicle!.heading!.to)!)}, ${Math.floor((spot.vehicle.heading.at - now) / 60)} min ${(spot.vehicle.heading.at - now) % 60} s of the drive are left`
         : `, standing at ${tagged(world.places.find(place => place.id === spot.vehicle!.at)!)}${spot.vehicle.route ? `, leaving for ${named(world.places, spot.vehicle.departure!.to)} in ${Math.floor((spot.vehicle.departure!.at - now) / 60)} min ${(spot.vehicle.departure!.at - now) % 60} s` : ''}` : ''}. ${others.length ? 'Here with you:' : spot.figures.length || spot.crowd !== null ? 'None of the people of the list is here with you.' : 'Nobody else is here.'}`,
-      ...others, ...watched,
+      ...others, ...doingOf(world, state, place, who), ...watched,
       ...vehicleView(world, state, actor, now).map(([, text]) => text),
       ...(spot.figures.length ? ['People of this place, who answer when you say with `to`:', ...spot.figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}`)] : []),
       ...(spot.crowd === null ? [] : [`Around you: ${closed(spot.crowd)}`]),
+      ...(pending ? [`You are still doing, ${Math.min(now - pending.at, pending.seconds)} of ${pending.seconds} s so far: ${closed(pending.text!)} To go on with it, answer wait: a do, a go or a sleep would stop it.`] : []),
       ...(body ? [body] : []), ...touching,
       ...LAWS.flatMap(law => law.turn(world, state.laws, actor, now) ?? []), ...lasting,
       ...(spot.vehicle ? [] : [`Minutes from here: ${world.places.filter(item => item.id !== place && !item.vehicle).map(item => `${tagged(item)} ${travelSeconds(world, place, item.id) / 60}`).join(', ') || 'there is no other place'}.`]),
