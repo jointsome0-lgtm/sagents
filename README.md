@@ -1004,12 +1004,18 @@ export SAGENTS_LAB_LANG=ru               # the page's language when `--lang` is 
 `lab` shows in a browser the experiments that lie under the directories it is given: under those that `SAGENTS_LAB`
 names, separated as in `PATH`, when it is given none, and under the current directory when that is not set either.
 It asks no model and writes nothing into those directories. It prints its address, which is on this computer only,
-and opens it in the default browser unless `--no-open` is given; `--port` asks for a port, and without it the system
-picks one. It is a whole number from 0 to 65535; 0 also lets the system choose. Ctrl+C stops it. A computer with no browser to open is no failure: the address is on the screen.
+and asks the system opener to open it in the default browser unless `--no-open` is given. The usual address is `http://127.0.0.1:4747/`;
+when that port is taken and no port was asked for, it takes a free one and says so. `--port` asks for a whole number
+from 0 to 65535; 0 lets the system choose. Ctrl+C stops it.
+
+The browser gets the data key after `#` in the first address, keeps it in its origin's storage and removes it from
+the address. When the system opener exits successfully, the printed address has no key. With `--no-open` or when
+that command cannot start or exits unsuccessfully, it prints the first address with the key; open it once in the browser you read in.
 
 The page is in English or in Russian: in the language that `--lang` names, or `SAGENTS_LAB_LANG` when the flag is
-not given, and with neither in Russian for a browser set to Russian and in English for any other. Any other value
-is refused. The language goes to the page in the address that the command prints and opens, as `?lang=ru`.
+not given, or else the language it remembers, and with none in Russian for a browser set to Russian and in English
+for any other. Any other flag or environment value is refused. The chosen language goes in the first address as
+`?language=ru`; the page remembers it and removes it from the address. Its RU or EN button changes that choice.
 
 [docs/lab.md](docs/lab.md) says the rest: which files make an experiment, what the page shows, the map, and what
 of a world file may leave the lab.

@@ -1,14 +1,18 @@
 // The lab against small synthetic folders. No browser and no model.
-// These are here because the lab serves the text of private stories on a local port: a mistake in the token or in
+// These are here because the lab serves the text of private stories on a local port: a mistake in the key, the host or
 // the paths shows it to another local user or reads a file outside the roots, a mistake in what is taken of a world
-// file or a chapter sends a sheet or a narrator's own thread to the page, and a token in the arguments of a process
+// file or a chapter sends a sheet or a narrator's own thread to the page, and a key in the arguments of a process
 // can be read by anyone on the computer. The world file here holds `NOT-FOR-THE-PAGE` in every field that the lab
 // does not give out, and where a field that it does give out is of another shape than the engine writes.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { request } from 'node:http';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { openLab } from './data.ts';
 import { openInBrowser } from './open.ts';
@@ -80,14 +84,6 @@ function folders() {
   writeFileSync(join(root, 'day/kept/about.txt'), 'A noon at the café.\n');
   return { root, outside };
 }
-// The first messages of a stream, as text, until its `caught`.
-async function streamed(url: string) {
-  const response = await fetch(url), reader = response.body!.getReader(), decoder = new TextDecoder();
-  let text = '';
-  while (!text.includes('event: caught')) { const { value, done } = await reader.read(); if (done) break; text += decoder.decode(value, { stream: true }); }
-  await reader.cancel();
-  return text;
-}
 
 test('the list holds the three shapes, each run of a directory by itself, and nothing from outside the root', () => {
   const { root } = folders(), lab = openLab(root, { fresh: 0 }), listed = lab.list().experiments;
@@ -117,33 +113,71 @@ test('the list holds the three shapes, each run of a directory by itself, and no
   assert.equal(lab.text('day/old/first', 'readme'), null);
 });
 
-test('the server answers only GET under its token, builds no path from a request and sends no sheet, carry or error text', async () => {
+test('the server gives data only to GET with its key and its own host, builds no path from a request and sends no sheet, carry or error text', async () => {
   const { root } = folders(), failures: string[] = [];
-  const lab = await startLab({ dirs: root, log: text => failures.push(text) });
+  const lab = await startLab({ dirs: root, port: 0, log: text => failures.push(text) });
   try {
-    assert.match(lab.url, /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/$/);
-    const base = new URL(lab.url), token = base.pathname.slice(1, -1), status = async (path: string, init?: RequestInit) => (await fetch(new URL(path, base.origin), init)).status;
-    // Without the token, with another one, beside the known names and by any other method: 404.
-    for (const path of ['/', '/list', `/${'0'.repeat(32)}/`, `/${'0'.repeat(32)}/list`, `/${token}`, `/${token}/data.ts`, `/${token}/server.ts`, `/${token}/open.ts`, `/${token}/page.html`, `/${token}/list/`, `/${token}//list`,
-      `/${token}/%2e%2e/${token}/list.json`, `/${token.toUpperCase()}/list`]) assert.equal(await status(path), 404, path);
-    for (const method of ['POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH']) assert.equal(await status(`/${token}/list`, { method }), 404, method);
-    for (const path of ['', 'app.js', 'core.js', 'map.js', 'strings.js', 'app.css', 'list']) assert.equal(await status(`/${token}/${path}`), 200, path);
+    assert.match(lab.url, /^http:\/\/127\.0\.0\.1:\d+\/$/);
+    assert.match(lab.key, /^[0-9a-f]{32}$/);
+    const base = new URL(lab.url), key = lab.key, keyed = { 'X-Lab-Key': key };
+    // One request as a browser or another program of this computer may send it, with a `Host` of the test's choice.
+    const got = (path: string, headers: { [name: string]: string } = {}, method = 'GET') => new Promise<{ status: number; location: string | undefined; text: string }>((done, failed) => {
+      const sent = request({ host: '127.0.0.1', port: lab.port, path, method, headers, agent: false }, answer => {
+        const chunks: Buffer[] = [];
+        answer.on('data', chunk => { chunks.push(chunk); if (path.startsWith('/data/stream') && answer.statusCode === 200 && Buffer.concat(chunks).includes('event: caught')) answer.destroy(); });
+        answer.on('close', () => done({ status: answer.statusCode ?? 0, location: answer.headers.location, text: Buffer.concat(chunks).toString('utf8') }));
+      });
+      sent.on('error', failed);
+      sent.end();
+    });
+    const status = async (path: string, headers?: { [name: string]: string }, method?: string) => (await got(path, headers, method)).status;
+    const DATA = ['list', 'stretch?x=day/kept&s=part1', 'story?x=day/kept', 'text?x=day/old/first&n=first-1', 'map?x=day/kept', 'stream?x=day/kept'];
+    // Every answer that holds data, with the key: there. Without it, with another one, with the key where it is not
+    // looked for, by any other method, and with the key under any host but the lab's own: 404.
+    for (const name of DATA) {
+      assert.equal(await status(`/data/${name}`, keyed), 200, name);
+      assert.equal(await status(`/data/${name}`), 404, name);
+      for (const headers of [{ 'X-Lab-Key': '0'.repeat(32) }, { 'X-Lab-Key': key.toUpperCase() }, { 'X-Lab-Key': key.slice(1) }, { 'X-Lab-Key': `${key}0` }, { Cookie: `key=${key}` }, { Authorization: `Bearer ${key}` },
+        { ...keyed, Host: `localhost:${lab.port}` }, { ...keyed, Host: `example.com:${lab.port}` }, { ...keyed, Host: '127.0.0.1' }, { ...keyed, Host: `127.0.0.1:${lab.port + 1}` }, { ...keyed, Host: `127.0.0.1.example.com:${lab.port}` }] as { [name: string]: string }[])
+        assert.equal(await status(`/data/${name}`, headers), 404, `${name} ${JSON.stringify(headers).replaceAll(key, 'KEY')}`);
+      for (const method of ['POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH']) assert.equal(await status(`/data/${name}`, keyed, method), 404, `${method} ${name}`);
+    }
+    // The feed alone takes the key in its query; nothing else does.
+    assert.equal(await status(`/data/stream?x=day/kept&key=${key}`), 200);
+    assert.equal(await status(`/data/stream?x=day/kept&key=${'0'.repeat(32)}`), 404);
+    assert.equal(await status(`/data/stream?x=day/kept&key=${key}`, { Host: `example.com:${lab.port}` }), 404);
+    assert.equal(await status(`/data/list?key=${key}`), 404);
+    // Beside the known names, with the key: 404.
+    for (const path of ['/list', `/${key}/`, `/${key}/list`, '/data', '/data/', '/data/list/', '/data//list', '/data/data.ts', '/data.ts', '/server.ts', '/open.ts', '/page.html', '/view', '/view/', '/data/%2e%2e/list', '/lab/app.js'])
+      assert.equal(await status(path, keyed), 404, path);
+    // The page and its files need no key and hold nothing of the root: no name of an experiment, a stretch, a
+    // character or a place, and no word of an event. Under `localhost` they are sent on to the one host, and under
+    // any other host there is nothing.
+    const PAGE = ['/', '/view/day/kept', '/view/day/kept?stretch=part2&moment=13:00:03', '/app.js', '/core.js', '/map.js', '/strings.js', '/app.css'];
+    for (const path of PAGE) {
+      const answer = await got(path);
+      assert.equal(answer.status, 200, path);
+      assert.deepEqual(['day/scenes', 'first-2', 'dry-a', 'Nina', 'Café', 'Three.', 'They met.', key, ...SECRETS].filter(word => answer.text.includes(word)), [], path);
+      assert.deepEqual([(await got(path, { Host: `localhost:${lab.port}` })).status, (await got(path, { Host: `localhost:${lab.port}` })).location], [302, `${base.origin}${path}`], path);
+      for (const host of [`example.com:${lab.port}`, 'localhost', `127.0.0.1:${lab.port + 1}`]) assert.equal(await status(path, { Host: host }), 404, `${path} ${host}`);
+      assert.equal(await status(path, {}, 'POST'), 404, path);
+    }
     // A request names an experiment, a stretch and a transcript, and each is looked up among what the walk found:
     // a name that is a path finds nothing, inside the root or outside it.
-    const q = (name: string, values: { [key: string]: string }) => `/${token}/${name}?${new URLSearchParams(values)}`;
+    const q = (name: string, values: { [key: string]: string }) => `/data/${name}?${new URLSearchParams(values)}`;
     for (const path of [q('stretch', { x: 'day/kept', s: '../scenes/a' }), q('stretch', { x: '../outside', s: 'secret' }), q('stretch', { x: 'day/linked/secret', s: 'secret' }), q('stretch', { x: 'day/scenes/c', s: 'c' }),
       q('stretch', { x: 'day/kept', s: 'usage-part1' }), q('text', { x: 'day/old/first', n: '../second' }), q('text', { x: 'day/old/second', n: 'second' }), q('text', { x: 'day/old/first', n: 'readme' }),
       q('text', { x: 'day/kept', n: 'world.json' }), q('text', { x: 'day/kept', n: 'state.sqlite' }), q('story', { x: 'day/kept/story' }), q('story', { x: '..' }),
-      q('map', { x: 'day/old/first' }), q('map', { x: 'day/kept/world.json' }), q('map', { x: '../outside' }), q('map', {})]) assert.equal(await status(path), 404, path);
+      q('map', { x: 'day/old/first' }), q('map', { x: 'day/kept/world.json' }), q('map', { x: '../outside' }), q('map', {})]) assert.equal(await status(path, keyed), 404, path);
     // Everything the server gives of the root, in one text: no sheet, no fact, no carry, no words of a failure,
     // nothing of a state file and nothing from outside the root.
-    const texts = [await (await fetch(new URL(q('list', {}), base.origin))).text(), await (await fetch(new URL(q('story', { x: 'day/kept' }), base.origin))).text(),
-      await (await fetch(new URL(q('story', { x: 'day/links' }), base.origin))).text()];
+    const text = async (path: string) => (await got(path, keyed)).text;
+    const texts = [await text(q('list', {})), await text(q('story', { x: 'day/kept' })), await text(q('story', { x: 'day/links' }))];
     for (const one of JSON.parse(texts[0]).experiments) {
-      if (one.map) texts.push(await (await fetch(new URL(q('map', { x: one.id }), base.origin))).text());
-      texts.push(await streamed(new URL(q('stream', { x: one.id }), base.origin).href));
-      for (const stretch of one.stretches) texts.push(await (await fetch(new URL(q('stretch', { x: one.id, s: stretch.name }), base.origin))).text());
-      for (const text of one.texts) texts.push(await (await fetch(new URL(q('text', { x: one.id, n: text.name }), base.origin))).text());
+      if (one.map) texts.push(await text(q('map', { x: one.id })));
+      texts.push(await text(q('stream', { x: one.id })));
+      for (const stretch of one.stretches) texts.push(await text(q('stretch', { x: one.id, s: stretch.name })));
+      for (const transcript of one.texts) texts.push(await text(q('text', { x: one.id, n: transcript.name })));
     }
     const all = texts.join('\n');
     assert.deepEqual(SECRETS.filter(secret => all.includes(secret)), []);
@@ -153,11 +187,12 @@ test('the server answers only GET under its token, builds no path from a request
   } finally { await lab.stop(); }
 });
 
-test('the browser is handed a file that only the user can read, never the address, and the file goes when the lab stops', () => {
-  // The address as the command gives it when a language was chosen: the file leads to the whole of it.
-  const url = `http://127.0.0.1:1/${'ab'.repeat(16)}/?lang=ru`, started: string[][] = [];
+test('the browser is handed a file that only the user can read, never the address, and the file goes when the lab stops', async () => {
+  // The first address as the command gives it when a language was chosen: the file leads to the whole of it.
+  const url = `http://127.0.0.1:1/?language=ru#key=${'ab'.repeat(16)}`, started: string[][] = [];
   const opened = openInBrowser(url, (command, args) => { started.push([command, ...args]); });
   assert.equal(started.length, 1);
+  assert.equal(await opened.handed, true);
   assert.ok(readFileSync(opened.file, 'utf8').includes(`url=${url}"`));
   assert.ok(!started[0].join(' ').includes('ab'.repeat(16)));
   assert.ok(started[0].at(-1)!.endsWith('open.html'));
@@ -166,9 +201,33 @@ test('the browser is handed a file that only the user can read, never the addres
   opened.remove();
   assert.equal(statSync(opened.file, { throwIfNoEntry: false }), undefined);
   assert.equal(statSync(join(opened.file, '..'), { throwIfNoEntry: false }), undefined);
-  // A computer with no command to open a browser is no failure.
+  // A computer with no command to open a browser is no failure, and the caller is told, to print the key.
   const none = openInBrowser(url, () => { throw Object.assign(new Error('spawn'), { code: 'ENOENT' }); });
+  assert.equal(await none.handed, false);
   none.remove();
+  const { root } = folders(), bin = mkdtempSync(join(tmpdir(), 'sagents-opener-')), capture = join(bin, 'args');
+  try {
+    for (const code of [0, 1]) {
+      for (const name of ['xdg-open', 'open']) writeFileSync(join(bin, name), `#!/bin/sh\nprintf '%s\\n' "$@" > '${capture}'\nexit ${code}\n`, { mode: 0o700 });
+      const child = spawn(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'lab', root, '--port', '0', '--lang', 'en'],
+        { env: { ...process.env, PATH: bin }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const exited = once(child, 'exit'), timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+      try {
+        const printed = await new Promise<string>((done, failed) => {
+          child.once('error', failed);
+          child.once('exit', () => failed(new Error('lab exited before printing its address')));
+          child.stdout.once('data', chunk => done(String(chunk).trim()));
+        });
+        assert.equal(printed.includes('#key='), code !== 0);
+        const file = fileURLToPath(readFileSync(capture, 'utf8').trim());
+        assert.equal(statSync(file, { throwIfNoEntry: false }) !== undefined, code === 0);
+        child.kill('SIGTERM');
+        assert.deepEqual(await exited, [0, null]);
+        assert.equal(statSync(file, { throwIfNoEntry: false }), undefined);
+        assert.equal(statSync(join(file, '..'), { throwIfNoEntry: false }), undefined);
+      } finally { clearTimeout(timer); if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; } }
+    }
+  } finally { rmSync(bin, { recursive: true, force: true }); }
 });
 
 test('a retained follower reads no events, usage or names from a path replaced by an outside link', () => {

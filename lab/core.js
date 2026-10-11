@@ -115,19 +115,62 @@ export const firstAt = (items, T) => {
   return Math.min(low, items.length - 1);
 };
 
-// ---- The list of experiments. `narrowed` says whether an experiment stays when the list is narrowed by `words`:
-// every word typed is a part of its id, which is its path under the root and its name, without regard to case.
-export const narrowed = (id, words) => { const name = String(id).toLowerCase(); return String(words).toLowerCase().split(/\s+/).filter(Boolean).every(word => name.includes(word)); };
-// The experiments of a list as it is shown: by group, the group with the newest activity first and within a group
-// the order given, the real runs of a group apart from its rehearsals. `experiments` are in the order of the list,
-// newest first. Gives `[{ group, runs, rehearsals }]`.
-export const grouped = experiments => {
+// ---- The list of experiments: what of it is shown, and in what order. The state of the list is `LIST`: `words`,
+// each of which has to be in the entry's id, its name, the title of its world or a model's name that its usage rows
+// record, whatever the case; `least`, the least number of requests; `since`, a date `YYYY-MM-DD` on or after which
+// it was last written, by the clock of the browser; `kind`, one of `KINDS_OF`; `order`, one of `ORDERS`, each with
+// a direction of its own that `reverse` turns round; and `rehearsals`, whether those are shown.
+export const LIST = { words: '', least: 0, since: '', kind: '', order: 'written', reverse: false, rehearsals: false };
+// The kinds by the words of the address, and what the lab calls each (`shape`).
+export const KINDS_OF = { world: 'world', run: 'run', transcript: 'text' };
+// The story seconds that an entry covers, from its first event to its last, or null when it has no event.
+export const spanOf = entry => {
+  let from = null, to = null;
+  for (const stretch of list(entry.stretches)) { if (stretch.from != null && (from === null || stretch.from < from)) from = stretch.from; if (stretch.to != null && (to === null || stretch.to > to)) to = stretch.to; }
+  return from === null || to === null ? null : { from, to };
+};
+// What an order compares: a text goes up, a number down, and an entry without the value stands last either way.
+const covered = entry => { const span = spanOf(entry); return span ? span.to - span.from : null; };
+export const ORDERS = { written: entry => entry.modified, name: entry => String(entry.name), kind: entry => entry.shape, requests: entry => entry.usage.requests || null, time: covered,
+  residents: entry => entry.cast ?? null, model: entry => entry.residents[0] ?? entry.world[0] ?? null };
+const texts = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+// The text that the words are looked for in.
+export const hayOf = entry => [entry.id, entry.name, entry.title ?? '', ...list(entry.residents), ...list(entry.world)].join('\n').toLowerCase();
+// `entries` are the list's, each with `hay` (`hayOf`). `kept` are ids that stay though they are rehearsals: what is
+// open. Gives `shown`, in the order asked for, and `hidden`: how many rehearsals the filters would have let through.
+export const listed = (entries, state, kept = new Set()) => {
+  const words = state.words.toLowerCase().split(/\s+/).filter(Boolean), shape = KINDS_OF[state.kind] ?? null, [year, month, day] = state.since.split('-').map(Number);
+  const since = state.since === '' ? null : new Date(year, month - 1, day).getTime(), value = ORDERS[state.order] ?? ORDERS.written, turn = state.reverse ? -1 : 1, shown = [];
+  let hidden = 0;
+  for (const entry of entries) {
+    if (entry.usage.requests < state.least || (shape !== null && entry.shape !== shape) || (since !== null && !(entry.modified >= since)) || !words.every(word => entry.hay.includes(word))) continue;
+    if (entry.rehearsal && !state.rehearsals && !kept.has(entry.id)) hidden += 1; else shown.push(entry);
+  }
+  const keyed = shown.map(entry => [value(entry), entry]);
+  keyed.sort(([one, first], [other, second]) => {
+    if (one == null && other == null) return second.modified - first.modified || (first.id < second.id ? -1 : 1);
+    if (one == null) return 1;
+    if (other == null) return -1;
+    return turn * (typeof one === 'string' ? texts.compare(one, other) : other - one) || second.modified - first.modified || (first.id < second.id ? -1 : 1);
+  });
+  return { shown: keyed.map(([, entry]) => entry), hidden };
+};
+// The entries of a list by group, a group being the folder of its entries: the groups in the order in which the
+// list comes to them, and within a group the order given. Gives `[{ group, entries }]`.
+export const grouped = entries => {
   const groups = new Map();
-  for (const experiment of experiments) {
-    if (!groups.has(experiment.group)) groups.set(experiment.group, { group: experiment.group, runs: [], rehearsals: [] });
-    groups.get(experiment.group)[experiment.rehearsal ? 'rehearsals' : 'runs'].push(experiment);
+  for (const entry of entries) {
+    if (!groups.has(entry.group)) groups.set(entry.group, { group: entry.group, entries: [] });
+    groups.get(entry.group).entries.push(entry);
   }
   return [...groups.values()];
+};
+// The list's state as the query of the address `/` reads and writes it, in words: `words`, `requests`, `since`,
+// `kind`, `order`, `reverse=yes`, `rehearsals=shown`.
+export const listOf = (query = '') => {
+  const got = new URLSearchParams(query), least = Number(got.get('requests')), since = got.get('since') ?? '', kind = got.get('kind') ?? '', order = got.get('order') ?? '';
+  return { words: got.get('words') ?? '', least: Number.isInteger(least) && least > 0 ? least : 0, since: /^\d{4}-\d\d-\d\d$/.test(since) ? since : '', kind: Object.hasOwn(KINDS_OF, kind) ? kind : '',
+    order: Object.hasOwn(ORDERS, order) ? order : LIST.order, reverse: got.get('reverse') === 'yes', rehearsals: got.get('rehearsals') === 'shown' };
 };
 
 // ---- Where everyone is. Of an event, what it says of where its `who` is from then on, or null when it says nothing
@@ -153,43 +196,70 @@ export const moveOf = (event, T, known) => {
   return { T, who, kind: 'at', place };
 };
 
-// ---- The link: the view's state as it stands after `#` in the page's address, so that a link opens the same view.
-// x: the experiment. s: a stretch of it; t: a story second. In the feed of a whole world they say where to stand
-// (`s` alone: where that stretch begins; `t` with `s`: that moment within the stretch; `t` alone: that moment of the
-// world), and `solo=1` shows the stretch `s` by itself. cmp, cs: the experiment beside it and its stretch; in a
-// comparison a named stretch is shown by itself (`s` on the left, `cs` on the right) and a side without one is its
-// whole world. who, place: the filters; q, only: the search and whether it filters; v: `n` for the numbers, `s` for
-// the story, `t` for the transcript, `m` for the map, where `t` is the moment it shows; ch: the chapter at the top of the story; step: seconds of a compare row (0: chosen by the page); notes,
-// lists: the two switches. A link of the time when a stretch was all there was to open (`x`, `s`, `t` and the rest)
-// reads by the same rule and stands on the same moment, now within the whole world.
-export const linkOf = hash => {
-  const got = {}, text = String(hash ?? '').replace(/^#/, '');
-  for (const part of text.split('&')) { const at = part.indexOf('='); if (at > 0 && !Object.hasOwn(got, part.slice(0, at))) got[part.slice(0, at)] = part.slice(at + 1); }
-  const one = key => { if (got[key] === undefined) return null; try { return decodeURIComponent(got[key]); } catch { return null; } };
-  const ids = key => (got[key] ?? '').split(',').map(id => { try { return decodeURIComponent(id); } catch { return ''; } }).filter(Boolean);
-  const t = one('t'), ch = Number(one('ch')), step = Number(one('step')), v = one('v');
-  return { x: one('x'), s: one('s'), solo: one('solo') === '1' && one('s') !== null, cmp: one('cmp'), cs: one('cs'), who: ids('who'), place: ids('place'), q: one('q') ?? '', only: one('only') === '1',
-    v: v === 'n' || v === 's' || v === 't' || v === 'm' ? v : 'f', ch: Number.isInteger(ch) && ch > 0 ? ch : null, step: step > 0 ? step : 0, notes: one('notes') !== '0', lists: one('lists') !== '0',
-    t: t !== null && t !== '' && Number.isFinite(Number(t)) ? Number(t) : null };
+// ---- The link: the view's state as the path and the query of the page's address, so that a link opens the same
+// view and reads as words: `/view/day/kept?stretch=part2&moment=13:00:03`. The path `/` names no experiment: it is
+// the list, and its query is the list's state (`listOf`).
+// The state keeps short names, and the address has a whole word for each, here in brackets.
+// x: the experiment, its id after `/view/` with its slashes. s [stretch]: a stretch of it, which the address leaves
+// out when the experiment has that one stretch alone (`implied`); t [moment]: a moment as the story's clock,
+// `22:23:27`, with `day2-` before it from the second day, read back as a story second. In the feed of a whole world
+// they say where to stand (`s` alone: where that stretch begins; `t` with `s`: that moment within the stretch; `t`
+// alone: that moment of the world), and solo [alone=yes] shows the stretch `s` by itself. cmp, cs [compare,
+// compare-stretch]: the experiment beside it and its stretch; in a comparison a named stretch is shown by itself
+// (`s` on the left, `cs` on the right) and a side without one is its whole world. who, place: the filters; q, only
+// [search, found=only]: the search and whether it filters; v [show]: `n` for the numbers, `s` for the story, `t`
+// for the transcript, `m` for the map, where `t` is the moment it shows (`VIEWS` has their words); ch [chapter]:
+// the chapter at the top of the story; step: seconds of a compare row (0: chosen by the page); notes, lists
+// [thoughts=hidden, lists=hidden]: the two switches. A moment that is a plain count of seconds is read too.
+const VIEWS = { numbers: 'n', story: 's', transcript: 't', map: 'm' };
+const VIEW = '/view/';
+// A text of a query with the signs that read as they are left alone: the colons of a clock, the slashes of an id,
+// the commas of a list, and a space as `+`.
+const inQuery = text => encodeURIComponent(text).replace(/%3A/g, ':').replace(/%2F/g, '/').replace(/%2C/g, ',').replace(/%20/g, '+');
+// An id in a list keeps its own comma and percent sign apart from the list's.
+const inList = ids => ids.map(id => inQuery(id.replace(/[%,]/g, encodeURIComponent))).join(',');
+const momentIn = T => { const at = Math.round(T); return at < 0 ? String(at) : clockAt(at).replace(/^day (\d+) · /, 'day$1-'); };
+const momentOf = text => { const at = secondsOf(String(text).replace(/^day(\d+)-/, 'day $1 ')); return at !== null ? at : text !== '' && Number.isFinite(Number(text)) ? Number(text) : null; };
+export const linkOf = (path = '/', query = '') => {
+  const got = new URLSearchParams(query), one = key => got.get(key);
+  const decoded = text => { try { return decodeURIComponent(text); } catch { return ''; } };
+  const ids = key => (one(key) ?? '').split(',').map(decoded).filter(Boolean);
+  const x = String(path).startsWith(VIEW) ? decoded(String(path).slice(VIEW.length)).replace(/\/+$/, '') || null : null;
+  const t = one('moment'), ch = Number(one('chapter')), step = Number(one('step')), show = one('show') ?? '';
+  return { x, s: one('stretch'), solo: one('alone') === 'yes' && one('stretch') !== null, cmp: one('compare'), cs: one('compare-stretch'), who: ids('who'), place: ids('place'), q: one('search') ?? '', only: one('found') === 'only',
+    v: Object.hasOwn(VIEWS, show) ? VIEWS[show] : 'f', ch: Number.isInteger(ch) && ch > 0 ? ch : null, step: step > 0 ? step : 0, notes: one('thoughts') !== 'hidden', lists: one('lists') !== 'hidden',
+    t: t === null ? null : momentOf(t) };
 };
-export const hashOf = state => {
-  const enc = encodeURIComponent, parts = [];
-  if (state.x !== null) parts.push(`x=${enc(state.x)}`);
-  if (state.s !== null) parts.push(`s=${enc(state.s)}`);
-  if (state.s !== null && state.solo && state.cmp === null) parts.push('solo=1');
-  if (state.cmp !== null) parts.push(`cmp=${enc(state.cmp)}`);
-  if (state.cmp !== null && state.cs !== null) parts.push(`cs=${enc(state.cs)}`);
-  if (state.who.length) parts.push(`who=${state.who.map(enc).join(',')}`);
-  if (state.place.length) parts.push(`place=${state.place.map(enc).join(',')}`);
-  if (state.q) parts.push(`q=${enc(state.q)}`);
-  if (state.q && state.only) parts.push('only=1');
-  if (state.v !== 'f') parts.push(`v=${state.v}`);
-  if (state.v === 's' && state.ch !== null) parts.push(`ch=${state.ch}`);
+// `implied` is the experiment's stretch when it has one alone, or null. Without an experiment the address is the
+// list's, and `list` is its state.
+export const addressOf = (state, implied = null, list = LIST) => {
+  const enc = inQuery, parts = [], s = state.s === implied ? null : state.s;
+  if (state.x === null) {
+    if (list.words) parts.push(`words=${enc(list.words)}`);
+    if (list.least > 0) parts.push(`requests=${list.least}`);
+    if (list.since) parts.push(`since=${list.since}`);
+    if (list.kind) parts.push(`kind=${list.kind}`);
+    if (list.order !== LIST.order) parts.push(`order=${list.order}`);
+    if (list.reverse) parts.push('reverse=yes');
+    if (list.rehearsals) parts.push('rehearsals=shown');
+    return `/${parts.length ? `?${parts.join('&')}` : ''}`;
+  }
+  if (s !== null) parts.push(`stretch=${enc(s)}`);
+  if (s !== null && state.solo && state.cmp === null) parts.push('alone=yes');
+  if (state.cmp !== null) parts.push(`compare=${enc(state.cmp)}`);
+  if (state.cmp !== null && state.cs !== null) parts.push(`compare-stretch=${enc(state.cs)}`);
+  if (state.who.length) parts.push(`who=${inList(state.who)}`);
+  if (state.place.length) parts.push(`place=${inList(state.place)}`);
+  if (state.q) parts.push(`search=${enc(state.q)}`);
+  if (state.q && state.only) parts.push('found=only');
+  if (state.v !== 'f') parts.push(`show=${Object.keys(VIEWS).find(word => VIEWS[word] === state.v)}`);
+  if (state.v === 's' && state.ch !== null) parts.push(`chapter=${state.ch}`);
   if (state.cmp !== null && state.step) parts.push(`step=${state.step}`);
-  if (!state.notes) parts.push('notes=0');
-  if (!state.lists) parts.push('lists=0');
-  if (state.t !== null) parts.push(`t=${Math.round(state.t)}`);
-  return parts.join('&');
+  if (!state.notes) parts.push('thoughts=hidden');
+  if (!state.lists) parts.push('lists=hidden');
+  if (state.t !== null) parts.push(`moment=${momentIn(state.t)}`);
+  // The id stands in the path as it is but for what would end the path or be read as another sign.
+  return `${VIEW + encodeURI(state.x).replace(/[?#]/g, encodeURIComponent)}${parts.length ? `?${parts.join('&')}` : ''}`;
 };
 // Which stretch each side shows by itself: null is the whole world.
 export const sidesOf = state => ({ a: state.s !== null && (state.solo || state.cmp !== null) ? state.s : null, b: state.cmp !== null ? state.cs : null });

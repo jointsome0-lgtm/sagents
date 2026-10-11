@@ -1,13 +1,19 @@
 // The lab in a browser: an HTTP server over the data module, and the page beside this file.
-//   const lab = await startLab({ dirs, port });   // -> { url, port, stop }
-// The server listens on 127.0.0.1 alone and has no option for another address. The URL holds a token made at start;
-// every other path, and every method but GET, is answered 404. With no `port` (or 0) the system picks one.
-// What leaves this process: the six files of the page, and what the data module gives (the lines of events files,
-// the counted fields of usage rows, the first line of `about.txt`, of a world file the ids and names of characters
+//   const lab = await startLab({ dirs, port });   // -> { url, key, port, moved, stop }
+// The server listens on 127.0.0.1 alone and has no option for another address, and answers a request only when its
+// `Host` is that address with the port: `localhost` with the port is sent on to it, any other host gets 404, so a
+// page of another site that rebinds its name to 127.0.0.1 is given nothing. The page (`/` and `/view/<id>`) and its
+// five files hold no data and are served as they are. Everything that holds data is under `/data/` and needs the key
+// made at start, in the header `X-Lab-Key`, which a page of another origin cannot send; the feed, which the browser
+// opens without headers, carries it as `key` of its query. A wrong key, every other path and every method but GET
+// are answered 404. With no `port` it is 4747, or one that the system picks when that is taken (`moved`); a `port`
+// that was named is listened on or the start fails, and 0 asks the system for one.
+// What leaves this process: the six files of the page, to whoever on this computer asks for them, and under the key
+// what the data module gives (the lines of events files, the counted fields of usage rows, the first line of `about.txt`, of a world file the ids and names of characters
 // and places and what its `mapOf` names for the map, the chapters of `story/` without their `carry`, a transcript's
 // text). Nothing is written, and no text
 // of a file is logged.
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -15,11 +21,13 @@ import type { AddressInfo } from 'node:net';
 
 import { openLab } from './data.ts';
 
-const HOST = '127.0.0.1', POLL = 400, BATCH = 500, PIECE = 2000;
-// The whole of what is served as a file: these six, beside this one. Each is read when asked for, so that an edit
-// of the page shows at the next reload.
-const ASSETS: { [name: string]: [string, string] } = { '': ['page.html', 'text/html; charset=utf-8'], 'app.js': ['app.js', 'text/javascript; charset=utf-8'], 'core.js': ['core.js', 'text/javascript; charset=utf-8'],
-  'strings.js': ['strings.js', 'text/javascript; charset=utf-8'], 'map.js': ['map.js', 'text/javascript; charset=utf-8'], 'app.css': ['app.css', 'text/css; charset=utf-8'] };
+const HOST = '127.0.0.1', PORT = 4747, POLL = 400, BATCH = 500, PIECE = 2000;
+// The whole of what is served as a file: the page and these five, beside this one. Each is read when asked for, so
+// that an edit of the page shows at the next reload.
+const PAGE: [string, string] = ['page.html', 'text/html; charset=utf-8'];
+const ASSETS: { [path: string]: [string, string] } = { '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/core.js': ['core.js', 'text/javascript; charset=utf-8'],
+  '/strings.js': ['strings.js', 'text/javascript; charset=utf-8'], '/map.js': ['map.js', 'text/javascript; charset=utf-8'], '/app.css': ['app.css', 'text/css; charset=utf-8'] };
+const DATA = ['list', 'stretch', 'story', 'text', 'map', 'stream'];
 const asset = (file: string) => readFileSync(new URL(file, import.meta.url));
 const HEADERS = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
 // The page loads its own script and style sheet from this server and nothing from anywhere else.
@@ -29,10 +37,12 @@ const codeOf = (error: unknown) => error instanceof Error ? 'code' in error && t
 
 // `dirs` are the lab's roots. `log` is given one short line when something fails (a code, never a text of a file).
 // The promise is refused when a root is no directory (`LabError`) or the port cannot be listened on.
-export async function startLab({ dirs, port = 0, log = () => {} }: { dirs: string | string[]; port?: number; log?: (line: string) => void }) {
+export async function startLab({ dirs, port, log = () => {} }: { dirs: string | string[]; port?: number; log?: (line: string) => void }) {
   const lab = openLab(dirs);
-  for (const [file] of Object.values(ASSETS)) asset(file);
-  const token = randomBytes(16).toString('hex'), streams = new Set<ServerResponse>();
+  for (const [file] of [PAGE, ...Object.values(ASSETS)]) asset(file);
+  const key = randomBytes(16).toString('hex'), streams = new Set<ServerResponse>();
+  const right = (given: unknown) => { const sent = Buffer.from(typeof given === 'string' ? given : ''), own = Buffer.from(key); return sent.length === own.length && timingSafeEqual(sent, own); };
+  let listening = 0;
   // One open feed: the messages of a followed stretch as server-sent events, looked for again every POLL ms. A broken
   // connection goes on from the byte the browser names in `Last-Event-ID`.
   const stream = (request: IncomingMessage, response: ServerResponse, id: string, wanted: string | null) => {
@@ -76,10 +86,18 @@ export async function startLab({ dirs, port = 0, log = () => {} }: { dirs: strin
       response.end('not found\n');
       return;
     }
-    const prefix = `/${token}/`, asked = (key: string) => url.searchParams.get(key) ?? '';
-    const name = request.method === 'GET' && url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : null;
-    if (name !== null && Object.hasOwn(ASSETS, name)) {
-      const [file, type] = ASSETS[name], body = asset(file);
+    const path = url.pathname, host = String(request.headers.host ?? '').toLowerCase(), asked = (name: string) => url.searchParams.get(name) ?? '';
+    // What needs no key: the page, at the list and at any view, and its files. Which view it is, the page reads
+    // from its own address; nothing of the path is looked at here.
+    const open = request.method !== 'GET' ? null : path === '/' || (path.startsWith('/view/') && path.length > 6) ? PAGE : Object.hasOwn(ASSETS, path) ? ASSETS[path] : null;
+    const called = request.method === 'GET' && host === `${HOST}:${listening}` && path.startsWith('/data/') && DATA.includes(path.slice(6)) ? path.slice(6) : null;
+    const name = called !== null && right(request.headers['x-lab-key'] ?? (called === 'stream' ? url.searchParams.get('key') : null)) ? called : null;
+    if (open !== null && host === `localhost:${listening}`) {
+      // The address typed with the machine's name: on to the one host, where the page's storage holds the key.
+      response.writeHead(302, { ...HEADERS, Location: `http://${HOST}:${listening}${path}${url.search}`, 'Content-Length': 0 });
+      response.end();
+    } else if (open !== null && host === `${HOST}:${listening}`) {
+      const [file, type] = open, body = asset(file);
       response.writeHead(200, { ...HEADERS, 'Content-Type': type, 'Content-Security-Policy': POLICY, 'Content-Length': body.length });
       response.end(body);
     } else if (name === 'list') {
@@ -108,8 +126,13 @@ export async function startLab({ dirs, port = 0, log = () => {} }: { dirs: strin
     } else if (name === 'stream') stream(request, response, asked('x'), url.searchParams.get('s'));
     else { response.writeHead(404, { ...HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }); response.end('not found\n'); }
   });
-  await new Promise<void>((done, failed) => { server.once('error', failed); server.listen(port, HOST, () => { server.off('error', failed); done(); }); });
-  const listening = (server.address() as AddressInfo).port;
-  const stop = () => new Promise<void>(done => { for (const response of streams) response.destroy(); server.close(() => done()); server.closeAllConnections(); });
-  return { url: `http://${HOST}:${listening}/${token}/`, port: listening, stop };
+  const listen = (on: number) => new Promise<void>((done, failed) => { server.once('error', failed); server.listen(on, HOST, () => { server.off('error', failed); done(); }); });
+  let moved = false;
+  if (port === undefined) {
+    // The usual port is someone else's just now: any free one, and the caller says so.
+    try { await listen(PORT); } catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'EADDRINUSE')) throw error; moved = true; await listen(0); }
+  } else await listen(port);
+  listening = (server.address() as AddressInfo).port;
+  const stop = () => new Promise<void>(done => { for (const response of streams) response.end('event: stopped\ndata: {}\n\n'); server.close(() => done()); server.closeIdleConnections(); });
+  return { url: `http://${HOST}:${listening}/`, key, port: listening, moved, stop };
 }

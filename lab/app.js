@@ -1,11 +1,45 @@
-import { secondsOf, clockAt as clockIn, timeOf, focusOf, numbersOf as numbersIn, median, ACTORS, linkOf, hashOf as hashIn, sidesOf, planOf, stretchAt, firstAt, narrowed, grouped } from './core.js';
+import { secondsOf, clockAt as clockIn, timeOf, focusOf, numbersOf as numbersIn, median, ACTORS, linkOf, addressOf, sidesOf, planOf, stretchAt, firstAt, grouped, LIST, listOf, listed as shownOf, hayOf as hayIn, spanOf } from './core.js';
 import { layoutOf, fitOf, sceneOf, peopleOf, roomFor, ridersAt, momentsOf, waysFrom } from './map.js';
 import { STRINGS, languageOf } from './strings.js';
 // Every text of an event, of a world file, of `about.txt`, of a transcript and every name of a file comes from
 // outside: it goes into the page as a text node alone, through `textContent`, and never as markup.
-// The page's own words are `TXT`, the table of the language that the address names (`?lang=`, as `sagents lab` was
-// told) or else of the browser's: the markup names its entries, the rest is asked for here by name.
-const LANG = languageOf(navigator.language, new URLSearchParams(location.search).get('lang')), TXT = STRINGS[LANG];
+const stored = (key, value) => { try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); return value; } catch (error) {
+  // Storage can be disabled, so the choice must also work for this page alone.
+  if (!(error instanceof DOMException)) throw error;
+} return null; };
+// The key to the lab's data. It comes once, after `#` in the first address, is kept in the storage of this origin,
+// which a page of another port cannot read, and leaves the address at once. A later start of the lab on this port
+// hands a new one to whichever tab it opens, so the storage is asked every time.
+let keyGiven = null;
+{
+  const given = /^#key=([0-9a-f]+)$/.exec(location.hash);
+  if (given) { keyGiven = given[1]; if (stored('sagents-lab-key', keyGiven) !== null) keyGiven = null; }
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+}
+let keyHeld = keyGiven ?? stored('sagents-lab-key'), keyBlocked = null;
+const keyNow = () => {
+  const fresh = keyGiven;
+  if (fresh !== null && stored('sagents-lab-key', fresh) !== null) keyGiven = null;
+  const next = fresh ?? stored('sagents-lab-key'), key = next === keyBlocked ? null : next;
+  if (key !== keyHeld) {
+    keyHeld = key;
+    for (const one of sides) if (one.source !== null) { one.source.close(); one.source = null; one.live = false; if (key !== null) listen(one, one.tail); }
+  }
+  return key;
+};
+const ask = path => {
+  const key = keyNow();
+  return fetch(`/data/${path}`, { cache: 'no-store', headers: key === null ? {} : { 'X-Lab-Key': key } }).then(response => {
+    if (path === 'list' && [401, 403, 404, 410].includes(response.status)) stopKey(key);
+    return response;
+  });
+};
+// The page's own words are `TXT`, the table of the language that the address names (`?language=`, as `sagents lab`
+// was told) or the page's switch chose, which the page then remembers, or else of the browser's: the markup names
+// its entries, the rest is asked for here by name.
+const langAsked = new URLSearchParams(location.search).get('language');
+if (langAsked === 'en' || langAsked === 'ru') stored('sagents-lab-lang', langAsked);
+const LANG = languageOf(navigator.language, langAsked === 'en' || langAsked === 'ru' ? langAsked : stored('sagents-lab-lang')), TXT = STRINGS[LANG];
 document.documentElement.lang = LANG;
 for (const node of document.querySelectorAll('[data-t]')) node.textContent = TXT[node.dataset.t];
 for (const node of document.querySelectorAll('[data-t-title]')) node.title = TXT[node.dataset.tTitle];
@@ -23,14 +57,17 @@ const decimal = text => text.replace('.', TXT.point);
 // A search takes the Russian letter yo for ye, as a reader of a Russian story types it.
 const YO = String.fromCharCode(0x451), YE = String.fromCharCode(0x435);
 const norm = text => text.toLowerCase().replaceAll(YO, YE);
-const stored = (key, value) => { try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch { /* no storage: the choice lasts for this page alone */ } return null; };
 
-// ---- The view's state, which lives in the hash: a link opens the same view. What each key means, and how a link is
-// read and written, is `linkOf` and `hashOf` of `core.js`.
-const state = linkOf('');
-const readHash = () => { Object.assign(state, linkOf(location.hash)); };
-const hashOf = () => hashIn(state);
-const writeHash = push => { const hash = `#${hashOf()}`; if (hash !== (location.hash || '#')) history[push ? 'pushState' : 'replaceState'](null, '', hash); };
+// ---- The view's state, which lives in the path and the query of the address: a link opens the same view. What
+// each part means, and how an address is read and written, is `linkOf` and `addressOf` of `core.js`. A stretch that
+// is the only one of its experiment is not named. `/` is the list and opens no experiment: its query is the state
+// of the list (`finder`), which an address of an experiment does not hold and so leaves as it is.
+const state = linkOf();
+const readAddress = () => { Object.assign(state, linkOf(location.pathname, location.search)); if (state.x === null) { Object.assign(finder, listOf(location.search)); showFilters(); } };
+const writeAddress = push => {
+  const only = stretchNames(state.x), address = addressOf(state, only.length === 1 ? only[0] : null, finder);
+  if (address !== location.pathname + location.search) history[push ? 'pushState' : 'replaceState'](null, '', address);
+};
 
 // ---- The clock of the story, whose rules are in `core.js`; here are its words.
 const clockAt = (T, seconds = true) => clockIn(T, seconds, TXT.day);
@@ -48,6 +85,20 @@ const duration = seconds => !(seconds > 0) ? '' : seconds < 60 ? `${Math.round(s
 // being written once with the names in it, and the side B waits for the names of A, whose order the chips keep.
 const side = key => ({ key, x: null, s: null, parts: [], tail: null, order: [], first: null, pending: null, gen: null, busy: false, source: null, recs: [], usage: [], names: { characters: new Map(), places: new Map() }, named: false, caught: false, placed: false, live: false, gone: false });
 const A = side('a'), B = side('b'), sides = [A, B];
+const stopKey = key => {
+  if (key !== keyHeld) return;
+  if (key !== null) keyBlocked = key;
+  keyGiven = keyHeld = null;
+  if (stored('sagents-lab-key') === key) try { localStorage.removeItem('sagents-lab-key'); } catch (error) {
+    // A disabled store cannot be cleared, so keyBlocked also prevents reuse in this page.
+    if (!(error instanceof DOMException)) throw error;
+  }
+  for (const one of sides) { one.source?.close(); one.source = null; one.live = false; }
+  locked = true;
+  $('locked-why').textContent = key === null ? TXT.noKey : TXT.oldKey;
+  $('locked').hidden = false;
+  document.body.classList.add('locked');
+};
 // The chapters of the open experiment's story, as `story?x=` gave them; `key` is what the list said of them then.
 let story = { x: null, key: null, chapters: [], loading: false };
 // The characters and the places in the order of the world file and then of first appearance: the order gives a
@@ -171,7 +222,7 @@ const makePart = (one, name) => {
   part.toChapter.title = TXT.toChapterTitle;
   part.alone.title = TXT.aloneTitle;
   part.toChapter.addEventListener('click', () => openChapter(part.chapter));
-  part.alone.addEventListener('click', () => { Object.assign(state, { s: part.name, solo: true, t: null }); writeHash(true); sync(); });
+  part.alone.addEventListener('click', () => { Object.assign(state, { s: part.name, solo: true, t: null }); writeAddress(true); sync(); });
   part.mark.append(el('span', 'mark-name', name), part.about, part.wait, part.toChapter, part.alone);
   part.box.append(part.mark, part.body);
   return part;
@@ -317,9 +368,9 @@ const stand = (name, t) => {
 };
 // On the map the moment that was followed stays the chosen one when the following ends.
 const setFollow = on => {
-  if (!on && follow && state.v === 'm' && state.t === null) { state.t = worldSpan().to; writeHash(); }
+  if (!on && follow && state.v === 'm' && state.t === null) { state.t = worldSpan().to; writeAddress(); }
   follow = on; $('follow').checked = on;
-  if (on) { fresh = 0; state.t = null; bottom(); writeHash(); }
+  if (on) { fresh = 0; state.t = null; bottom(); writeAddress(); }
   showFresh(); showMoment();
 };
 const showFresh = () => { const pill = $('fresh'); pill.hidden = follow || fresh === 0 || state.v !== 'f'; if (!pill.hidden) pill.textContent = TXT.fresh(number(fresh)); };
@@ -328,7 +379,8 @@ let shownCount = 0, totalCount = 0;
 const showShown = () => {
   $('shown').textContent = TXT.shown(number(shownCount), number(totalCount));
   $('empty').hidden = shownCount > 0;
-  if (!shownCount) $('empty').textContent = totalCount ? TXT.emptyFiltered : A.gone ? TXT.emptyGone : TXT.emptyNone;
+  if (!shownCount && (A.gone || (listed && A.x !== null && found(A.x) === null))) { const link = el('a', '', TXT.toList); link.href = addressOf(linkOf(), null, finder); link.addEventListener('click', event => { event.preventDefault(); toList(); }); $('empty').replaceChildren(TXT.emptyGone(A.x), ' ', link); }
+  else if (!shownCount) $('empty').textContent = totalCount ? TXT.emptyFiltered : TXT.emptyNone;
 };
 const applyFilters = keep => {
   const anchor = keep && !follow ? topItem() : null;
@@ -479,7 +531,7 @@ const pump = one => {
   if (!part) return;
   const gen = one.gen, sig = part.sig, failed = () => { part.failed = Date.now(); part.loading = false; };
   one.busy = true; part.loading = true;
-  fetch(`stretch?x=${encodeURIComponent(one.x)}&s=${encodeURIComponent(part.name)}&from=${part.at}`, { cache: 'no-store' })
+  ask(`stretch?x=${encodeURIComponent(one.x)}&s=${encodeURIComponent(part.name)}&from=${part.at}`)
     .then(response => response.ok ? response.json() : null)
     .then(piece => {
       if (one.gen !== gen) return;
@@ -497,15 +549,19 @@ const pump = one => {
 };
 // The stream of a side: its last part, or, while the experiment has no stretch, whichever comes.
 const listen = (one, part) => {
+  const key = keyNow();
   const old = one.tail;
   one.source?.close();
   // What the part listened to until now still grew by is asked for like any other's.
   if (old && old !== part) { old.stale = true; old.loading = false; }
   one.tail = part;
-  const source = one.source = new EventSource(`stream?x=${encodeURIComponent(one.x)}${part === null ? '' : `&s=${encodeURIComponent(part.name)}`}`);
+  if (key === null) { one.source = null; return; }
+  // The feed cannot send a header: the key goes in its own query, which no address bar and no history holds.
+  const source = one.source = new EventSource(`/data/stream?key=${key}&x=${encodeURIComponent(one.x)}${part === null ? '' : `&s=${encodeURIComponent(part.name)}`}`);
   const on = (name, handler) => source.addEventListener(name, message => { if (one.source !== source) return; try { handler(message.data ? JSON.parse(message.data) : null, message); } catch (error) { console.error(error); } });
   source.addEventListener('open', () => { if (one.source === source) { one.live = true; showLive(); } });
   source.addEventListener('error', () => { if (one.source === source) { one.live = false; showLive(); } });
+  on('stopped', () => stopKey(key));
   on('world', world => {
     const named = entries => new Map(list(entries).map(item => [str(item?.id), str(item?.name)]));
     one.names = { characters: named(world?.characters), places: named(world?.places) };
@@ -577,96 +633,156 @@ const openSide = (one, x, s, want) => {
   syncParts(one);
 };
 
-// ---- The list of experiments, asked for again every few seconds. It is shown by group, a group being the path of
-// a directory under the root, the group with the newest activity first; a part of a name typed above it narrows
-// it; the rehearsals of a group are folded under one line until that line is clicked, and a click on a group's
-// head folds the group. `ordered` is what is shown, from top to bottom.
-let listing = { single: false, root: '', experiments: [] }, listed = false, ordered = [], narrowBy = '';
-const cards = new Map(), heads = new Map(), folds = new Map(), unfolded = new Set(), closed = new Set();
+// ---- The list of experiments, asked for again every few seconds. At `/` it is the whole page, a line an entry with
+// its columns; beside an open experiment it is the narrow column, two lines an entry. What of it is shown and in
+// what order is `finder` (`LIST` and `listed` of `core.js`), which at `/` is the query of the address: the words, the
+// least number of requests, the date, the kind, the order, and whether rehearsals are shown, which at first they
+// are not. The entries stand in groups by folder, a click on a group's head folds it, and `ordered` is what is
+// shown, from top to bottom. Only the lines in the window are in the document: with thousands of entries the rest
+// are places kept free, each line having one height.
+let listing = { single: false, root: '', roots: [], experiments: [] }, listed = false, ordered = [];
+const finder = { ...LIST }, closed = new Set(), lines = new Map(), heads = new Map(), scrollAt = { home: 0, side: 0 };
+let listItems = [], listOffsets = [0];
+const HEIGHT = { head: 30, wide: 30, slim: 48 };
+const atHome = () => document.body.classList.contains('home');
 const sizeOf = bytes => bytes < 1024 ? `${number(bytes)} ${TXT.bytes}` : `${compact.format(bytes)}B`;
-const span = experiment => {
-  let first = null, last = null;
-  for (const stretch of experiment.stretches) { if (stretch.first && (!first || stretch.first.at < first.at)) first = stretch.first; if (stretch.last && (!last || stretch.last.at > last.at)) last = stretch.last; }
-  const show = mark => { const T = secondsOf(mark.clock); return T === null ? str(mark.clock) : clockAt(T, false); };
-  return first && last ? `${show(first)} – ${show(last)}` : null;
-};
-const metaLine = (box, pairs) => { box.replaceChildren(); pairs.forEach(([label, value], at) => { if (at) box.append(' · '); box.append(`${label} `, el('b', '', value)); }); };
-// The card of one experiment, made once and brought up to what the list says of it now.
-const cardOf = experiment => {
-  let card = cards.get(experiment.id);
-  if (!card) {
-    const node = el('div', 'exp'), top = el('div', 'exp-top');
-    card = { node, name: el('span', 'exp-name', str(experiment.name)), live: el('span', 'exp-live', TXT.running), kind: el('span', 'exp-kind'), mark: el('span', 'exp-side'), about: el('div', 'exp-about'), models: el('div', 'exp-meta'),
-      counts: el('div', 'exp-meta'), compare: el('button', 'exp-cmp', TXT.compare) };
-    top.append(card.name, card.live, card.kind, card.mark);
-    node.append(top, card.about, card.models, card.counts, card.compare);
+const two = value => String(value).padStart(2, '0');
+// When an entry was last written, by the clock of this computer.
+const written = (ms, year = true) => { const at = new Date(ms); return `${year ? `${at.getFullYear()}-` : ''}${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}`; };
+// The story time an entry covers: its first and its last moment, and how long that is.
+const covers = entry => { const span = spanOf(entry); return span === null ? '' : `${clockAt(span.from, false)} – ${clockAt(span.to, false)}${span.to > span.from ? ` · ${duration(span.to - span.from)}` : ''}`; };
+// The models that the usage rows of an entry record, the residents' first and then the world's.
+const modelsOf = entry => [entry.residents.join(', '), entry.world.length ? `${TXT.world} ${entry.world.join(', ')}` : ''].filter(Boolean).join(' · ');
+const COLUMNS = [['name', 'cName'], ['kind', 'cKind'], ['written', 'cWritten'], ['requests', 'cRequests'], ['time', 'cTime'], ['residents', 'cCast'], ['model', 'cModel']];
+// The line of one entry, made anew only when what it says has changed.
+const lineOf = (entry, wide) => {
+  const isA = entry.id === A.x, isB = entry.id === state.cmp, textOnly = entry.shape === 'text', requests = entry.usage.requests ? number(entry.usage.requests) : '';
+  const canCompare = !wide && (isB || (entry.stretches.length > 0 && found(A.x)?.stretches.length > 0 && !(isA && entry.stretches.length < 2)));
+  const sig = [wide, isA, isB, comparing(), canCompare, entry.modified, entry.growing, entry.rehearsal, requests, entry.cast, entry.about, entry.title, covers(entry), modelsOf(entry)].join('\n');
+  let row = lines.get(entry.id);
+  if (row?.sig === sig) return row.node;
+  const node = row?.node ?? el('div'), name = el('div', 'c-name'), cell = (cls, text) => { const one = el('div', cls, text); one.title = text; return one; };
+  if (!row) {
     node.tabIndex = 0;
-    node.title = experiment.id;
     node.setAttribute('role', 'button');
-    card.compare.type = 'button';
-    const openIt = () => { choose(experiment.id); if (matchMedia('(max-width: 900px)').matches) document.body.classList.add('noside'); };
-    node.addEventListener('click', openIt);
+    const openIt = () => { choose(entry.id); if (matchMedia('(max-width: 900px)').matches) document.body.classList.add('noside'); };
+    node.addEventListener('click', event => { if (event.target.closest('.exp-cmp')) compareWith(state.cmp === entry.id ? null : entry.id); else openIt(); });
     node.addEventListener('keydown', event => { if (event.target === node && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openIt(); } });
-    card.compare.addEventListener('click', event => { event.stopPropagation(); compareWith(state.cmp === experiment.id ? null : experiment.id); });
-    cards.set(experiment.id, card);
   }
-  const isA = experiment.id === A.x, isB = experiment.id === state.cmp, events = experiment.stretches.reduce((sum, stretch) => sum + stretch.events, 0), textOnly = experiment.shape === 'text';
-  card.node.classList.toggle('a', isA);
-  card.node.classList.toggle('b', isB && !isA);
-  card.node.classList.toggle('dry', experiment.rehearsal);
-  card.live.hidden = !experiment.growing;
-  card.kind.hidden = !textOnly && !experiment.rehearsal;
-  card.kind.textContent = textOnly ? TXT.textOnly : TXT.rehearsal;
-  card.mark.hidden = !(isB || (isA && comparing()));
-  card.mark.textContent = isA && isB ? TXT.sideBoth : isA ? TXT.sideA : TXT.sideB;
-  card.about.hidden = !experiment.about;
-  card.about.textContent = experiment.about ?? '';
-  card.models.hidden = !experiment.residents.length && !experiment.world.length;
-  metaLine(card.models, [...(experiment.residents.length ? [[TXT.residents, experiment.residents.join(', ')]] : []), ...(experiment.world.length ? [[TXT.world, experiment.world.join(', ')]] : [])]);
-  // A transcript alone has no clock and no events to count: its size, and the requests when their rows were kept.
-  metaLine(card.counts, textOnly ? [[TXT.text.toLowerCase(), sizeOf(experiment.texts.reduce((sum, text) => sum + text.size, 0))], ...(experiment.usage.requests ? [[TXT.requests, number(experiment.usage.requests)]] : [])]
-    : [...(span(experiment) ? [[TXT.clock, span(experiment)]] : []), ...(experiment.stretches.length > 1 ? [[TXT.stretches, number(experiment.stretches.length)]] : []), [TXT.events, number(events)], [TXT.requests, number(experiment.usage.requests)],
-      ...(experiment.story?.chapters ? [[TXT.chapters, number(experiment.story.chapters)]] : [])]);
-  card.compare.textContent = isB ? TXT.cmpRemove : isA ? TXT.cmpStretches : TXT.cmpWithOpen;
-  // Two feeds are compared: an experiment without events has none, and the open one beside itself needs two stretches.
-  card.compare.hidden = !isB && (!experiment.stretches.length || !(found(A.x)?.stretches.length) || (isA && experiment.stretches.length < 2));
-  return card;
+  lines.set(entry.id, { node, sig });
+  node.className = `exp ${wide ? 'wide' : 'slim'}${isA ? ' a' : isB ? ' b' : ''}${entry.rehearsal ? ' dry' : ''}`;
+  node.title = [entry.id, entry.title, entry.about].filter(Boolean).join('\n');
+  name.append(el('span', 'exp-name', str(entry.name)));
+  if (entry.growing) name.append(el('span', 'exp-live', TXT.running));
+  if (entry.rehearsal) name.append(el('span', 'exp-kind', TXT.rehearsal));
+  if (!wide && textOnly) name.append(el('span', 'exp-kind', TXT.textOnly));
+  if (isB || (isA && comparing())) name.append(el('span', 'exp-side', isA && isB ? TXT.sideBoth : isA ? TXT.sideA : TXT.sideB));
+  if (wide && (entry.about || entry.title)) name.append(el('span', 'exp-about', entry.about || entry.title));
+  if (wide) node.replaceChildren(name, cell('', TXT.shapes[entry.shape] ?? str(entry.shape)), cell('', written(entry.modified)), cell('num', requests), cell('', covers(entry)), cell('num', entry.cast ? number(entry.cast) : ''), cell('', modelsOf(entry)));
+  else {
+    // A transcript alone has no clock and no events to count: its size, and the requests when their rows were kept.
+    const meta = [written(entry.modified, false), requests ? TXT.requestsOf(requests) : '', textOnly ? sizeOf(entry.texts.reduce((sum, text) => sum + text.size, 0)) : covers(entry)].filter(Boolean).join(' · ');
+    if (canCompare) { const compare = el('button', 'exp-cmp', '⇄'); compare.type = 'button'; compare.title = isB ? TXT.cmpRemove : isA ? TXT.cmpStretches : TXT.cmpWithOpen; name.append(compare); }
+    node.replaceChildren(name, cell('exp-meta', meta));
+  }
+  return node;
 };
+const groupHead = (group, label, count, folded) => {
+  let head = heads.get(group);
+  if (!head) { head = el('button', 'grp'); head.type = 'button'; head.addEventListener('click', () => { if (closed.has(group)) closed.delete(group); else closed.add(group); keepList(); renderList(); }); heads.set(group, head); }
+  head.replaceChildren(`${count === 0 ? '·' : folded ? '▸' : '▾'} ${label}`, el('span', 'n', count === 0 ? TXT.emptyRoot : number(count)));
+  head.disabled = count === 0;
+  return head;
+};
+// The lines that the window shows, each at its place.
+const drawList = () => {
+  const box = $('list'), rowsBox = $('list-rows'), wide = atHome(), top = box.scrollTop - 400, bottom = box.scrollTop + box.clientHeight + 400;
+  let low = 0, high = listItems.length;
+  while (low < high) { const mid = (low + high) >> 1; if (listOffsets[mid + 1] < top) low = mid + 1; else high = mid; }
+  let end = low;
+  while (end < listItems.length && listOffsets[end] < bottom) end += 1;
+  const nodes = [];
+  for (let at = low; at < end; at += 1) {
+    const item = listItems[at], node = item.entry ? lineOf(item.entry, wide) : groupHead(item.group, item.label, item.count, item.folded);
+    node.style.top = `${listOffsets[at]}px`;
+    node.style.height = `${listOffsets[at + 1] - listOffsets[at]}px`;
+    nodes.push(node);
+  }
+  nodes.forEach((node, at) => { if (rowsBox.children[at] !== node) rowsBox.insertBefore(node, rowsBox.children[at] ?? null); });
+  while (rowsBox.children.length > nodes.length) rowsBox.lastChild.remove();
+  if (lines.size > 1500) { const kept = new Set(nodes); for (const [id, row] of lines) if (!kept.has(row.node)) lines.delete(id); }
+};
+// What a reload of `/` brings back besides the address: the folded groups and the place in the finder.
+const restoreList = () => {
+  try {
+    const kept = JSON.parse(sessionStorage.getItem('sagents-lab-list') ?? 'null');
+    if (kept?.address === addressOf(linkOf(), null, finder)) { for (const group of list(kept.closed)) closed.add(group); scrollAt.home = Number(kept.scroll) || 0; }
+  } catch { /* no storage, or not what this page wrote: the list starts at its top */ }
+  if (atHome()) { renderList(); $('list').scrollTop = scrollAt.home; }
+};
+const keepList = () => { try { sessionStorage.setItem('sagents-lab-list', JSON.stringify({ address: addressOf(linkOf(), null, finder), closed: [...closed], scroll: atHome() ? $('list').scrollTop : scrollAt.home })); } catch { /* no storage: the list starts at its top */ } };
 const renderList = () => {
-  const box = $('list'), nodes = [], kept = listing.experiments.filter(experiment => narrowed(experiment.id, narrowBy)), all = grouped(kept), ids = new Set(listing.experiments.map(experiment => experiment.id));
-  const toggler = (known, group, set, cls) => { let node = known.get(group); if (!node) { node = el('button', cls); node.type = 'button'; node.addEventListener('click', () => { if (set.has(group)) set.delete(group); else set.add(group); renderList(); }); known.set(group, node); } return node; };
-  ordered = [];
-  $('root').textContent = listing.single ? TXT.oneRun : listing.root;
-  $('list-empty').hidden = kept.length > 0;
-  $('list-empty').textContent = listing.experiments.length ? TXT.noMatch : TXT.listEmpty;
-  for (const { group, runs, rehearsals } of all) {
-    // While the list is narrowed, everything that stays is shown, whatever was folded.
-    const folded = closed.has(group) && narrowBy === '', open = unfolded.has(group) || narrowBy !== '' || rehearsals.some(experiment => experiment.id === A.x || experiment.id === state.cmp);
-    if (all.length > 1 || group !== '') { const head = toggler(heads, group, closed, 'grp'); head.replaceChildren(`${folded ? '▸' : '▾'} ${group || listing.root}`, el('span', 'n', number(runs.length + rehearsals.length))); nodes.push(head); }
-    if (folded) continue;
-    for (const experiment of runs) { nodes.push(cardOf(experiment).node); ordered.push(experiment); }
-    if (!rehearsals.length) continue;
-    const fold = toggler(folds, group, unfolded, 'fold');
-    fold.textContent = `${open ? '▾' : '▸'} ${TXT.rehearsals(number(rehearsals.length))}`;
-    nodes.push(fold);
-    if (open) for (const experiment of rehearsals) { nodes.push(cardOf(experiment).node); ordered.push(experiment); }
+  const wide = atHome(), { shown, hidden } = shownOf(listing.experiments, finder, new Set([A.x, state.cmp])), groups = grouped(shown), all = listing.experiments.length;
+  listItems = []; ordered = []; listOffsets = [0];
+  for (const { group, entries } of groups) {
+    const folded = closed.has(group);
+    listItems.push({ group, label: listing.roots.length > 1 ? group || listing.root : [listing.root, group].filter(Boolean).join('/'), count: entries.length, folded });
+    if (!folded) for (const entry of entries) { listItems.push({ entry }); ordered.push(entry); }
   }
-  nodes.forEach((node, at) => { if (box.children[at] !== node) box.insertBefore(node, box.children[at] ?? null); });
-  while (box.children.length > nodes.length) box.lastChild.remove();
-  for (const id of cards.keys()) if (!ids.has(id)) cards.delete(id);
+  // A root that holds no run at all is named too, so that a folder given by mistake is seen.
+  if (listing.roots.length > 1) for (const root of listing.roots) if (!listing.experiments.some(entry => entry.id === root || entry.id.startsWith(`${root}/`))) listItems.push({ group: `\n${root}`, label: root, count: 0, folded: false });
+  for (const item of listItems) listOffsets.push(listOffsets.at(-1) + (item.entry ? HEIGHT[wide ? 'wide' : 'slim'] : HEIGHT.head));
+  $('list-rows').style.height = `${listOffsets.at(-1)}px`;
+  $('root').textContent = listing.single ? TXT.oneRun : listing.root;
+  $('f-count').textContent = listed ? TXT.shownOf(number(shown.length), number(all)) : '';
+  $('f-rehearsals').hidden = !hidden && !finder.rehearsals;
+  $('f-rehearsals').textContent = finder.rehearsals ? TXT.rehearsalsHide : TXT.rehearsalsHidden(number(hidden));
+  const filtered = finder.words !== '' || finder.least > 0 || finder.since !== '' || finder.kind !== '';
+  $('f-clear').hidden = !filtered;
+  $('list-empty').hidden = shown.length > 0 || !listed;
+  $('list-empty').textContent = !all ? TXT.listEmpty : hidden && !filtered ? TXT.onlyRehearsals : TXT.noMatch;
+  for (const [key] of COLUMNS) { const head = $(`h-${key}`); head.classList.toggle('on', finder.order === key); head.dataset.turn = finder.order !== key ? '' : finder.reverse ? '▲' : '▼'; }
+  drawList();
+  for (const group of heads.keys()) if (!listItems.some(item => item.group === group)) heads.delete(group);
 };
-const found = id => listing.experiments.find(experiment => experiment.id === id) ?? null;
+// The controls of the list, as the state has them; and the state, as a control was changed.
+const showFilters = () => {
+  if ($('f-words').value.trim() !== finder.words) $('f-words').value = finder.words;
+  $('f-least').value = finder.least || '';
+  $('f-since').value = finder.since;
+  $('f-kind').value = finder.kind;
+};
+const listChanged = () => { if (state.x === null) writeAddress(); $('list').scrollTop = 0; keepList(); renderList(); };
+// To the list from an experiment: the list as it was left, at the place it was left at.
+const toList = () => { Object.assign(state, linkOf()); writeAddress(true); sync(true); };
+// The entries by their ids, for the many places that ask for one.
+let byId = new Map();
+const found = id => byId.get(id) ?? null;
 // An experiment of which only a transcript was kept: it opens as that text.
 const textOnly = id => { const experiment = found(id); return experiment !== null && !experiment.stretches.length && experiment.texts.length > 0; };
 const growing = one => found(one.x)?.stretches.some(stretch => stretch.growing && (one.s === null || stretch.name === one.s)) ?? false;
+// Without the right key the lab answers 404: the page says that it has no key, or the key of an earlier start, and
+// what to do, in place of everything else. When the key comes, through another tab, the page starts anew.
+let locked = false;
 const refreshList = async () => {
   try {
-    const response = await fetch('list', { cache: 'no-store' });
+    const key = keyNow();
+    const response = await ask('list');
+    if (key !== keyNow()) return;
+    if ([401, 403, 404, 410].includes(response.status)) return;
     if (!response.ok) throw new Error('list');
-    listing = await response.json();
-    if (!listed) { listed = true; if (listing.single || matchMedia('(max-width: 900px)').matches) document.body.classList.add('noside'); sync(true); }
+    if (locked) { location.reload(); return; }
+    // The two marks say how long the first list takes from its arrival to the screen (`performance.measure`).
+    const body = await response.text(), first = !listed;
+    if (first) performance.mark('sagents-list-arrived');
+    listing = JSON.parse(body);
+    listing.roots ??= [];
+    byId = new Map();
+    for (const entry of listing.experiments) { entry.hay = hayIn(entry); byId.set(entry.id, entry); }
+    if (first) { listed = true; if (listing.single || matchMedia('(max-width: 900px)').matches) document.body.classList.add('noside'); sync(true); restoreList(); }
     else for (const one of sides) syncParts(one);
     renderList(); showTop(); showLive(); loadStory(); loadTexts(); loadMap();
+    if (first) requestAnimationFrame(() => setTimeout(() => performance.mark('sagents-list-shown'), 0));
   } catch { showLive(true); }
 };
 
@@ -685,7 +801,9 @@ const showTop = () => {
   $('name').textContent = A.x ?? '—';
   document.title = A.x === null ? TXT.title : TXT.titleOf(comparing() ? `${A.x} ⇄ ${state.cmp}` : A.x);
   const names = stretchNames(A.x);
-  if (document.activeElement !== $('stretch')) fillSelect($('stretch'), names, A.s ?? (state.v === 'f' ? standing() ?? state.s : state.s));
+  // On the map of a whole world the picker names the stretch that holds the map's moment.
+  const held = state.v === 'm' && A.s === null ? found(A.x)?.stretches[stretchAt(found(A.x)?.stretches ?? [], momentNow())]?.name ?? null : null;
+  if (document.activeElement !== $('stretch')) fillSelect($('stretch'), names, A.s ?? (state.v === 'f' ? standing() ?? state.s : held ?? state.s));
   $('solo-box').hidden = names.length < 2;
   $('solo').checked = A.s !== null;
   if (cmpHead) fillSelect(cmpHead.pick, stretchNames(B.x), B.s ?? '', true);
@@ -707,7 +825,7 @@ const showLive = down => {
   if (down !== undefined) lost = down;
   const mark = $('live'), broken = lost || (A.source !== null && !A.live && !A.gone);
   mark.className = broken ? 'off' : growing(A) ? 'on' : 'quiet';
-  mark.textContent = broken ? TXT.noLink : growing(A) ? TXT.running : A.recs.length ? TXT.notGrowing : '';
+  mark.textContent = broken ? TXT.noLink : growing(A) ? TXT.running : '';
   mark.title = broken ? TXT.noLinkTitle : growing(A) ? TXT.growingTitle : '';
 };
 const secondsText = ms => ms === null ? '—' : `${decimal((ms / 1000).toFixed(1))} ${TXT.seconds}`;
@@ -818,7 +936,7 @@ stripBox.addEventListener('pointercancel', () => { dragging = false; });
 stripBox.addEventListener('pointerleave', () => { if (!dragging) $('strip-tip').hidden = true; });
 
 // ---- One frame of upkeep after anything changed: the clock, the strip of the time, the counts, the numbers.
-let framed = false, hashTimer = null;
+let framed = false, addressTimer = null;
 const frame = () => {
   framed = false;
   const all = shownItems();
@@ -840,14 +958,14 @@ document.addEventListener('visibilitychange', () => { framed = false; scheduleFr
 // The link keeps the moment at the top of the window, and in the feed of a world the stretch it is in. It is
 // written a moment after the reader stopped, and not while a place is still being kept.
 const noteTop = () => {
-  clearTimeout(hashTimer);
-  hashTimer = setTimeout(() => {
+  clearTimeout(addressTimer);
+  addressTimer = setTimeout(() => {
     if (pin) { noteTop(); return; }
     const item = topItem();
     if (follow || !item || state.v !== 'f' || A.pending) return;
     state.t = scroller.scrollTop < 12 ? null : item.T;
     if (A.s === null && !comparing()) state.s = state.t === null ? null : item.part.name;
-    writeHash();
+    writeAddress();
   }, 400);
 };
 scroller.addEventListener('scroll', () => {
@@ -877,8 +995,8 @@ const headOfCompare = () => {
   pick.title = TXT.rightStretch; steps.title = TXT.rowSpan; close.title = TXT.cmpClose; close.type = 'button';
   for (const value of [0, ...STEPS]) { const option = el('option', '', value ? stepName(value) : `${TXT.auto} · ${stepName(state.step ? autoStep() : step)}`); option.value = String(value); steps.append(option); }
   steps.value = String(state.step);
-  steps.addEventListener('change', () => { state.step = Number(steps.value); writeHash(); const at = shownItems().length ? shownItems()[itemAt(scroller.scrollTop + headRoom())].T : null; relayout(); applyFilters(false); if (at !== null && !follow) jumpTo(at); });
-  pick.addEventListener('change', () => { state.cs = pick.value || null; writeHash(); sync(); });
+  steps.addEventListener('change', () => { state.step = Number(steps.value); writeAddress(); const at = shownItems().length ? shownItems()[itemAt(scroller.scrollTop + headRoom())].T : null; relayout(); applyFilters(false); if (at !== null && !follow) jumpTo(at); });
+  pick.addEventListener('change', () => { state.cs = pick.value || null; writeAddress(); sync(); });
   close.addEventListener('click', () => compareWith(null));
   mid.append(steps);
   head.append(left, mid, right);
@@ -986,8 +1104,8 @@ const renderNumbers = () => {
 // read. From a chapter one goes to its stretches in the feed, and from where a stretch begins in the feed to its
 // chapter.
 const storyBox = $('story');
-const toFeed = name => { Object.assign(state, { v: 'f', s: name, t: null, solo: false }); if (comparing()) Object.assign(state, { cmp: null, cs: null, step: 0 }); follow = false; $('follow').checked = false; writeHash(true); sync(true); };
-const openChapter = n => { Object.assign(state, { v: 's', ch: n }); writeHash(true); sync(true); };
+const toFeed = name => { Object.assign(state, { v: 'f', s: name, t: null, solo: false }); if (comparing()) Object.assign(state, { cmp: null, cs: null, step: 0 }); follow = false; $('follow').checked = false; writeAddress(true); sync(true); };
+const openChapter = n => { Object.assign(state, { v: 's', ch: n }); writeAddress(true); sync(true); };
 const chapterNode = n => [...storyBox.querySelectorAll('article')].find(node => node.dataset.n === String(n)) ?? null;
 const renderStory = () => {
   const column = el('div', 'story'), names = stretchNames(A.x), chapters = story.x === A.x ? story.chapters : [], kept = storyBox.scrollTop;
@@ -1021,7 +1139,7 @@ const loadStory = () => {
   if (story.loading || (story.x === x && story.key === key)) return;
   if (story.x !== x) story = { x, key: null, chapters: [], loading: false };
   story.loading = true;
-  fetch(`story?x=${encodeURIComponent(x)}`, { cache: 'no-store' }).then(response => response.ok ? response.json() : null).then(got => {
+  ask(`story?x=${encodeURIComponent(x)}`).then(response => response.ok ? response.json() : null).then(got => {
     story.loading = false;
     if (got === null || A.x !== x) return;
     const first = story.key === null;
@@ -1038,7 +1156,7 @@ storyBox.addEventListener('scroll', () => {
     if (state.v !== 's') return;
     const top = storyBox.scrollTop, at = [...storyBox.querySelectorAll('article')].find(node => node.offsetTop + node.offsetHeight > top + 12);
     state.ch = top < 12 || !at ? null : Number(at.dataset.n) || null;
-    writeHash();
+    writeAddress();
   }, 400);
 }, { passive: true });
 
@@ -1050,7 +1168,7 @@ let texts = { x: null, parts: new Map(), column: null, about: null };
 const pumpText = (x, name, part) => {
   if (part.busy) return;
   part.busy = true;
-  fetch(`text?x=${encodeURIComponent(x)}&n=${encodeURIComponent(name)}&from=${part.at}`, { cache: 'no-store' }).then(response => response.ok ? response.json() : null).then(piece => {
+  ask(`text?x=${encodeURIComponent(x)}&n=${encodeURIComponent(name)}&from=${part.at}`).then(response => response.ok ? response.json() : null).then(piece => {
     part.busy = false;
     if (texts.x !== x || piece === null || !Number.isInteger(piece.at)) return;
     // The file is another one than the one that was read: what was read of it goes.
@@ -1110,7 +1228,7 @@ const loadMap = () => {
   const mine = land, key = `${experiment.mapKey}:${experiment.stretches.reduce((sum, stretch) => sum + stretch.events, 0)}`;
   if (mine.loading || mine.key === key) return;
   mine.loading = true;
-  fetch(`map?x=${encodeURIComponent(x)}`, { cache: 'no-store' }).then(response => response.ok ? response.json() : null).then(got => {
+  ask(`map?x=${encodeURIComponent(x)}`).then(response => response.ok ? response.json() : null).then(got => {
     mine.loading = false;
     if (land !== mine || got === null || got.world === null || typeof got.world !== 'object') return;
     // The places are laid out anew only when the world file is another one than the one that is drawn.
@@ -1184,7 +1302,7 @@ const setMoment = T => {
   if (follow) { follow = false; $('follow').checked = false; }
   state.t = Math.round(T);
   if (A.s === null && !comparing()) state.s = null;
-  clearTimeout(momentTimer); momentTimer = setTimeout(() => writeHash(), 250);
+  clearTimeout(momentTimer); momentTimer = setTimeout(() => writeAddress(), 250);
   showMoment();
 };
 // To the next or the previous moment at which someone moved, fell asleep or woke; past the last one, to the end.
@@ -1207,18 +1325,20 @@ mapSvg.addEventListener('pointerleave', () => { land.hot = null; showCard(); });
 mapSvg.addEventListener('click', event => { const id = placeUnder(event); if (id === null) return; toggle('place', id); unpin(); showMoment(); });
 new ResizeObserver(() => showMap()).observe(mapScroll);
 
-// ---- Bringing the page to the state: after the hash changed, by a link, a click or a key. `moved` says that the
+// ---- Bringing the page to the state: after the address changed, by a link, a click or a key. `moved` says that the
 // place to stand may have changed too: the page goes where `s` and `t` say.
 let viewWas = 'f';
 const sync = moved => {
   if (!listed) return;
-  // With no experiment named, the one with the newest activity that is no rehearsal.
-  const x = state.x ?? (listing.experiments.find(experiment => !experiment.rehearsal) ?? listing.experiments[0])?.id ?? null;
-  if (state.x === null && x !== null) { state.x = x; writeHash(); }
+  // With no experiment named the page is the list alone, at its whole width; with one, the list is the column
+  // beside it. Each keeps its own place.
+  const x = state.x, wasHome = atHome();
+  if (wasHome !== (x === null)) { scrollAt[wasHome ? 'home' : 'side'] = $('list').scrollTop; document.body.classList.toggle('home', x === null); lines.clear(); }
   // An experiment that is a transcript alone opens as that text, and one without a transcript never does.
   // And one without a world file to draw from has no map.
-  const view = textOnly(x) ? 't' : found(x) !== null && ((state.v === 't' && !found(x).texts.length) || (state.v === 'm' && !found(x).map)) ? 'f' : state.v;
-  if (view !== state.v) { state.v = view; writeHash(); }
+  // One that is not there has nothing but the sentence that says so.
+  const view = textOnly(x) ? 't' : (x !== null && found(x) === null) || (found(x) !== null && ((state.v === 't' && !found(x).texts.length) || (state.v === 'm' && !found(x).map))) ? 'f' : state.v;
+  if (view !== state.v) { state.v = view; writeAddress(); }
   // A stretch is shown by itself when the link says so and the experiment has it; else the side is its whole world.
   const alone = sidesOf(state), sA = alone.a !== null && stretchNames(x).includes(alone.a) ? alone.a : null, sB = alone.b !== null && stretchNames(state.cmp).includes(alone.b) ? alone.b : null;
   let opened = false;
@@ -1247,6 +1367,7 @@ const sync = moved => {
   $('filters').hidden = state.v !== 'f';
   $('follow').parentElement.hidden = state.v !== 'f' && state.v !== 'm';
   renderChips(); renderList(); showTop(); showFresh();
+  if (wasHome !== atHome()) { $('list').scrollTop = scrollAt[atHome() ? 'home' : 'side']; drawList(); }
   for (const one of sides) for (const part of one.parts) showMark(part);
   numbersStale = true; countsStale = true; stripStale = true;
   runSearch();
@@ -1259,7 +1380,7 @@ const sync = moved => {
   if (state.v === 'f' && !opened && (moved || viewWas !== 'f')) { if (follow) bottom(); else stand(state.s, state.t); }
   viewWas = state.v;
 };
-const choose = id => { if (id === state.x) return; Object.assign(state, { x: id, s: null, solo: false, t: null, ch: null }); if (state.cmp === id) Object.assign(state, { cmp: null, cs: null }); writeHash(true); sync(); };
+const choose = id => { if (id === state.x) return; Object.assign(state, { x: id, s: null, solo: false, t: null, ch: null }); if (state.cmp === id) Object.assign(state, { cmp: null, cs: null }); writeAddress(true); sync(); };
 // Beside another experiment each side is its whole world, unless the open one is a stretch by itself already; an
 // experiment beside itself is one of its stretches against another.
 const compareWith = id => {
@@ -1267,12 +1388,12 @@ const compareWith = id => {
   else if (id === A.x) { const mine = standing() ?? stretchNames(id)[0] ?? null; Object.assign(state, { cmp: id, s: mine, cs: stretchNames(id).find(name => name !== mine) ?? null, step: 0 }); }
   else Object.assign(state, { cmp: id, s: A.s, cs: null, step: 0 });
   state.t = null;
-  writeHash(true); sync();
+  writeAddress(true); sync();
 };
-const toggle = (key, id) => { state[key] = state[key].includes(id) ? state[key].filter(other => other !== id) : [...state[key], id]; writeHash(); renderChips(); applyFilters(true); };
-const clearFilters = () => { Object.assign(state, { who: [], place: [], q: '', only: false }); $('q').value = ''; $('q-only').checked = false; writeHash(); renderChips(); runSearch(); };
-const setView = view => { state.v = view; writeHash(); sync(); };
-const flip = key => { state[key] = !state[key]; writeHash(); sync(); };
+const toggle = (key, id) => { state[key] = state[key].includes(id) ? state[key].filter(other => other !== id) : [...state[key], id]; writeAddress(); renderChips(); applyFilters(true); };
+const clearFilters = () => { Object.assign(state, { who: [], place: [], q: '', only: false }); $('q').value = ''; $('q-only').checked = false; writeAddress(); renderChips(); runSearch(); };
+const setView = view => { state.v = view; writeAddress(); sync(); };
+const flip = key => { state[key] = !state[key]; writeAddress(); sync(); };
 
 // ---- Theme and face: the system's theme until the switch is used; the choice stays in this browser.
 const THEMES = Object.entries(TXT.themes);
@@ -1292,7 +1413,26 @@ $('b-clear').addEventListener('click', clearFilters);
 $('v-feed').addEventListener('click', () => setView('f'));
 $('v-story').addEventListener('click', () => setView('s'));
 $('v-text').addEventListener('click', () => setView('t'));
-$('narrow').addEventListener('input', () => { narrowBy = $('narrow').value.trim(); renderList(); });
+// The list's row of filters, the heads of its columns, the line of the rehearsals, and the way back to it.
+$('f-words').addEventListener('input', () => { finder.words = $('f-words').value.trim(); listChanged(); });
+$('f-least').addEventListener('input', () => { const least = Number($('f-least').value); finder.least = Number.isInteger(least) && least > 0 ? least : 0; listChanged(); });
+$('f-since').addEventListener('change', () => { finder.since = /^\d{4}-\d\d-\d\d$/.test($('f-since').value) ? $('f-since').value : ''; listChanged(); });
+$('f-kind').addEventListener('change', () => { finder.kind = $('f-kind').value; listChanged(); });
+$('f-rehearsals').addEventListener('click', () => { finder.rehearsals = !finder.rehearsals; listChanged(); });
+$('f-clear').addEventListener('click', () => { Object.assign(finder, { words: '', least: 0, since: '', kind: '' }); showFilters(); listChanged(); });
+for (const [key, name] of COLUMNS) {
+  const head = el('button', key === 'requests' || key === 'residents' ? 'num' : '', TXT[name]);
+  head.type = 'button'; head.id = `h-${key}`; head.title = TXT.orderTitle(TXT[name]);
+  head.addEventListener('click', () => { if (finder.order === key) finder.reverse = !finder.reverse; else Object.assign(finder, { order: key, reverse: false }); listChanged(); });
+  $('list-head').append(head);
+}
+for (const [value, name] of [['', TXT.kindAny], ['world', TXT.shapes.world], ['run', TXT.shapes.run], ['transcript', TXT.shapes.text]]) { const option = el('option', '', name); option.value = value; $('f-kind').append(option); }
+$('b-list').addEventListener('click', toList);
+let listFrame = 0, listKept = 0;
+$('list').addEventListener('scroll', () => { if (!listFrame) listFrame = requestAnimationFrame(() => { listFrame = 0; drawList(); }); clearTimeout(listKept); listKept = setTimeout(keepList, 300); });
+new ResizeObserver(() => drawList()).observe($('list'));
+// The other language: the page remembers it and starts anew in it.
+for (const button of document.querySelectorAll('.b-lang')) { button.textContent = TXT.otherLang; button.title = TXT.otherLangTitle; button.addEventListener('click', () => { stored('sagents-lab-lang', LANG === 'ru' ? 'en' : 'ru'); location.reload(); }); }
 $('v-numbers').addEventListener('click', () => setView('n'));
 $('v-map').addEventListener('click', () => setView('m'));
 $('follow').addEventListener('change', () => setFollow($('follow').checked));
@@ -1307,28 +1447,37 @@ $('stretch').addEventListener('change', () => {
   $('stretch').blur();
   Object.assign(state, { s: name, t: null });
   if (state.v !== 'f') state.v = 'f';
-  writeHash(true);
+  writeAddress(true);
   if (alone) sync(); else { sync(); stand(name, null); }
 });
 $('solo').addEventListener('change', () => {
   if ($('solo').checked) Object.assign(state, { s: standing() ?? state.s ?? stretchNames(A.x)[0] ?? null, solo: !comparing() });
   else { state.solo = false; if (comparing()) state.s = null; }
-  writeHash(true); sync();
+  writeAddress(true); sync();
 });
 let typing = null;
-$('q').addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(() => { state.q = $('q').value; writeHash(); runSearch(); }, 140); });
+$('q').addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(() => { state.q = $('q').value; writeAddress(); runSearch(); }, 140); });
 $('q').addEventListener('keydown', event => {
-  if (event.key === 'Enter') { event.preventDefault(); clearTimeout(typing); if (state.q !== $('q').value) { state.q = $('q').value; writeHash(); runSearch(); } toHit(event.shiftKey ? -1 : 1); }
+  if (event.key === 'Enter') { event.preventDefault(); clearTimeout(typing); if (state.q !== $('q').value) { state.q = $('q').value; writeAddress(); runSearch(); } toHit(event.shiftKey ? -1 : 1); }
   else if (event.key === 'Escape') { event.preventDefault(); $('q').blur(); scroller.focus(); }
 });
 $('q-next').addEventListener('click', () => toHit(1));
 $('q-prev').addEventListener('click', () => toHit(-1));
-$('q-only').addEventListener('change', () => { state.only = $('q-only').checked; writeHash(); applyFilters(true); });
+$('q-only').addEventListener('change', () => { state.only = $('q-only').checked; writeAddress(); applyFilters(true); });
 // The keys go by their place on the keyboard, so that they work in a Russian layout too.
 addEventListener('keydown', event => {
   if (event.ctrlKey || event.metaKey || event.altKey || $('help').open) return;
   if (event.target instanceof Element && event.target.closest('input, select, textarea')) return;
   const code = event.code, stepBy = by => { const all = shownItems(); if (!all.length || state.v !== 'f') return; if (follow) setFollow(false); const at = itemAt(scroller.scrollTop + headRoom() + 1), next = all[Math.max(0, Math.min(all.length - 1, at + by))]; pinTo(next.el); noteTop(); };
+  // At the list the keys of an experiment's page do nothing: the search goes to the box of words.
+  if (atHome()) {
+    if (code === 'Slash' && !event.shiftKey || code === 'NumpadDivide') { $('f-words').focus(); $('f-words').select(); }
+    else if (code === 'Slash' && event.shiftKey) $('help').showModal();
+    else if (code === 'KeyT') nextTheme();
+    else return;
+    event.preventDefault();
+    return;
+  }
   const experimentBy = by => { const at = ordered.findIndex(experiment => experiment.id === A.x), next = ordered[at === -1 && by < 0 ? ordered.length - 1 : at + by]; if (next) choose(next.id); };
   if (code === 'Slash' && !event.shiftKey || code === 'NumpadDivide') { $('q').focus(); $('q').select(); }
   else if (code === 'Slash' && event.shiftKey) $('help').showModal();
@@ -1353,11 +1502,14 @@ addEventListener('keydown', event => {
   else return;
   event.preventDefault();
 });
-addEventListener('hashchange', () => { readHash(); sync(true); });
-addEventListener('popstate', () => { readHash(); sync(true); });
+addEventListener('popstate', () => { readAddress(); sync(true); });
+addEventListener('storage', event => { if (event.key === 'sagents-lab-key' || event.key === null) { keyNow(); refreshList(); } });
 
 setTheme(stored('sagents-lab-theme') ?? '');
 setFace(stored('sagents-lab-face') ?? 'serif');
-readHash();
+readAddress();
+// What the page keeps for itself, the language of the address among it, leaves the address.
+history.replaceState(null, '', addressOf(state, null, finder));
+document.body.classList.toggle('home', state.x === null);
 refreshList();
 setInterval(refreshList, 2500);

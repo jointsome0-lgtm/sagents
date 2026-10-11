@@ -17,14 +17,24 @@ const en = {
   // The feed and its marks.
   onlyStretch: 'only this stretch', toChapterTitle: 'Read the chapter that retells this stretch', aloneTitle: 'Open this stretch by itself, without the rest of the world',
   eventsN: n => `events ${n}`, loading: 'loading…', chapterLink: (n, title) => `chapter ${n}${title ? ` · ${title}` : ''} →`, fresh: n => `↓ new: ${n}`, shown: (n, all) => `shown ${n} of ${all}`,
-  emptyFiltered: 'No event passes these filters.', emptyGone: 'There is no such experiment here.', emptyNone: 'No events yet.', countOf: (at, all) => `${at} of ${all}`, noHits: 'none',
+  emptyFiltered: 'No event passes these filters.', emptyGone: id => `The lab has no experiment «${id}» under its roots.`, toList: 'To the list of experiments', emptyNone: 'No events yet.', countOf: (at, all) => `${at} of ${all}`, noHits: 'none',
   // The list of experiments.
-  oneRun: 'one run directory', running: 'running', compare: 'compare', sideA: 'A', sideB: 'B', sideBoth: 'A and B', residents: 'residents', world: 'world', clock: 'clock',
-  stretches: 'stretches', events: 'events', requests: 'requests', chapters: 'chapters', cmpRemove: 'remove the comparison', cmpStretches: 'compare stretches', cmpWithOpen: 'compare with the open one',
-  narrow: 'Narrow by a part of a name', rehearsals: n => `rehearsals: ${n}`, rehearsal: 'rehearsal', textOnly: 'transcript only', noMatch: 'No experiment has this in its name.',
+  oneRun: 'one run directory', running: 'running', sideA: 'A', sideB: 'B', sideBoth: 'A and B', world: 'world',
+  events: 'events', requests: 'requests', cmpRemove: 'remove the comparison', cmpStretches: 'compare stretches', cmpWithOpen: 'compare with the open one',
+  rehearsal: 'rehearsal', textOnly: 'transcript only', noMatch: 'No experiment passes these filters.', onlyRehearsals: 'Everything here is a rehearsal: the line above shows them.', emptyRoot: 'no runs in this folder',
+  // The list as the whole page: its filters, its columns and its counts.
+  fWords: 'Words of a name, a folder, a world or a model', fWordsTitle: 'Every word has to be in the entry’s path, its name, the title of its world or a model that its requests record ( / )',
+  fLeast: 'requests, at least', fSince: 'written since', fKind: 'kind', kindAny: 'any', shapes: { world: 'world', run: 'run', text: 'transcript' }, fClear: 'clear the filters',
+  shownOf: (shown, all) => `${shown} of ${all} shown`, rehearsalsHidden: n => `rehearsals hidden: ${n}, show them`, rehearsalsHide: 'hide the rehearsals', requestsOf: n => `${n} req.`,
+  cName: 'name', cKind: 'kind', cWritten: 'last written', cRequests: 'requests', cTime: 'story time', cCast: 'residents', cModel: 'model', orderTitle: name => `Order by this column, ${name}; a second click turns the order round`,
+  wholeList: '← the list', wholeListTitle: 'The whole list of experiments, as it was left', otherLang: 'RU', otherLangTitle: 'Русский: the page in Russian',
+  // The page without the lab's key, or with the key of an earlier start.
+  lockTitle: 'The lab’s data is closed to this page', noKey: 'This browser was never given the key that the lab makes at its start, so the page shows nothing.',
+  oldKey: 'The lab stopped or no longer accepts this page’s key, so the page dropped it and shows nothing.',
+  lockDo: 'Open the address that the lab’s start handed its browser. Or stop the original lab and repeat its original command, with the same directories and options, adding --no-open. Open the address it prints in this browser.', lockAfter: 'After that every address of the lab opens in this browser, this one too.',
   listEmpty: 'No experiments under the lab’s roots yet: a directory with world.json, a file *.events.jsonl or a transcript is waited for.', sideLabel: 'Experiments of the lab', bSide: 'List of experiments (E)',
   // The top of the page.
-  wholeWorld: 'the whole world', noLink: 'no connection', notGrowing: 'not growing', noLinkTitle: 'The server does not answer: it was stopped, or started again at another address.',
+  wholeWorld: 'the whole world', noLink: 'no connection', noLinkTitle: 'The server does not answer: it was stopped, or started again at another address.',
   growingTitle: 'A file of the run grew in the last seconds.', loaded: (ready, all) => `stretches loaded ${ready} of ${all}`, fromCache: 'from cache', answer: 'answer', keyTitle: key => `Key ${key}`,
   stretchTitle: 'A stretch of the run: in the feed of a world it goes to where the stretch begins', soloTitle: 'Show this one stretch, without the rest of the world', solo: 'only the stretch',
   clockTitle: 'The story clock at the lowest event in the window', feed: 'Feed', feedTitle: 'Feed', story: 'Story', storyTitle: 'Story: the narrator’s chapters (S)', numbers: 'Numbers', numbersTitle: 'Numbers (N)',
@@ -75,12 +85,20 @@ const ru = {
   why: { to: 'обращено к', heard: 'слышит', body: 'касается' },
   onlyStretch: 'только этот отрезок', toChapterTitle: 'Читать главу, в которой пересказан этот отрезок', aloneTitle: 'Открыть этот отрезок отдельно, без остального мира',
   eventsN: n => `событий ${n}`, loading: 'загружается…', chapterLink: (n, title) => `глава ${n}${title ? ` · ${title}` : ''} →`, fresh: n => `↓ новые: ${n}`, shown: (n, all) => `показано ${n} из ${all}`,
-  emptyFiltered: 'Под эти фильтры не попало ни одного события.', emptyGone: 'Такого эксперимента здесь нет.', emptyNone: 'Событий пока нет.', countOf: (at, all) => `${at} из ${all}`, noHits: 'нет',
-  oneRun: 'одна папка прогона', running: 'идёт', compare: 'сравнить', sideA: 'А', sideB: 'Б', sideBoth: 'А и Б', residents: 'жители', world: 'мир', clock: 'часы',
-  stretches: 'отрезков', events: 'событий', requests: 'запросов', chapters: 'глав', cmpRemove: 'убрать сравнение', cmpStretches: 'сравнить отрезки', cmpWithOpen: 'сравнить с открытым',
-  narrow: 'Часть названия', rehearsals: n => `репетиции: ${n}`, rehearsal: 'репетиция', textOnly: 'только текст', noMatch: 'Ни в одном названии этого нет.',
+  emptyFiltered: 'Под эти фильтры не попало ни одного события.', emptyGone: id => `Эксперимента «${id}» в папках лаборатории нет.`, toList: 'К списку экспериментов', emptyNone: 'Событий пока нет.', countOf: (at, all) => `${at} из ${all}`, noHits: 'нет',
+  oneRun: 'одна папка прогона', running: 'идёт', sideA: 'А', sideB: 'Б', sideBoth: 'А и Б', world: 'мир',
+  events: 'событий', requests: 'запросов', cmpRemove: 'убрать сравнение', cmpStretches: 'сравнить отрезки', cmpWithOpen: 'сравнить с открытым',
+  rehearsal: 'репетиция', textOnly: 'только текст', noMatch: 'Под эти фильтры не попал ни один эксперимент.', onlyRehearsals: 'Здесь одни репетиции: их показывает строка выше.', emptyRoot: 'в этой папке нет прогонов',
+  fWords: 'Слова из названия, папки, мира или модели', fWordsTitle: 'Каждое слово должно быть в пути записи, в её названии, в заголовке её мира или в имени модели из её запросов ( / )',
+  fLeast: 'запросов не меньше', fSince: 'записан не раньше', fKind: 'вид', kindAny: 'любой', shapes: { world: 'мир', run: 'прогон', text: 'текст' }, fClear: 'сбросить фильтры',
+  shownOf: (shown, all) => `показано ${shown} из ${all}`, rehearsalsHidden: n => `скрыто репетиций: ${n}, показать`, rehearsalsHide: 'скрыть репетиции', requestsOf: n => `${n} запр.`,
+  cName: 'название', cKind: 'вид', cWritten: 'записан', cRequests: 'запросов', cTime: 'время истории', cCast: 'жителей', cModel: 'модель', orderTitle: name => `Упорядочить по этой колонке, ${name}; второй щелчок переворачивает порядок`,
+  wholeList: '← список', wholeListTitle: 'Весь список экспериментов, каким он был оставлен', otherLang: 'EN', otherLangTitle: 'English: страница по-английски',
+  lockTitle: 'Данные лаборатории закрыты для этой страницы', noKey: 'Этому браузеру не передавали ключ, который лаборатория создаёт при запуске, поэтому страница ничего не показывает.',
+  oldKey: 'Лаборатория остановлена или больше не принимает ключ этой страницы, поэтому страница удалила его и ничего не показывает.',
+  lockDo: 'Откройте адрес, который лаборатория при запуске передала своему браузеру. Или остановите исходную лабораторию и повторите её исходную команду с теми же папками и параметрами, добавив --no-open. Откройте напечатанный адрес в этом браузере.', lockAfter: 'После этого в этом браузере откроется любой адрес лаборатории, и этот тоже.',
   listEmpty: 'В лаборатории пока нет экспериментов: ждём папку с world.json, файл *.events.jsonl или текст прогона.', sideLabel: 'Эксперименты лаборатории', bSide: 'Список экспериментов (E)',
-  wholeWorld: 'весь мир', noLink: 'нет связи', notGrowing: 'не растёт', noLinkTitle: 'Сервер не отвечает: он остановлен или запущен заново с другим адресом.',
+  wholeWorld: 'весь мир', noLink: 'нет связи', noLinkTitle: 'Сервер не отвечает: он остановлен или запущен заново с другим адресом.',
   growingTitle: 'Файл прогона рос в последние секунды.', loaded: (ready, all) => `загружено отрезков ${ready} из ${all}`, fromCache: 'из кэша', answer: 'ответ', keyTitle: key => `Клавиша ${key}`,
   stretchTitle: 'Отрезок прогона: в ленте мира переносит туда, где он начинается', soloTitle: 'Показать один этот отрезок, без остального мира', solo: 'только отрезок',
   clockTitle: 'Часы истории на нижнем видимом событии', feed: 'Лента', feedTitle: 'Лента', story: 'История', storyTitle: 'История: главы рассказчика (S)', numbers: 'Числа', numbersTitle: 'Числа (N)',
@@ -114,6 +132,7 @@ const ru = {
   focusNote: 'Фокус на героях оставляет то, что они сказали, сделали и записали, что вышло из их дел, что чувствовало их тело, что обращено к ним и что они слышали. Чужие мысли и чужие ощущения при этом скрыты.',
 };
 export const STRINGS = { en, ru };
-// The language of the page: the one chosen when the lab was started (`lang` in the address, `en` or `ru`), and with
+// The language of the page: the one chosen when the lab was started (`language` in the address, `en` or `ru`) or, with
+// none in the address, the one the page remembers of an earlier address; and with
 // none Russian for a browser whose first language is Russian, English for any other.
 export const languageOf = (language, chosen = null) => chosen === 'en' || chosen === 'ru' ? chosen : /^ru(?:-|$)/i.test(String(language ?? '')) ? 'ru' : 'en';

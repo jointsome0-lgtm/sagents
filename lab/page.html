@@ -5,20 +5,39 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>sagents lab</title>
-<link rel="stylesheet" href="app.css">
-<script type="module" src="app.js"></script>
+<link rel="stylesheet" href="/app.css">
+<script type="module" src="/app.js"></script>
 </head>
 <body>
 <aside id="side" data-t-label="sideLabel" aria-label="Experiments of the lab">
   <div class="side-head">
     <h2 data-t="title">sagents lab</h2>
     <span id="root" class="quiet"></span>
+    <button type="button" id="b-list" class="side-only" data-t="wholeList" data-t-title="wholeListTitle">The whole list</button>
+    <button type="button" class="b-lang icon wide-only"></button>
   </div>
-  <div class="side-find"><input type="search" id="narrow" data-t-placeholder="narrow" placeholder="Narrow by a part of a name" autocomplete="off" spellcheck="false"></div>
-  <div id="list"></div>
-  <div id="list-empty" class="quiet pad" hidden></div>
+  <div class="side-find">
+    <input type="search" id="f-words" data-t-placeholder="fWords" data-t-title="fWordsTitle" placeholder="Words of a name, a folder, a world or a model" autocomplete="off" spellcheck="false">
+    <label class="wide-only"><span data-t="fLeast">requests, at least</span> <input type="number" id="f-least" min="0" step="1" inputmode="numeric"></label>
+    <label class="wide-only"><span data-t="fSince">written since</span> <input type="date" id="f-since"></label>
+    <label class="wide-only"><span data-t="fKind">kind</span> <select id="f-kind"></select></label>
+    <span id="f-count" class="quiet"></span>
+    <button type="button" id="f-rehearsals" class="link" hidden></button>
+    <button type="button" id="f-clear" class="link" data-t="fClear" hidden>clear the filters</button>
+  </div>
+  <div id="list">
+    <div id="list-head" class="wide-only"></div>
+    <div id="list-rows"></div>
+    <div id="list-empty" class="quiet pad" hidden></div>
+  </div>
 </aside>
 <div id="shade"></div>
+<div id="locked" class="pad" hidden>
+  <h1 data-t="lockTitle">The lab’s data is closed to this page</h1>
+  <p id="locked-why"></p>
+  <p data-t="lockDo">Stop the original lab and repeat its original command with the same directories and options, adding --no-open. Open the address it prints in this browser.</p>
+  <p class="quiet" data-t="lockAfter">After that every address of the lab opens here.</p>
+</div>
 <main>
   <header id="top">
     <div class="bar">
@@ -39,6 +58,7 @@
         </span>
         <label class="switch" data-t-title="followTitle"><input type="checkbox" id="follow"> <span data-t="follow">follow</span></label>
         <button type="button" id="b-face" class="icon" data-t-title="faceTitle">Aa</button>
+        <button type="button" class="b-lang icon"></button>
         <button type="button" id="b-theme" class="icon">◐</button>
         <button type="button" id="b-help" class="icon" data-t-title="helpTitle">?</button>
       </span>

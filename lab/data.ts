@@ -179,7 +179,9 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   for (const dir of given) if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new LabError(`not a directory: ${dir}`);
   // Each root once, by its real path, under the last part of its path as its name.
   const roots = [...new Set(given.map(dir => realpathSync(dir)))].map(path => ({ path, label: basename(path) || path }));
-  roots.forEach((root, at) => { const same = roots.slice(0, at).filter(other => other.label.replace(/ \(\d+\)$/, '') === root.label).length; if (same) root.label = `${root.label} (${same + 1})`; });
+  roots.forEach((root, at) => { const name = root.label; if (roots.slice(0, at).some(other => other.label === name)) {
+    for (let n = 2; roots.some((other, i) => i !== at && other.label === root.label); n += 1) root.label = `${name} (${n})`;
+  } });
   const paths = roots.map(root => root.path);
   const readTail = (path: string, from = 0) => tail(path, from, paths);
   const readPiece = (path: string, from: number, most: number) => piece(path, from, most, paths);
@@ -189,6 +191,10 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
     try { return readFileSync(file, 'utf8'); } finally { closeSync(file); }
   };
   const modified = (path: string) => statSync(path, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+  // What a path leads to just now: which file, how long and when written. A file that the counts of the list have
+  // read to its end is not opened again while this stays the same, which with thousands of files is most of the
+  // time of a list; a path that leads elsewhere has another stamp and is opened, and checked, as ever.
+  const stampOf = (path: string) => { const stat = statSync(path, { throwIfNoEntry: false }); return stat ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}` : ''; };
 
   // ---- The walk. A path is used only when, with every link in it followed, it is still under its root. A name is
   // never taken from outside to build one: an experiment, a stretch and a transcript are looked up among what the
@@ -231,7 +237,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
         // One world. A stretch without a usage file of its name is counted by every usage file of the directory.
         const all = [...texts.values()].flat(), id = rel('') || basename(root);
         if (where === root) single.world = true;
-        found.push({ id, group: id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : '', name: basename(where), shape: stretches.length || !all.length ? 'world' : 'text', dir: where,
+        found.push({ id, group: id.includes('/') ? id.slice(0, id.lastIndexOf('/')) : prefix, name: basename(where), shape: stretches.length || !all.length ? 'world' : 'text', dir: where,
           stretches: stretches.map(name => stretchOf(name, usageFiles)), texts: stretches.length ? stretches.filter(name => files.has(`${name}.txt`)).map(name => ({ name, path: files.get(`${name}.txt`)! })) : all,
           usage: stretches.length ? [] : usageFiles, worlds: [files.get('world.json')!], covered: false, about: files.get('about.txt') ?? null, story: inner.find(([name]) => name === 'story')?.[1] ?? null });
         return;
@@ -258,11 +264,12 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   const get = (id: string) => walk().found.get(id) ?? null;
 
   // ---- The counts of the list, kept for each file and brought up to date by what the file grew by.
-  const counted = new Map<string, { reader: ReturnType<typeof tail>; events: number; first: Mark | null; last: Mark | null; who: Set<string> }>();
+  const counted = new Map<string, { reader: ReturnType<typeof tail>; stamp: string; events: number; first: Mark | null; last: Mark | null; who: Set<string> }>();
   const eventsCount = (path: string) => {
     let known = counted.get(path);
-    if (!known) counted.set(path, known = { reader: readTail(path), events: 0, first: null, last: null, who: new Set() });
-    for (let more = true; more;) {
+    if (!known) counted.set(path, known = { reader: readTail(path), stamp: '', events: 0, first: null, last: null, who: new Set() });
+    const stamp = stampOf(path);
+    for (let more = known.stamp !== stamp || stamp === ''; more;) {
       const got = known.reader.read(5000);
       if (got.anew) Object.assign(known, { events: 0, first: null, last: null, who: new Set() });
       more = got.more && got.lines.length > 0;
@@ -275,17 +282,19 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
       known.first ??= marks[0];
       known.last = marks.at(-1) ?? known.last;
     }
+    known.stamp = stamp;
     // `from` and `to`: the first and the last moment as story seconds, by the clock and by `at` when it cannot be read.
     const second = (mark: Mark | null): number | null => mark === null ? null : secondsOf(mark.clock) ?? mark.at;
     return { events: known.events, first: known.first, last: known.last, from: second(known.first), to: second(known.last), who: known.who };
   };
   type Tally = Sums & { residents: Map<string, number>; world: Map<string, number> };
-  const usages = new Map<string, { reader: ReturnType<typeof tail>; sums: Tally }>();
+  const usages = new Map<string, { reader: ReturnType<typeof tail>; stamp: string; sums: Tally }>();
   const usageCount = (path: string) => {
     const none = (): Tally => ({ requests: 0, failed: 0, input: 0, cached: 0, output: 0, residents: new Map(), world: new Map() });
     let known = usages.get(path);
-    if (!known) usages.set(path, known = { reader: readTail(path), sums: none() });
-    for (let more = true; more;) {
+    if (!known) usages.set(path, known = { reader: readTail(path), stamp: '', sums: none() });
+    const stamp = stampOf(path);
+    for (let more = known.stamp !== stamp || stamp === ''; more;) {
       const got = known.reader.read(5000);
       if (got.anew) known.sums = none();
       more = got.more && got.lines.length > 0;
@@ -298,6 +307,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
         if (row.model) { const side = row.kind === 'world' || row.kind === 'reply' ? sums.world : sums.residents; side.set(row.model, (side.get(row.model) ?? 0) + 1); }
       }
     }
+    known.stamp = stamp;
     return known.sums;
   };
   const SUMS = ['requests', 'failed', 'input', 'cached', 'output'] as const;
@@ -305,7 +315,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
   // ---- The names of an experiment. A world's are those of its `world.json`. A run's are those of the first world
   // file of its directory whose characters cover everyone its events name: one that names nobody is covered only by
   // the file of its own name.
-  type Read = { names: Names; map: WorldMap; key: string };
+  type Read = { names: Names; map: WorldMap; title: string | null; key: string };
   const worlds = new Map<string, { key: string; read: Read | null }>();
   const worldIn = (path: string) => {
     const stat = statSync(path, { throwIfNoEntry: false });
@@ -313,7 +323,7 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
     const key = `${stat.mtimeMs}:${stat.size}`, known = worlds.get(path);
     if (known?.key === key) return known.read;
     let read: Read | null = null;
-    try { const value: unknown = JSON.parse(readFile(path)), names = namesOf(value), map = mapOf(value); if (names && map) read = { names, map, key }; }
+    try { const value: unknown = JSON.parse(readFile(path)), names = namesOf(value), map = mapOf(value); if (names && map) read = { names, map, title: isObject(value) ? text(value.title) : null, key }; }
     catch (error) { if (!(error instanceof SyntaxError) && !missing(error)) throw error; /* a file that cannot be read gives no names: the ids are shown */ }
     worlds.set(path, { key, read });
     return read;
@@ -385,19 +395,23 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
 
   // Every experiment, the one written to last first: its `group` (the path of its directory under the root), its
   // `shape`, whether it is a `rehearsal` (its name begins with `dry-`, or it has requests and none of them reported a
-  // token), its `about` line, the models of the residents (rows of kind `turn` and `memory`) and of the world
+  // token), its `about` line, the `title` of its world file, `cast`: how many characters that file names, or with no
+  // world file how many its events name, or null with neither, the models of the residents (rows of kind `turn` and `memory`) and of the world
   // (`world`, `reply`), most used first, its `usage` counted once, its stretches in the played order with their
   // counts, the first and the last moment of the story clock (`first`, `last`; `from`, `to` as story seconds),
   // whether a file of theirs was written just now, and `chapter`: the number of the first chapter that retells the
   // stretch, or null. `texts` are its transcripts with their sizes, `story` counts the chapters, and `map` says
   // whether its world file names a place, so that a map of it can be drawn; `mapKey` is the file's modified time
-  // and size, so that the page knows when to ask for it again.
+  // and size, so that the page knows when to ask for it again. `roots` are the names of the roots, which with
+  // several of them begin the ids.
   const list = () => {
     const now = Date.now(), { single, found } = walk();
     const all = [...found.values()].map(one => {
       const story = storyOf(one), retold = (name: string) => story.chapters.find(chapter => chapter.stretches.includes(name))?.n ?? null, files = new Set<string>(one.usage);
       let latest = 0;
-      const stretches = stretchesOf(one).map(({ name, path, usage: paths, text: transcript, own: _own, who: _who, ...counts }) => {
+      const seen = new Set<string>();
+      const stretches = stretchesOf(one).map(({ name, path, usage: paths, text: transcript, own: _own, who, ...counts }) => {
+        for (const id of who) seen.add(id);
         const usage: Sums = { requests: 0, failed: 0, input: 0, cached: 0, output: 0 };
         let changed = modified(path);
         for (const file of paths) { files.add(file); const sums = usageCount(file); for (const key of SUMS) usage[key] += sums[key]; changed = Math.max(changed, modified(file)); }
@@ -414,10 +428,10 @@ export function openLab(dirs: string | string[], { growing = 15000, fresh = 1000
       const texts = one.texts.map(({ name, path }) => { const stat = statSync(path, { throwIfNoEntry: false }); if (!stretches.length) latest = Math.max(latest, stat?.mtimeMs ?? 0); return { name, size: stat?.size ?? 0 }; });
       if (!latest) latest = modified(one.dir);
       const most = (side: Map<string, number>) => [...side].sort((first, second) => second[1] - first[1]).map(([model]) => model), world = worldFor(one);
-      return { id: one.id, group: one.group, name: one.name, shape: one.shape, rehearsal: REHEARSAL.test(one.name) || (usage.requests > 0 && usage.input + usage.output === 0), about: aboutIn(one),
+      return { id: one.id, group: one.group, name: one.name, shape: one.shape, rehearsal: REHEARSAL.test(one.name) || (usage.requests > 0 && usage.input + usage.output === 0), about: aboutIn(one), title: world?.title ?? null, cast: world?.names.characters.length || seen.size || null,
         residents: most(models.residents), world: most(models.world), usage, stretches, texts, story: { chapters: story.chapters.length, modified: story.modified }, map: (world?.map.places.length ?? 0) > 0, mapKey: world?.key ?? null, modified: Math.round(latest), growing: stretches.some(stretch => stretch.growing) };
     });
-    return { single, root: roots.map(root => root.label).join(', '), experiments: all.sort((one, other) => other.modified - one.modified || (one.id < other.id ? -1 : 1)) };
+    return { single, root: roots.map(root => root.label).join(', '), roots: roots.map(root => root.label), experiments: all.sort((one, other) => other.modified - one.modified || (one.id < other.id ? -1 : 1)) };
   };
 
   // One stretch of one experiment, followed: `poll` gives what is new since the last call, as messages in order:

@@ -49,37 +49,66 @@ select { background: var(--panel); border: 1px solid var(--line); border-radius:
 .switch input { margin: 0; accent-color: var(--accent); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--faint)); flex: none; }
 
-/* The list of experiments. */
+/* The list of experiments: the narrow column beside an open experiment, and at `/` (`body.home`) the whole page. */
 #side { flex: none; width: 292px; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 body.noside #side { display: none; }
+body.home #side { display: flex; position: static; flex: 1; width: auto; min-width: 0; border-right: 0; box-shadow: none; }
+body.home main, body.home #shade { display: none; }
+body.home .side-only, body:not(.home) .wide-only { display: none; }
+/* Without the lab's key the page is this one message. */
+body.locked > :not(#locked) { display: none; }
+#locked { max-width: 64ch; font-size: 15px; line-height: 1.5; }
+#locked h1 { font-size: 20px; margin: 0 0 10px; }
+#locked p { margin: 8px 0; }
+.command { font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 8px 0; user-select: all; white-space: pre-wrap; }
 .side-head { padding: 12px 14px 8px; display: flex; align-items: baseline; gap: 8px; }
-#root { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-#list { overflow-y: auto; flex: 1; padding: 0 8px 16px; }
-.exp { border: 1px solid transparent; border-radius: 8px; padding: 8px 8px 8px 10px; margin-bottom: 4px; cursor: pointer; position: relative; }
+#root { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; flex: 1; min-width: 0; }
+#b-list { font-size: 12px; padding: 1px 8px; white-space: nowrap; }
+/* The row of filters: words, the least length, a date, the kind, and how much of the list is shown. */
+.side-find { padding: 0 14px 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+body:not(.home) .side-find { padding: 0 10px 8px; }
+.side-find label { display: inline-flex; align-items: center; gap: 6px; color: var(--soft); font-size: 12px; white-space: nowrap; }
+.side-find input, .side-find select { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font: inherit; }
+#f-words { flex: 1 1 240px; min-width: 0; max-width: 460px; }
+body:not(.home) #f-words { flex-basis: 100%; }
+#f-least { width: 6.5em; }
+#f-count { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.side-find .link { font-size: 12px; text-decoration: underline; }
+/* Only the lines in the window are in the document, each at its place in the height of the whole list. */
+#list { overflow-y: auto; flex: 1; padding: 0 8px; position: relative; }
+#list-rows { position: relative; }
+#list-rows > * { position: absolute; left: 0; right: 0; box-sizing: border-box; margin: 0; }
+#list-head, .exp.wide { display: grid; grid-template-columns: minmax(220px, 2.4fr) 86px 132px 78px minmax(150px, 1.1fr) 74px minmax(140px, 1.3fr); gap: 0 14px; align-items: center; }
+body:not(.home) #list-head { display: none; }
+#list-head { position: sticky; top: 0; z-index: 2; height: 30px; padding: 0 11px 0 13px; background: var(--panel); border-bottom: 1px solid var(--line); }
+#list-head button { border: 0; border-radius: 0; background: none; padding: 0; text-align: left; color: var(--soft); font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+#list-head button:hover, #list-head button.on { color: var(--ink); }
+#list-head button::after { content: attr(data-turn); margin-left: 4px; font-size: 9px; }
+#list-head .num, .exp .num { text-align: right; font-variant-numeric: tabular-nums; }
+.exp { border: 1px solid transparent; border-radius: 6px; cursor: pointer; overflow: hidden; white-space: nowrap; }
+.exp > * { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.exp.wide { padding: 0 10px 0 12px; color: var(--soft); font-size: 12.5px; }
+.exp.slim { padding: 4px 8px 4px 10px; }
 .exp:hover { background: var(--bg); }
 .exp.a { background: var(--tint); border-color: var(--accent); }
 .exp.b { border-color: var(--accent); border-style: dashed; }
-.exp-top { display: flex; align-items: baseline; gap: 6px; }
-.exp-name { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; flex: 1; min-width: 0; }
-.exp-live { color: var(--live); font-size: 11.5px; white-space: nowrap; }
+.c-name { display: flex; align-items: baseline; gap: 6px; }
+.exp-name { font-weight: 600; font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; min-width: 3ch; }
+.exp.slim .exp-name { flex: 1; }
+.exp-live { color: var(--live); font-size: 11.5px; white-space: nowrap; flex: none; }
 .exp-live::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 4px; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .exp-live::before, #live.on::before { animation: none; } }
-.exp-side { font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; }
-.exp-about { margin-top: 2px; color: var(--ink); overflow-wrap: anywhere; }
-.exp-meta { margin-top: 3px; color: var(--soft); font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.exp-meta b { font-weight: 600; color: var(--ink); }
-.exp-cmp { margin-top: 6px; font-size: 12px; padding: 1px 8px; }
-.exp-kind { font-size: 11px; color: var(--soft); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+.exp-side { font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; flex: none; }
+.exp-about { color: var(--soft); overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.exp-meta { margin-top: 2px; color: var(--soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+.exp-cmp { font-size: 12px; line-height: 1.2; padding: 0 6px; flex: none; }
+.exp-kind { font-size: 11px; color: var(--soft); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; flex: none; }
 .exp.dry .exp-name { font-weight: 500; color: var(--soft); }
-/* The list is narrowed by a part of a name; a group is the path of a directory, and its rehearsals are folded. */
-.side-find { padding: 0 10px 8px; }
-#narrow { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
-.grp { display: block; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; margin-top: 6px; padding: 7px 4px 4px; color: var(--soft); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
-.grp:first-child { border-top: 0; margin-top: 0; }
-.grp .n { font-weight: 400; margin-left: 6px; font-variant-numeric: tabular-nums; }
-.fold { display: block; border: 0; background: none; color: var(--soft); font-size: 12px; padding: 2px 10px 6px; }
-.fold:hover, .grp:hover { color: var(--ink); }
+/* A group is the folder of its entries; a click on its head folds it. */
+.grp { display: flex; align-items: center; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; padding: 0 4px; color: var(--soft); font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.grp .n { font-weight: 400; margin-left: 8px; font-variant-numeric: tabular-nums; }
+.grp:hover:not(:disabled) { color: var(--ink); }
 
 /* The top of the reading side. */
 main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }

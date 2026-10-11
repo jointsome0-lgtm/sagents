@@ -27,9 +27,12 @@ checks quotes by their words and keeps its report with findings and bounded refu
 and no writes; it uses the lab's file reader and never opens SQLite. Beside the live mode,
 `src/kept.ts` writes the directory of
 `live --run`: it only makes files where there are none and adds lines to them. `lab/` is `sagents lab`: `data.ts`
-reads the experiments under the directories it is given and writes nothing, `server.ts` serves them on `127.0.0.1`
-under a token, `open.ts` writes the one temporary file that takes the browser there, and the page is the plain
-`page.html`, `app.css`, `app.js`, `strings.js`, `map.js` and `core.js`, which `npm run check` does not check.
+reads the experiments under the directories it is given and writes nothing, `server.ts` serves the page at `/` and
+`/view/<id>` on `127.0.0.1`, usually port 4747. Data under `/data/` needs a key in a header, or in the stream's query.
+`open.ts` writes the one temporary file that takes the browser there with the key after `#`; the page keeps it in
+its origin's storage and removes it from the address. The command prints that first address with `--no-open` or when the system
+opener cannot start or exits unsuccessfully; after a successful exit it prints the address without the key. The page, which holds no
+data, is the plain `page.html`, `app.css`, `app.js`, `strings.js`, `map.js` and `core.js`, which `npm run check` does not check.
 Nothing in `src/` but the command line, `numbers.ts` and the test of `kept.ts` imports from `lab/`, and `lab/` asks
 no model. What may leave the lab is listed in [docs/lab.md](docs/lab.md); keep that list true.
 
@@ -71,7 +74,7 @@ This limit ends a runaway answer early.
 - The key of a chat completions server comes from the environment (`SAGENTS_API_KEY`) and is never printed, logged,
   written to a file or put into an error. Do not open `.env*` files or print the environment. A request to a real
   server costs the owner money: an assistant sends one only when the owner asked for that request.
-- Never print or log tokens, keys, request text or the service's error text. A model's answer goes where its caller asked
+- Never print or log service tokens or keys, request text or the service's error text. A model's answer goes where its caller asked
   for it and nowhere else: `ask` prints it on stdout. A failure is a code in `ModelError`, with the service's own code
   and field name only when they are plain identifiers. A sign-in problem is one of this project's own sentences in
   `SignInError`.

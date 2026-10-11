@@ -30,9 +30,14 @@ sagents numbers <dir>... [--json]
                                the story's time, actions and requests counted from kept files, with no model
 sagents lab [<dir>...] [--port <n>] [--lang <en|ru>] [--no-open]
                                the lab in the browser: the experiments under the directories, or under those that
-                               SAGENTS_LAB names (separated as in PATH), or under the current one; it prints its address
-                               on this computer and opens it unless --no-open is given; Ctrl+C stops it; the page is
-                               in the language of --lang, or of SAGENTS_LAB_LANG, or else of the browser
+                               SAGENTS_LAB names (separated as in PATH), or under the current one; it prints its address,
+                               http://127.0.0.1:4747/ or with another port when --port names one or 4747 is taken, and
+                               asks the system opener to open it with the data key after #; with --no-open or when
+                               the opener cannot start or exits unsuccessfully, the printed address holds the key;
+                               --port 0 lets the system choose;
+                               an experiment is at /view/<its id>; Ctrl+C stops it; the page is in the language of
+                               --lang, or of SAGENTS_LAB_LANG, or else the one it remembers or the browser's;
+                               the first address uses ?language=en or ?language=ru, which the page remembers and removes
 sagents help                   this text
 
 Without the command installed, \`node src/cli.ts\` takes the same arguments.
@@ -120,27 +125,32 @@ else if (command === 'numbers') {
   }
 } else if (command === 'lab') {
   const given = argumentsOf({ port: { type: 'string' }, lang: { type: 'string' }, 'no-open': { type: 'boolean' } }, Infinity);
-  const port = Number(given?.values.port ?? 0);
+  // Without `--port` the lab takes its usual port, or a free one when that is taken.
+  const port = given?.values.port === undefined ? undefined : Number(given.values.port || NaN);
+  // The page's language when it is not to be the browser's: the flag, or without it what the environment names.
   const lang = given?.values.lang ?? (process.env.SAGENTS_LAB_LANG || undefined);
-  if (!given || !(Number.isInteger(port) && port >= 0 && port < 65536)) {
+  if (!given || !(port === undefined || (Number.isInteger(port) && port >= 0 && port < 65536))) {
     console.error(USAGE);
     process.exitCode = 1;
   } else if (lang !== undefined && lang !== 'en' && lang !== 'ru') {
-    console.error('failed: The lab\'s language is `en` or `ru`, by `--lang` or by SAGENTS_LAB_LANG; without either it is the browser\'s.');
+    console.error('failed: The lab\'s language is `en` or `ru`, by `--lang` or by SAGENTS_LAB_LANG; without either it is the remembered language, or else the browser\'s.');
     process.exitCode = 1;
   } else {
     const { LabError } = await import('../lab/data.ts');
     const named = given.positionals.length ? given.positionals : (process.env.SAGENTS_LAB ?? '').split(delimiter).filter(Boolean);
     try {
       const lab = await (await import('../lab/server.ts')).startLab({ dirs: named.length ? named : ['.'], port, log: line => console.error(line) });
-      // The page reads the language query; the server uses only the path.
-      const url = lang === undefined ? lab.url : `${lab.url}?lang=${lang}`;
-      console.log(url);
-      // The URL contains a token that must not enter the process list.
-      // A missing browser is harmless because the URL is already on screen.
-      const opened = given.values['no-open'] === true ? null : (await import('../lab/open.ts')).openInBrowser(url);
+      if (lab.moved) console.error(`port 4747 is taken: the lab is on port ${lab.port}`);
+      // The first address: with the key after `#`, which the page keeps and takes out of the address, and with a
+      // language that was chosen, which the page remembers too.
+      const first = `${lab.url}${lang === undefined ? '' : `?language=${lang}`}#key=${lab.key}`;
+      // The key must stay out of process arguments, which other local users can read.
+      const opened = given.values['no-open'] === true ? null : (await import('../lab/open.ts')).openInBrowser(first);
       process.on('exit', () => opened?.remove());
       for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { void lab.stop().then(() => process.exit(0)); });
+      const handed = opened !== null && await opened.handed;
+      if (!handed) opened?.remove();
+      console.log(handed ? lab.url : first);
     } catch (error) {
       console.error(`failed: ${error instanceof LabError ? error.message : error instanceof Error && 'code' in error && typeof error.code === 'string' ? `cannot listen (${error.code})` : 'unexpected'}`);
       process.exitCode = 1;
