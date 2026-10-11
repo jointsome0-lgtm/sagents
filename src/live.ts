@@ -7,10 +7,10 @@ import type { Record, State, Store } from './journal.ts';
 import { idle, oldest, readMemory, sameScript } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { LAWS } from './laws.ts';
-import { closed } from './reading.ts';
+import { closed, isObject } from './reading.ts';
 import { next, readAction, waysOf, sleepersNear } from './action.ts';
 import { labelsOn, readReply, readResult, refusal } from './answer.ts';
-import type { Answer, Rejected } from './answer.ts';
+import type { Allowed, Answer, Rejected } from './answer.ts';
 import { all, MAX_IN_PLACE, MAX_MOVES, MAX_ON_PERSON, MAX_SETS, MAX_STOCK, NAME_WORDS, RECORD, shown, SINKS, sought, written } from './things.ts';
 import type { Thing } from './things.ts';
 import { FORCES, KINDS, MAX_TOUCHES, NONE } from './touch.ts';
@@ -22,9 +22,9 @@ import { CHARS_PER_WORD, GESTURE_WORDS, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_TRAC
 import type { Event, Person, Place, World } from './world.ts';
 
 // Journal records contain private text; resident requests may include only their owner's sheet, memory and perceived events.
-const residentInstructionsOf = (traces: boolean) => `You are one person in a story that several people live through together. You are that person and not a narrator.
+const residentInstructionsOf = (traces: boolean, oneSchema = false) => `You are one person in a story that several people live through together. You are that person and not a narrator.
 
-Each turn you take exactly one action and answer with one JSON object. Every field is there; a field the action does not use is null.
+Each turn you take exactly one action and answer with one JSON object. Every field is there; a field the action does not use is null.${oneSchema ? '\n- memory: null unless the turn asks you to rewrite your memory.' : ''}
 - note: with any action, and written before you choose it, a private line you keep for yourself: not a plan, but what is going on in you right now, what you notice in those with you, what your body feels, what you want and, when something holds you back, what it is. Nobody else ever reads it. Null when you have none.
 - say: you speak \`text\` aloud. Everyone in your place hears it. With \`to\`, the id of one of the people of the place that a turn lists, you speak to that person, who may answer.
 - call: you speak \`text\` to one person, \`to\` (that person's id), by the world's means of remote contact, if it has one. That person hears it wherever they are, and those in your place hear your half.
@@ -63,17 +63,40 @@ const FELT = 'A line that begins `You feel:` is what your own body tells you, an
 const TOUCH_TOLD = 'A line `You touch …` or `… touches you` is a touch that holds now between you and someone here: its kind, how hard, for how long, and with what and where. It lasts until one of the two lets go, by a do, or leaves the place, so nobody has to renew it.';
 const MARK_TOLD = 'A line like `Your back (burn, strong): …` is a feeling that stays in that part of your body: what kind it is, how strong it is now, and where exactly and what it is like. It is told again on every turn, as it then is, until something that is done to it or time changes it, and nobody else is told it.';
 const instructionsOf = (world: World) => {
-  let text = residentInstructionsOf(traced(world)).replace(FELT, [FELT, ...(world.touch ? [TOUCH_TOLD] : []), ...(world.marks ? [MARK_TOLD] : [])].join(' '));
+  let text = residentInstructionsOf(traced(world), world.oneSchema).replace(FELT, [FELT, ...(world.touch ? [TOUCH_TOLD] : []), ...(world.marks ? [MARK_TOLD] : [])].join(' '));
   if (world.vehicles?.length) text = text.replace('\n- do:', `\n${vehicleRule(world)}\n- do:`);
   return text;
 };
 
+const ordered = (list: string[]) => [...new Set(list)].sort((a, b) => {
+  const left = /^([mt])(\d+)$/.exec(a), right = /^([mt])(\d+)$/.exec(b);
+  const first = left?.[1] ?? a, second = right?.[1] ?? b;
+  if (first !== second) return first < second ? -1 : 1;
+  if (left && right) {
+    const difference = BigInt(left[2]) - BigInt(right[2]);
+    if (difference) return difference < 0n ? -1 : 1;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+});
 const text = { type: ['string', 'null'] };
 // Writing the note first lets it lead the action choice.
-const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['note', 'action', 'text', 'to', 'place', 'seconds', 'until', 'gesture', 'says'],
-  properties: { note: text, action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: { ...text, enum: [...world.places.map(place => place.id), ...(world.vehicles ?? []).map(place => place.id), null] },
+const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: [...(world.oneSchema ? ['memory'] : []), 'note', 'action', 'text', 'to', 'place', 'seconds', 'until', 'gesture', 'says'],
+  properties: { ...(world.oneSchema ? { memory: text } : {}), note: text, action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: { ...text, enum: [...world.places.map(place => place.id), ...(world.vehicles ?? []).map(place => place.id), null] },
     seconds: { type: ['integer', 'null'] }, until: text, gesture: text, says: text } });
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
+
+// Replay reads the stored action without the response-only memory field.
+const readTurn = (world: World, actor: Person, answer: string, state: State) => {
+  if (world.oneSchema) {
+    let value: unknown;
+    try { value = JSON.parse(answer); } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      return 'json' as const;
+    }
+    if (!isObject(value) || value.memory !== null) return 'json' as const;
+  }
+  return readAction(world, actor, answer, state.people, state.things);
+};
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
 const tagged = ({ id, name }: { id: string; name: string }) => `${name} (${id})`;
@@ -108,8 +131,21 @@ You are ${tagged(self)}.
 ${self.sheet}${self.looks === null ? '' : `\nHow you look: ${self.looks}`}`;
 };
 
-const known = (mind: Mind, lines: Line[]) => [...(mind.long ? ['What you remember:', mind.long, ''] : []),
-  ...(lines.length ? [mind.long ? 'Since then:' : 'So far:', ...lines.map(line => line.text), ''] : [])];
+const BLOCK_LINES = 40;
+const known = (system: string, mind: Mind, lines: Line[], last: string, stableFirst: boolean) => {
+  if (!stableFirst) return { system, messages: [{ role: 'user' as const, content: [
+    ...(mind.long ? ['What you remember:', mind.long, ''] : []),
+    ...(lines.length ? [mind.long ? 'Since then:' : 'So far:', ...lines.map(line => line.text), ''] : []), last].join('\n') }] };
+  const parts = mind.long ? [`What you remember:\n${mind.long}\n`] : [];
+  for (let start = 0; start < lines.length; start += BLOCK_LINES) {
+    parts.push([...(start ? [] : [mind.long ? 'Since then:' : 'So far:']),
+      ...lines.slice(start, start + BLOCK_LINES).map(line => line.text)].join('\n'));
+  }
+  parts.push(`${lines.length ? '\n' : ''}${last}`);
+  const fixed = parts.splice(0, (mind.long ? 1 : 0) + Math.floor(lines.length / BLOCK_LINES));
+  return { system: fixed.length ? `${system}\n\n${fixed.join('\n')}` : system,
+    messages: [{ role: 'user' as const, content: parts.join('\n') }] };
+};
 // Aiming at the limit made models overrun and lose the end; put what matters most before the cut.
 // A weak model lost wants placed last and sums and times spelled out in words.
 // This fourth wording was measured on 2026-10-05, on two weak models over 25 rewrites of three synthetic stories each.
@@ -117,7 +153,7 @@ const MEMORY_AIM = 0.85;
 const rewriteOf = (world: World, time: string, waking: boolean) => `${time} This is not a turn and you take no action: ${
   waking ? 'you are waking, and what you lived through before your sleep stays with you only as your memory' : 'much has happened, and its oldest part stays with you only as your memory'}.
 Write your memory anew as one running text of about ${Math.floor(world.longWords * MEMORY_AIM)} words, in the language of your sheet, from what you remember and the lines above. The limit is ${world.longWords} words: a text past it is cut there, and its end is lost. Begin with what you want and what has changed in you, in one or two sentences. Then what will be needed later, with the figures, names and places as the lines give them: what is owed and to whom, what was promised and by when, sums agreed, times set, where a thing was put. Then what you know about people. Leave out passing chores, small talk and the prices of trifles that nothing hangs on. Write sentences, not a list, and do not number them. Write every sum and every time of day in figures, as the lines give it, never in words. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten.
-Answer with one JSON object that has the single field \`memory\`.`;
+Answer with one JSON object that has the single field \`memory\`.${world.oneSchema ? ' Write the memory in `memory`, set `action` to `wait`, and set every other field to null.' : ''}`;
 
 const notationOf = (traces: boolean) => `Every thing here is listed once, under a label like t7. What a thing holds stands in square brackets after it: \`t8 parka [t9 cigarettes ×17; t10 lighter]\`. \`×17\` is how many there are, and a thing with no number is one. Empty brackets mean a thing that can hold others and holds nothing now; a thing with no brackets never holds anything. Under \`Things here\` is what stands or lies in the place. After \`Carries\` is what a person has in their hands or wears, in sight; what is in the brackets of such a thing is in its pockets or inside it, out of sight unless the thing is \`open\`. Marks after a thing: \`fixed\`, a part of the place, never moved; \`open\`, what it holds is in plain sight; \`stock\`, a supply with no count, which taking does not use up; \`food\`, it can be eaten or drunk; \`burns\`, it can burn up; \`fire\`, it can set things alight; \`state\`, how it is now, and in brackets the states it can have. After \`Facts:\`, in the line of the place, is what is true of the place and of the things here and is not seen at once.${
   traces ? ' After `Traces:` is what is on a person\'s body or clothes for now and in plain sight, such as a smear of food, a stain or wet hair, each under a label like m7; it is no thing, and it is never moved.' : ''}`;
@@ -218,8 +254,20 @@ function namedOf(state: State, place: Place, deed: boolean) {
     of: people.map(person => person.id), awake: people.filter(person => !person.asleep).map(person => person.id), finds: lies.filter(thing => thing.hidden).map(thing => thing.label), wakes: sleepersNear(state.people, place).map(person => person.id),
     facts: [...new Set(things.flatMap(thing => thing.facts === null ? [] : [closed(thing.facts)]))] };
 }
+function allowedOf(world: World, state: State, place: Place, deed: boolean): Allowed {
+  const names = namedOf(state, place, deed);
+  const moves = { 'moves.what': names.what, 'moves.to': names.to };
+  return deed ? {
+    ...(world.ways ? { leads: [place.id, ...waysOf(world, state.people, state.people.find(person => person.id === state.deed!.who)!, state.things)] } : {}),
+    finds: names.finds, ...moves, 'sets.what': names.stated, 'sets.state': names.states, 'poses.of': names.of,
+    ...(world.touch ? { 'touches.of': names.of, 'touches.to': names.of } : {}), wakes: names.wakes, 'feels.of': names.awake,
+    ...(world.marks ? { 'lingers.of': names.of } : {}),
+    ...(state.traces ? { 'traces.of': names.of, wipes: labelsOn(state.traces, names.of) } : {}),
+  } : moves;
+}
+const allowedTextOf = (allowed: Allowed) => ['Allowed now:', ...Object.entries(allowed).map(([field, names]) => `${field}: ${JSON.stringify(names)}`)].join('\n');
 // A strict schema may refuse an empty enum.
-const oneOf = (list: string[]) => list.length ? { type: 'string', enum: list } : { type: 'string' };
+const oneOf = (list: string[]) => list.length ? { type: 'string', enum: ordered(list) } : { type: 'string' };
 const entries = (properties: object) => ({ type: 'array', items: { type: 'object', additionalProperties: false, required: Object.keys(properties), properties } });
 // Writing entries before result keeps the words from leading them; both orders passed the 2026-10-05 check on the weak local model.
 // Keep touches after poses and lingers after feels to preserve the measured earlier fields.
@@ -227,20 +275,20 @@ const entries = (properties: object) => ({ type: 'array', items: { type: 'object
 // This port onto main was played on no model.
 const resultSchemaOf = (state: State, place: Place, world: World) => {
   const { touch, marks } = world;
-  const names = namedOf(state, place, true);
-  const properties = { ...(world.ways ? { leads: { type: 'string', enum: [place.id, ...waysOf(world, state.people, state.people.find(person => person.id === state.deed!.who)!, state.things)] } } : {}), search: { type: 'boolean' }, finds: { type: 'array', items: oneOf(names.finds) },
-    moves: entries({ what: oneOf(names.what), n: { type: 'integer' }, to: oneOf(names.to) }), sets: entries({ what: oneOf(names.stated), state: oneOf(names.states) }),
-    poses: entries({ of: oneOf(names.of), text: { type: 'string' } }),
-    ...(touch ? { touches: entries({ of: oneOf(names.of), to: oneOf(names.of), kind: oneOf([...KINDS, NONE]), force: oneOf([...FORCES]), text: { type: 'string' } }) } : {}),
-    wakes: { type: 'array', items: oneOf(names.wakes) }, feels: entries({ of: oneOf(names.awake), text: { type: 'string' } }),
-    ...(marks ? { lingers: entries({ of: oneOf(names.of), zone: oneOf([...ZONES]), kind: oneOf([...MARK_KINDS]), level: oneOf([...LEVELS, NONE]), minutes: { type: ['integer', 'null'] }, text: { type: 'string' } }) } : {}), beyond: text, result: text,
-    ...(state.traces ? { traces: entries({ of: oneOf(names.of), text: { type: 'string' } }), wipes: { type: 'array', items: oneOf(labelsOn(state.traces, names.of)) } } : {}) };
+  const names = namedOf(state, place, true), current = (list: string[]) => world.fixedSchema ? { type: 'string' } : oneOf(list);
+  const properties = { ...(world.ways ? { leads: current([place.id, ...waysOf(world, state.people, state.people.find(person => person.id === state.deed!.who)!, state.things)]) } : {}), search: { type: 'boolean' }, finds: { type: 'array', items: current(names.finds) },
+    moves: entries({ what: current(names.what), n: { type: 'integer' }, to: current(names.to) }), sets: entries({ what: current(names.stated), state: current(names.states) }),
+    poses: entries({ of: current(names.of), text: { type: 'string' } }),
+    ...(touch ? { touches: entries({ of: current(names.of), to: current(names.of), kind: oneOf([...KINDS, NONE]), force: oneOf([...FORCES]), text: { type: 'string' } }) } : {}),
+    wakes: { type: 'array', items: current(names.wakes) }, feels: entries({ of: current(names.awake), text: { type: 'string' } }),
+    ...(marks ? { lingers: entries({ of: current(names.of), zone: oneOf([...ZONES]), kind: oneOf([...MARK_KINDS]), level: oneOf([...LEVELS, NONE]), minutes: { type: ['integer', 'null'] }, text: { type: 'string' } }) } : {}), beyond: text, result: text,
+    ...((world.fixedSchema ? traced(world) : state.traces) ? { traces: entries({ of: current(names.of), text: { type: 'string' } }), wipes: { type: 'array', items: current(world.fixedSchema ? [] : labelsOn(state.traces!, names.of)) } } : {}) };
   return { type: 'object', additionalProperties: false, required: Object.keys(properties), properties };
 };
-const replySchemaOf = (state: State, place: Place) => {
-  const names = namedOf(state, place, false);
+const replySchemaOf = (state: State, place: Place, world: World) => {
+  const names = namedOf(state, place, false), current = (list: string[]) => world.fixedSchema ? { type: 'string' } : oneOf(list);
   return { type: 'object', additionalProperties: false, required: ['reply', 'moves'],
-    properties: { reply: text, moves: entries({ what: oneOf(names.what), n: { type: 'integer' }, to: oneOf(names.to) }) } };
+    properties: { reply: text, moves: entries({ what: current(names.what), n: { type: 'integer' }, to: current(names.to) }) } };
 };
 
 const hereOf = (world: World, state: State, place: Place) => world.characters.flatMap((character, index) => {
@@ -343,18 +391,23 @@ export function requestLimit(world: World): number {
     + place.figures.reduce((sum, figure) => sum + tagged(figure).length + looks(figure) + (withFacts ? (figure.facts?.length ?? 0) + 20 : 0) + 20, 0)));
   const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + SENSED + 900
     + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + laws + local(false) + touches + marks;
-  const resident = system + world.longWords * CHARS_PER_WORD + lines + now + rewriteOf(world, '', true).length + 200;
+  const resident = system + world.longWords * CHARS_PER_WORD + lines + now + Math.max(rewriteOf(world, '', true).length, rewriteOf(world, '', false).length) + 200;
   // Everyone may be in one place; include room for a refusal sentence on the retry.
   const facts = (item: { facts: string | null }) => (item.facts?.length ?? 0) + 40;
   const lore = all([...world.places.flatMap(place => place.things), ...world.characters.flatMap(character => character.carries)]).filter(thing => thing.facts !== null);
   const parted = lore.filter(thing => thing.n !== null || thing.stock);
   const ofThings = lore.reduce((sum, thing) => sum + facts(thing), 0) + (parted.length ? (MAX_IN_PLACE + world.characters.length * MAX_ON_PERSON) * Math.max(...parted.map(facts)) : 0);
+  // Labels can reach the safe-integer boundary in long runs, so their JSON takes up to 20 characters.
+  const allowed = world.fixedSchema ? 600 + 4 * (MAX_IN_PLACE + world.characters.length * MAX_ON_PERSON) * 20
+    + 8 * JSON.stringify(world.characters.map(character => character.id)).length + 2 * JSON.stringify(world.places.map(place => place.id)).length
+    + JSON.stringify(all([...world.places.flatMap(place => place.things), ...world.characters.flatMap(character => character.carries)]).flatMap(thing => thing.states ?? [])).length
+    + (traced(world) ? world.characters.length * MAX_TRACES * 20 : 0) : 0;
   const deed = worldSystemOf(world).length
     + Math.max(...world.places.map(place => tagged(place).length + place.about.length + facts(place) + 40)) + spots
     + MAX_IN_PLACE * RECORD
     + 2 * places.reduce((sum, item) => sum + item.length + 20, 0) + people.reduce((sum, item) => sum + item.length + 12, 0) + 80 + ofThings
     + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + 40, 0)
-    + (RESULT_WORDS + SAID_WORDS + 4 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + told + retold + laws + local(true) + touches + world.characters.length * marks + (world.marks ? 40 : 0) + 1200;
+    + (RESULT_WORDS + SAID_WORDS + 4 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + told + retold + laws + local(true) + touches + world.characters.length * marks + (world.marks ? 40 : 0) + 1200 + allowed;
   const answer = deed + figureInstructionsOf(traced(world)).length - worldTextOf(world).length;
   // Either base request can be longer; cover the larger instruction addition whichever sets the bound.
   const residentText = instructionsOf(world).length - INSTRUCTIONS.length, worldText = worldTextOf(world).length - WORLD_INSTRUCTIONS.length;
@@ -518,10 +571,10 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const judge = { ...(worldPlayer ?? everyone), name: worldPlayer ? worldPlayer.name ?? worldPlayer.model : everyone.name };
   const worldSystem = worldSystemOf(world), figureSystem = `${figureInstructionsOf(traced(world))}\n\n${aboutOf(world)}`;
   // journal.ts accepts only answers the rules have taken.
-  const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null) => {
+  const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null, allowed?: Allowed) => {
     let came: Came | null = null, again = '';
     for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
-      const answer = await ask(judge, 'world', { system, schema, ...owned('world'), messages: [{ role: 'user', content: `${content}${again}` }] }, null, system === figureSystem ? 'reply' : 'world');
+      const answer = await ask(judge, 'world', { system, schema, ...owned('world'), messages: [{ role: 'user', content: `${content}${again}${allowed ? `\n${allowedTextOf(allowed)}` : ''}` }] }, null, system === figureSystem ? 'reply' : 'world');
       if (answer === null) return null;
       // The same words would be declined again, so the world is not asked twice: nothing comes of the deed.
       if (answer === DECLINED) break;
@@ -542,7 +595,8 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const deed = state.deed;
     if (deed?.kind === 'say') {
       const place = world.places.find(item => item.id === deed.place)!;
-      const got = await answered(deed, figureSystem, replySchemaOf(state, place), replyOf(world, state, deed), readReply);
+      const allowed = world.fixedSchema ? allowedOf(world, state, place, false) : undefined;
+      const got = await answered(deed, figureSystem, replySchemaOf(state, place, world), replyOf(world, state, deed), answer => readReply(answer, allowed), allowed);
       if (!got) return outcome;
       await happened({ kind: 'reply', who: deed.who, at: deed.at, figure: deed.to as string, text: got.came?.text ?? null, moves: got.came?.moves ?? [] }, judge.name);
       continue;
@@ -551,11 +605,15 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       const place = world.places.find(item => item.id === deed.place)!, here = state.people.filter(person => person.place === deed.place).map(person => person.id);
       const sleepers = sleepersNear(state.people, place).map(person => person.id), hidden = state.things.places.get(deed.place)!.filter(thing => thing.hidden).map(thing => thing.label);
       const held = world.touch ? touchesIn(state, place.id) : undefined;
+      const allowed = world.fixedSchema ? allowedOf(world, state, place, true) : undefined;
+      const checked = allowed && { ...allowed,
+        ...(world.touch ? { 'touches.kind': [...KINDS, NONE], 'touches.force': [...FORCES] } : {}),
+        ...(world.marks ? { 'lingers.zone': [...ZONES], 'lingers.kind': [...MARK_KINDS], 'lingers.level': [...LEVELS, NONE] } : {}) };
       const lasting = world.marks ? { marks: here.flatMap(id => marksOf(state, id, deed.at)), at: deed.at, end: deed.at + deed.seconds } : undefined;
       const got = await answered(deed, worldSystem, resultSchemaOf(state, place, world), deedOf(world, state, deed), answer => {
-        const came = readResult(answer, sleepers, here, hidden, held, lasting, state.traces ? labelsOn(state.traces, here) : undefined, world.ways ? waysOf(world, state.people, state.people.find(person => person.id === deed.who)!, state.things) : undefined, deed.place);
+        const came = readResult(answer, sleepers, here, hidden, held, lasting, state.traces ? labelsOn(state.traces, here) : undefined, world.ways ? waysOf(world, state.people, state.people.find(person => person.id === deed.who)!, state.things) : undefined, deed.place, checked);
         return came && { ...came, beyond: place.nextDoor.length ? came.beyond : null };
-      });
+      }, allowed);
       if (!got) return outcome;
       await happened({ kind: 'result', who: deed.who, at: deed.at, ...(got.came ?? { text: null, wakes: [], moves: [], sets: [], poses: [], feels: [], beyond: null, search: false, finds: [], ...(held ? { touches: [] } : {}), ...(lasting ? { lingers: [] } : {}),
         ...(state.traces ? { traces: [], wipes: [] } : {}), ...(world.ways ? { goes: null } : {}) }) }, judge.name);
@@ -592,8 +650,8 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     // Fold before a turn to bound its request regardless of the model's choices.
     const folding = actor.asleep ? mind.lines : mind.size > world.shortWords ? oldest(mind, world.shortWords) : null;
     if (folding) {
-      const request = { system, schema: MEMORY_SCHEMA, ...owned('resident', who),
-        messages: [{ role: 'user' as const, content: [...known(mind, folding), rewriteOf(world, nowOf(world, actor, now), actor.asleep)].join('\n') }] };
+      const { system: instructions, messages } = known(system, mind, folding, rewriteOf(world, nowOf(world, actor, now), actor.asleep), world.stableFirst === true);
+      const request = { system: instructions, schema: world.oneSchema ? schema : MEMORY_SCHEMA, ...owned('resident', who), messages };
       // Set aside a readable first memory so a failed retry or a stopped run cannot lose it.
       let memory = null, aside = null, stopped = false;
       for (let attempt = 0; attempt < 2 && !memory; attempt += 1) {
@@ -635,8 +693,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const watched = touches.filter(touch => !mine.includes(touch)).map(touch => `${called(touch.of)} touches ${called(touch.to)} (${touch.kind}): ${closed(touch.text)}`);
     // A body cannot feel how long temporary relief will last.
     const lasting = feltOf(marksOf(state, who, now)).map(({ zone, kind, layers: [{ level, text }] }) => `Your ${zone === 'body' ? 'whole body' : zone} (${kind}, ${level}): ${closed(text)}`);
-    const answer = await ask(player, 'turn', { system, schema, ...owned('resident', who), messages: [{ role: 'user', content: [
-      ...known(mind, mind.lines),
+    const request = known(system, mind, mind.lines, [
       `${nowOf(world, actor, now)} You are in ${tagged(spot)}${spot.vehicle ? spot.vehicle.heading
         ? `, on the way to ${tagged(world.places.find(place => place.id === spot.vehicle!.heading!.to)!)}, ${Math.floor((spot.vehicle.heading.at - now) / 60)} min ${(spot.vehicle.heading.at - now) % 60} s of the drive are left`
         : `, standing at ${tagged(world.places.find(place => place.id === spot.vehicle!.at)!)}${spot.vehicle.route ? `, leaving for ${named(world.places, spot.vehicle.departure!.to)} in ${Math.floor((spot.vehicle.departure!.at - now) / 60)} min ${(spot.vehicle.departure!.at - now) % 60} s` : ''}` : ''}. ${others.length ? 'Here with you:' : spot.figures.length || spot.crowd !== null ? 'None of the people of the list is here with you.' : 'Nobody else is here.'}`,
@@ -649,9 +706,10 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       ...(spot.vehicle ? [] : [`Minutes from here: ${world.places.filter(item => item.id !== place && !item.vehicle).map(item => `${tagged(item)} ${travelSeconds(world, place, item.id) / 60}`).join(', ') || 'there is no other place'}.`]),
       `This turn the \`text\` of a say or a call may hold ${limit} words at most.${
         pause ? '' : ` ${Math.floor((horizon - now) / 60)} min ${(horizon - now) % 60} s of the story are left.`}`,
-    ].join('\n') }] }, who);
+    ].join('\n'), world.stableFirst === true);
+    const answer = await ask(player, 'turn', { system: request.system, schema, ...owned('resident', who), messages: request.messages }, who);
     if (answer === null) return outcome;
-    const action = answer === CUT ? 'long' : answer === DECLINED ? 'declined' : readAction(world, actor, answer, state.people, state.things);
+    const action = answer === CUT ? 'long' : answer === DECLINED ? 'declined' : readTurn(world, actor, answer, state);
     if (typeof action === 'string' && answer !== DECLINED) { if (unusable(player)) return outcome; }
     else if (typeof action !== 'string') invalids.delete(player.name);
     const vehicle = spot.vehicle, drive = vehicle && typeof action !== 'string' && action.action === 'go' && action.place !== vehicle.at

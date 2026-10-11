@@ -53,10 +53,20 @@ const movesOf = (value: unknown): Move[] | null => Array.isArray(value) && value
   && value.every(item => isObject(item) && typeof item.what === 'string' && Number.isSafeInteger(item.n) && typeof item.to === 'string')
   ? value.map(({ what, n, to }) => ({ what, n, to })) : null;
 
+export type Allowed = { [field: string]: string[] };
+const allowedIn = (value: { [key: string]: unknown }, allowed?: Allowed) => !allowed || Object.entries(allowed).every(([field, names]) => {
+  const [key, part] = field.split('.'), items = value[key];
+  if (key === 'leads') return typeof items === 'string' && names.includes(items);
+  return Array.isArray(items) && items.every(item => {
+    const name = part && isObject(item) ? item[part] : part ? undefined : item;
+    return typeof name === 'string' && names.includes(name);
+  });
+});
+
 // Reading does not show whether the rules accept the moves and states: `refusal`, `result` and `reply` find that out.
-export function readResult(answer: string, sleepers: string[], present: string[], hidden: string[], held?: Touch[], lasting?: { marks: Mark[]; at: number; end: number }, labels?: string[], ways?: string[], here?: string): Answer | null {
+export function readResult(answer: string, sleepers: string[], present: string[], hidden: string[], held?: Touch[], lasting?: { marks: Mark[]; at: number; end: number }, labels?: string[], ways?: string[], here?: string, allowed?: Allowed): Answer | null {
   const value = parsed(answer);
-  if (!isObject(value) || (value.result !== null && typeof value.result !== 'string') || (value.beyond !== null && typeof value.beyond !== 'string') || !Array.isArray(value.wakes) || !Array.isArray(value.poses) || !Array.isArray(value.feels)
+  if (!isObject(value) || !allowedIn(value, allowed) || (value.result !== null && typeof value.result !== 'string') || (value.beyond !== null && typeof value.beyond !== 'string') || !Array.isArray(value.wakes) || !Array.isArray(value.poses) || !Array.isArray(value.feels)
     || !Array.isArray(value.sets) || value.sets.length > MAX_SETS) return null;
   const goes = here === undefined ? value.goes : value.leads === here ? null : value.leads;
   if (ways && goes !== null && (typeof goes !== 'string' || !ways.includes(goes))) return null;
@@ -97,9 +107,9 @@ export function readResult(answer: string, sleepers: string[], present: string[]
     ...(labels ? { traces, wipes: labels.filter(label => (wipes as unknown[]).includes(label)) } : {}) };
 }
 
-export function readReply(answer: string): { text: string | null; moves: Move[] } | null {
+export function readReply(answer: string, allowed?: Allowed): { text: string | null; moves: Move[] } | null {
   const value = parsed(answer);
-  if (!isObject(value) || (value.reply !== null && typeof value.reply !== 'string')) return null;
+  if (!isObject(value) || !allowedIn(value, allowed) || (value.reply !== null && typeof value.reply !== 'string')) return null;
   const moves = movesOf(value.moves);
   return moves && { text: line(value.reply, MAX_WORDS) || null, moves };
 }

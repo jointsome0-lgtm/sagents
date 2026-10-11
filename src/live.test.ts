@@ -12,7 +12,7 @@ import { ModelError } from './chatgpt.ts';
 import type { Request } from './chatgpt.ts';
 import { advance, begin, JournalError, memoryStore, replay } from './journal.ts';
 import type { Record } from './journal.ts';
-import { INSTRUCTIONS, runLive, WORLD_INSTRUCTIONS } from './live.ts';
+import { INSTRUCTIONS, requestLimit, runLive, WORLD_INSTRUCTIONS } from './live.ts';
 import { readWorld } from './laws.ts';
 import { readAction } from './action.ts';
 import { readMemory, sameScript } from './memory.ts';
@@ -155,6 +155,43 @@ test('optional hunger leaves old journals alone and keeps fed counts through a s
   } finally { rmSync(directory, { recursive: true }); }
 });
 
+test('fixed schemas reject an out-of-list value before any part of a deed or reply is kept, and retry', async () => {
+  const fixed = readWorld({ title: 'T', about: 'A.', clock: '09:00', fixedSchema: true, ways: true, touch: true, marks: true,
+    places: [{ id: 'hall', name: 'Hall', about: 'H.', figures: [{ id: 'guide', name: 'Guide' }],
+      things: [{ name: 'key' }, { name: 'lamp', states: ['on', 'off'] }, { name: 'coin', hidden: { spot: 'under the mat', minutes: 1 } }] },
+      { id: 'yard', name: 'Yard', about: 'Y.' }],
+    characters: [{ id: 'ada', name: 'Ada', place: 'hall', sheet: 'S', traces: ['dust on the sleeve'] },
+      { id: 'ben', name: 'Ben', place: 'yard', sheet: 'S', traces: ['mud on the boot'] }] });
+  const move = { what: 't1', n: 1, to: 'ada' };
+  const invalid = [{ leads: 'absent' }, { finds: ['t1'] }, { moves: [move, { ...move, what: 't99' }] },
+    { moves: [move, { what: 't2', n: 1, to: 'guide' }] }, { sets: [{ what: 't1', state: 'on' }] }, { sets: [{ what: 't2', state: 'gone' }] },
+    { poses: [{ of: 'ben', text: 'Sits' }] }, { touches: [{ of: 'ben', to: 'ada', kind: 'none', force: 'light', text: '' }] },
+    { touches: [{ of: 'ada', to: 'ben', kind: 'none', force: 'light', text: '' }] }, { wakes: ['ada'] }, { feels: [{ of: 'ben', text: 'Cold' }] },
+    { lingers: [{ of: 'ben', zone: 'hands', kind: 'ache', level: 'faint', minutes: 1, text: 'Aches' }] },
+    { traces: [{ of: 'ben', text: 'paint on the sleeve' }] }, { wipes: ['m2'] },
+    ...['kind', 'force'].map(field => ({ touches: [{ of: 'ada', to: 'ada', kind: 'none', force: 'light', text: '', [field]: 'absent' }] })),
+    ...['zone', 'kind', 'level'].map(field => ({ lingers: [{ of: 'ada', zone: 'hands', kind: 'ache', level: 'faint', minutes: 1, text: 'Aches', [field]: 'absent' }] }))];
+  for (const bad of invalid) {
+    const { sent, respond } = standIn({ ada: [act('do', { text: 'D', seconds: 1 })],
+      world: [left({ leads: 'hall', touches: [], lingers: [], moves: [move], result: 'Rejected', ...bad }), left({ leads: 'hall', touches: [], lingers: [], result: 'Taken' })] });
+    const journal = memoryStore();
+    const outcome = await runLive({ world: fixed, respond, model: 'stand-in', calls: 3, journal, pause: true });
+    assert.deepEqual([outcome.invalid, sent.world.length], [1, 2]);
+    const result = journal.all.at(-1)!.event, state = replay(fixed, journal.all);
+    assert.deepEqual([result.text, result.moved, result.poses, state.things.people.get('ada')], ['Taken', [], [], []]);
+    assert.equal(state.things.places.get('hall')![2].hidden!.spot, 'under the mat');
+    assert.equal(state.traces!.of.get('ben')![0].label, 'm2');
+  }
+  for (const bad of [{ moves: [move, { what: 't3', n: 1, to: 'ada' }] }, { moves: [move, { what: 't2', n: 1, to: 'guide' }] }]) {
+    const { sent, respond } = standIn({ ada: [act('say', { to: 'guide', text: 'Hello' })],
+      world: [JSON.stringify({ reply: 'Rejected', ...bad }), JSON.stringify({ reply: 'Taken', moves: [] })] });
+    const journal = memoryStore();
+    const outcome = await runLive({ world: fixed, respond, model: 'stand-in', calls: 3, journal, pause: true });
+    assert.deepEqual([outcome.invalid, sent.world.length, journal.all.at(-1)!.event.text, journal.all.at(-1)!.event.moved], [1, 2, 'Taken', []]);
+    assert.deepEqual(replay(fixed, journal.all).things.people.get('ada'), []);
+  }
+});
+
 test('a character is sent its own sheet and what it perceived, and nothing else', async () => {
   const { sent, respond } = standIn({
     anna: [act('say', { text: 'RED-WORD is here', note: 'NOTE-ANNA' })],
@@ -193,6 +230,33 @@ This turn the \`text\` of a say or a call may hold 57 words at most. 0 min 57 s 
   assert.match(sent.anna[1].messages[0].content,
     /^So far:\n09:00:00 You say: "RED-WORD is here"\n09:00:00 Your note: NOTE-ANNA\n09:00:00 Clara calls you \(telephone\): "CALL-WORD for you"\n\nNow 09:00:03\./);
   assert.match(sent.dan[0].messages[0].content, /^So far:\n09:00:00 Clara calls Anna \(telephone\): "CALL-WORD for you"\n\nNow 09:00:03\./);
+
+  const remembered = { ...world, shortWords: 10_000, characters: world.characters.map(character => ({ ...character, memory: `MEMORY-${character.id}` })) };
+  const played = [];
+  for (const stableFirst of [false, true]) {
+    const answer = standIn(Object.fromEntries(world.characters.map(({ id }) => {
+      const turns = () => Array.from({ length: 65 }, () => act('wait', { seconds: 1, note: `PRIVATE-${id}` }));
+      return [id, [...turns(), act('sleep', { seconds: 1 }), JSON.stringify({ memory: `REWRITE-${id}` }), ...turns()]];
+    }))), journal = memoryStore();
+    const outcome = await runLive({ world: stableFirst ? { ...remembered, stableFirst: true } : remembered,
+      respond: answer.respond, model: 'stand-in', minutes: 5, calls: 600, journal });
+    assert.equal(outcome.rewrites, 4);
+    for (const { id } of world.characters) {
+      const requests = answer.sent[id];
+      assert.ok(requests.every(request => request.messages.length === 1));
+      for (const { id: other } of world.characters) for (const mark of ['SHEET', 'MEMORY', 'PRIVATE', 'REWRITE']) {
+        assert.equal(JSON.stringify(requests).includes(`${mark}-${mark === 'SHEET' ? other.toUpperCase() : other}`), id === other);
+      }
+      if (stableFirst) {
+        assert.match(requests[0].system!, /\n\nWhat you remember:\nMEMORY-/);
+        assert.ok(requests.some(request => /Since then:\n[^]*Your note: PRIVATE-/.test(request.system!)));
+        assert.ok(requests.some(request => /What you remember:\nREWRITE-/.test(request.system!)));
+      }
+    }
+    played.push({ sent: answer.sent, entries: journal.all, outcome });
+  }
+  assert.deepEqual(played[1].entries, played[0].entries);
+  assert.deepEqual(played[1].outcome, played[0].outcome);
 });
 
 test('speech takes the time of its words, holds its listeners and is cut at the limit; the horizon, calls, tokens and unusable answers end the run', async () => {
@@ -366,6 +430,58 @@ This turn the \`text\` of a say or a call may hold 65 words at most.` }]);
   const lost = journal.all.find(({ record }) => record.kind === 'memory' && record.who === 'dan');
   assert.deepEqual([lost?.event.kind, lost?.event.text, sent.dan.length], ['memory', null, 5]);
   assert.match(sent.dan[4].messages[0].content, /^So far:\n09:01:40 You wake\.\n\nNow 09:01:40\./);
+});
+
+test('one schema refuses a memory on a turn and retries a null rewrite without applying its other fields', async () => {
+  const file = { title: 'A promise', about: 'A quiet room.', clock: '09:00',
+    places: [{ id: 'room', name: 'Room', about: 'A quiet room.' }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'room', sheet: 'SHEET-ANNA', memory: 'An old promise.' }] };
+  for (const setting of [false, null, 'true', 1]) assert.throws(() => readWorld({ ...file, oneSchema: setting }), /`oneSchema` must be true or absent/);
+  for (const waking of [false, true]) {
+    const given = readWorld({ ...file, oneSchema: true, shortWords: waking ? 2000 : 1 });
+    const journal = memoryStore(), sent: { kind: string; request: Request }[] = [];
+    let kind = '', turns = 0, memories = 0;
+    const outcome = await runLive({ world: given, model: 'stand-in', minutes: 2, calls: 10, journal,
+      onAsk: next => { kind = next; }, respond: async request => {
+        sent.push({ kind, request: structuredClone(request) });
+        const answer = kind === 'memory' ? act('do', { memory: ++memories === 1 ? null : 'A kept promise.', text: 'NEVER-APPLY', seconds: 1, note: 'NEVER-KEEP' })
+          : ++turns === (waking ? 3 : 2) ? act('say', { memory: 'NEVER-REMEMBER', text: 'NEVER-SAY' })
+          : act(waking && turns === 2 ? 'sleep' : 'wait', { memory: null, seconds: turns === 1 ? 1 : waking && turns === 2 ? 60 : 600,
+            note: turns === 1 ? 'I remembered a meeting.' : null });
+        return { text: answer, usage: null };
+      } });
+    assert.deepEqual([outcome.status, outcome.invalid, outcome.lost], ['done', 2, 0]);
+    const rewrite = sent.findIndex(item => item.kind === 'memory'), before = sent[rewrite - 1].request, after = sent[rewrite].request;
+    assert.equal(after.system, before.system);
+    assert.equal(JSON.stringify(after.schema), JSON.stringify(before.schema));
+    const schema = after.schema as { required: string[]; properties: { memory: { type: string[] } } };
+    assert.equal(schema.required[0], 'memory');
+    assert.equal(Object.keys(schema.properties)[0], 'memory');
+    assert.deepEqual(schema.properties.memory.type, ['string', 'null']);
+    assert.deepEqual(sent[rewrite + 1].request, after);
+    assert.ok(after.messages[0].content.startsWith(before.messages[0].content.split('\nNow ')[0]));
+    assert.ok(sent.every(({ request }) => (request.system?.length ?? 0) + request.messages.reduce((sum, message) => sum + message.content.length, 0) <= requestLimit(given)));
+    const kept = journal.all.find(({ record }) => record.kind === 'memory')!;
+    assert.equal(kept.event.text, 'A kept promise.');
+    assert.ok(journal.all.some(({ record, event }) => record.kind === 'act' && record.action === 'json' && event.kind === 'wait' && event.seconds === 30));
+    assert.doesNotMatch(JSON.stringify(journal.all), /NEVER-/);
+    assert.deepEqual(replay(given, JSON.parse(JSON.stringify(journal.all))), replay(given, journal.all));
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'sagents-one-schema-'));
+  try {
+    const path = join(directory, 'state.sqlite'), source = JSON.stringify({ ...file, oneSchema: true, ways: true, hunger: true,
+      places: [{ ...file.places[0], things: [{ name: 'bread', food: 80 }, { name: 'water', food: 0, drink: true }] }] });
+    const journal = openState(path, source);
+    try {
+      await runLive({ world: readWorld(JSON.parse(source)), model: 'stand-in', minutes: 1, journal,
+        respond: async () => ({ text: act('wait', { memory: null, seconds: 600 }), usage: null }) });
+    } finally { journal.close(); }
+    const meta = new DatabaseSync(path, { readOnly: true });
+    try { assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '40'); } finally { meta.close(); }
+    const continued = openState(path, source);
+    try { assert.equal([...continued.entries()].length, 1); } finally { continued.close(); }
+    assert.throws(() => openState(path, JSON.stringify(file)), /written by another version/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('a rewrite in another script is asked again, without losing good memories or changing how an unreadable rewrite is lost', async () => {

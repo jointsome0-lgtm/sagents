@@ -75,8 +75,8 @@ test('live --run keeps each start as a stretch of one world that the lab reads, 
 });
 
 // These ways must survive every pause, including one before the rules take the go. The café's byte hashes below
-// were taken with the same stand-in on HEAD, before ways: a silent change would lose a kept run.
-test('ways replay and continue as goes, and a world without ways keeps the requests, events and rows of HEAD', async () => {
+// fix the canonical schemas, request text, events and rows: a silent change would lose a kept run.
+test('ways replay and continue as goes, and a world without ways keeps its requests, events and rows', async () => {
   const act = (action: string, more: object = {}) => JSON.stringify({ note: null, action, text: null, to: null, place: null, seconds: null, until: null, ...more });
   const came = (more: object = {}) => JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], feels: [], beyond: null, result: null, ...more });
   const file = { title: 'Ways', about: 'Two places and a car.', clock: '09:00', ways: true, travelMinutes: 1,
@@ -145,7 +145,7 @@ test('ways replay and continue as goes, and a world without ways keeps the reque
   assert.deepEqual(doors.all.filter(entry => entry.event.transfer).map(entry => [entry.event.at, entry.event.to, entry.event.seconds]), [[2, 'car', 10], [14, 'hall', 10]]);
   assert.equal(replay(world, doors.all).people[0].place, 'hall');
   assert.deepEqual(schema(first.sent.world[0]).required.slice(0, 2), ['leads', 'search']);
-  assert.deepEqual(schema(first.sent.world[0]).properties.leads.enum, ['hall', 'yard', 'car']);
+  assert.deepEqual(schema(first.sent.world[0]).properties.leads.enum, ['car', 'hall', 'yard']);
   assert.deepEqual(schema(aboard.sent.world[1]).properties.leads.enum, ['car', 'hall', 'yard']);
   assert.match(aboard.sent.world[1].messages[0].content, /This vehicle stands at Hall \(hall\)\./);
   const paragraph = 'You are told which place this is and which other places there are. A deed never ends in another place by itself: you say in `leads` where the deed takes the one who does it, and the rules do the rest. Mostly it takes them nowhere else, and `leads` is the id of this place. A part of this place that is not one of the other places, such as a room upstairs, a yard or the ground in front of the door, is this place still, and the pose may say where in the place they now are. When the deed is the way to one of the other places, such as setting off for it on foot, climbing the stairs that lead to it, going in or out through its door, getting into a vehicle that stands here or out of the one they are in, or driving off to it, `leads` is the id of that place, however long the way is: the rules then take the one who does the deed there, in the time the way takes, and the result says only what happens here before they leave. A pose never names another place.';
@@ -161,7 +161,7 @@ test('ways replay and continue as goes, and a world without ways keeps the reque
   assert.equal(refusal.record.kind === 'act' && refusal.record.action, 'full');
   assert.equal(refusal.event.kind, 'wait');
   assert.ok(full.sent.ada[1].messages[0].content.includes(refused(world, 'full')));
-  assert.deepEqual(schema(full.sent.world[0]).properties.leads.enum, ['hall', 'yard', 'car']);
+  assert.deepEqual(schema(full.sent.world[0]).properties.leads.enum, ['car', 'hall', 'yard']);
 
   const riding = readWorld({ ...file, vehicles: [{ ...file.vehicles[0], seats: 2 }] }), ride = memoryStore();
   const driver = standIn({ ada: [act('do', { text: 'Gets into the car', seconds: 2 }), act('wait', { seconds: 3 }), act('do', { text: 'Looks out', seconds: 2 })],
@@ -234,7 +234,7 @@ test('ways replay and continue as goes, and a world without ways keeps the reque
   try {
     const rows = database.prepare('SELECT seq, record, event, by FROM journal ORDER BY seq').all();
     assert.deepEqual([requests.length, events.length, rows.length], [12, 14, 14]);
-    assert.equal(hash(requests), '4fc329b2ca7fba582ac69ba2ea12170e8c246c40d25eee2340452587274e5ff0');
+    assert.equal(hash(requests), '0c8286c60816a3efdfd9c634ae1da40ffb2b5e980e7c2ac9b59d1197a2521f27');
     assert.equal(hash(events), '7c2f25055b0ff2406d780463a5e80cf48ec7093d506abc51ab261d44fd866481');
     assert.equal(hash(rows), 'ec80c90403356a6bc9148d02344020221b79a37ffff45eed8b62e5bac86c1057');
     assert.equal(database.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '18');

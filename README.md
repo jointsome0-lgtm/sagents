@@ -150,7 +150,7 @@ The reader is `readWorld` in `src/laws.ts`, with `readCore` in `src/world.ts`. T
 The tables below list the fields the reader uses. Unknown fields of a world object are ignored; an environment
 refuses unknown fields. Required fields have no default. Text must be nonempty unless its entry allows null.
 Boolean settings use forms such as `"clock": true`, `"open": true`, `"touch": true`, `"marks": true`
-and `"ways": true`; hunger uses `hunger: true`. All numeric settings must be finite. Durations derived from them must fit whole seconds from 1 to
+and `"ways": true`; hunger and fixed schemas use `hunger: true` and `fixedSchema: true`. All numeric settings must be finite. Durations derived from them must fit whole seconds from 1 to
 1,000,000,000,000; this excludes worlds of 0.1.0 with longer durations, over thirty thousand years.
 The check covers settings and derived durations, not seconds accumulated over a long story.
 
@@ -187,7 +187,10 @@ beginning with a letter, unique across those four lists. It cannot be `eaten`, `
 | `touch` | Boolean, default false. | Keeps touches between two people as state. Sleep does not end them; crossing a place's boundary does. |
 | `marks` | Boolean, default false. | Keeps lasting feelings of a body, including temporary relief. It changes no body or ability. |
 | `ways` | Boolean, default false. | Lets the world name a deed's way to another place; the rules then take an ordinary `go`. |
+| `fixedSchema` | Only true or absent, default off. | Keeps deed and figure reply schemas fixed for this world, with the values allowed now in the request text and checked by the engine. |
 | `hunger` | Only true or absent, default off. | Turns on hunger and thirst together. The world must contain a thing with `food` above zero and a thing with `drink: true`, anywhere in its lists. It causes no fainting, illness or death. |
+| `stableFirst` | Boolean, default false. | Moves a resident's memory and closed blocks of recent lines to the instructions. |
+| `oneSchema` | Only true or absent, default off. | Uses one response schema for resident turns and memory rewrites. |
 | `environment` | Name or null, absent for none; 1 to 40 lower-case letters, digits and `-`, first a letter or digit. | `"environment": "<name>"` reads `environments/<name>.json`. The command's choice wins over this name. |
 | `dayStart` | `HH:MM`, default `07:00`; null uses the default. | The daily start from which the first sleep debt is counted. |
 | `tiredHours` | Number above zero, default 16; rounded-up seconds must fit the duration bound. | When tiredness is named to the character and others nearby. |
@@ -434,6 +437,9 @@ would ignore settings and lose their state.
 
 | Condition | Format |
 | --- | --- |
+| `stableFirst` | `43` |
+| `oneSchema` | `40` |
+| `fixedSchema` | `39` |
 | `hunger` | `31` |
 | `ways` | `30` |
 | Any character or figure has `wordsPerMinute` | `29` |
@@ -444,7 +450,7 @@ would ignore settings and lose their state.
 | `vehicles` is present, even empty | `19` |
 | Otherwise | `18` |
 
-Thus vehicles with touch take `21`; a speaker's rate wins over those and loses to ways and hunger.
+Thus vehicles with touch take `21`; a speaker's rate wins over those and loses to ways, hunger and fixed schemas.
 The earlier README reports that files of releases 0.1.0 and 0.1.1 with none of these settings and no `vehicles` still open. Their worlds that
 already had hunger, touch, marks, traces or a speaker's rate have mark `18` and are refused, because those
 releases ignored the setting. It also reports that files written under the earlier order that allowed a turn between simultaneous
@@ -808,6 +814,16 @@ Action records and events have `fromDeed`, the result's sequence number, and nul
 results preserves pauses before departure or during travel. Without ways, requests, records, events, stored
 rows and format stay unchanged.
 
+A world file with `stableFirst: true` uses `known` in `src/live.ts` to append a resident's memory and
+closed blocks of 40 recent lines to the instructions, for turns and memory rewrites. The remaining lines and
+the turn's changing end or the rewrite's question stay in one user message. This is for a provider whose cache
+follows the instructions: their beginning stays whole and grows by a block until the next rewrite.
+
+A world file with `fixedSchema: true` keeps the deed and figure reply schemas fixed for its run. The values
+allowed now come last in the request text; `allowedOf` and `allowedTextOf` in `src/live.ts` list them, and
+`allowedIn` in `src/answer.ts` rejects an answer outside them before anything happens, with the ordinary retry.
+Without the setting, requests, records, events, stored rows and format stay unchanged.
+
 ##### Clock laws
 
 `Law`, `LAWS` and `beginLaws` in `src/laws.ts` give a clock law its settings and checks, state, due record,
@@ -852,6 +868,13 @@ text; the world always gets weather and roof or sky, with instructions to mentio
 meets it. Nothing checks that instruction. Seeded weather is replayable and does not repeat a state consecutively.
 
 ##### Folding memory
+
+A world file with `oneSchema: true` uses the turn schema with `memory` first, a string or null, for both
+turns and rewrites. `schemaOf` and `residentInstructionsOf` in `src/live.ts` give both requests the same
+schema and fixed instructions; `known` puts memory before perceived lines in both. A turn requires null
+memory; a rewrite writes it, sets `action` to `wait` and the rest to null, and only its memory is read.
+`readTurn` in `src/live.ts` and `readMemory` in `src/memory.ts` reject the wrong form with the existing retry.
+Records keep their form. Without the setting, requests and stored rows stay unchanged.
 
 `oldest`, `rewrite` and `idle` in `src/memory.ts` keep short memory as perceived lines with local times, own
 actions and notes, and delivered waiting calls. On waking, everything before sleep is folded; waking and calls
