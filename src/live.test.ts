@@ -148,6 +148,57 @@ test('portions keep lists, fed counts, memories and requests through a stopped r
   }
 });
 
+test('a priced sale and an unpaid refusal survive a kept stop with the same lists, memories, history and next request', async () => {
+  const file = { title: 'Counter', about: 'An invented counter.', clock: '09:00', prices: true, deedEnds: true,
+    stableFirst: true, fixedSchema: true, oneSchema: true,
+    places: [{ id: 'counter', name: 'Counter', about: 'A counter.', clock: true,
+      figures: [{ id: 'seller', name: 'Seller' }], things: [{ name: 'fish', stock: true, food: 200, price: { name: 'euro', n: 6 } },
+        { name: 'drawer', fixed: true, till: true, holds: [{ name: 'euro', money: true, n: 40 }] }] }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'counter', sheet: 'SHEET-ANNA', carries: [{ name: 'euro', money: true, n: 10 }] }] };
+  const world = readWorld(file), source = JSON.stringify(file), sale = { what: 't1', n: 1, to: 'anna' };
+  const script = () => standIn({ anna: [act('say', { memory: null, text: 'One fish.', to: 'seller' }),
+    act('say', { memory: null, text: 'Another fish.', to: 'seller' }), act('wait', { memory: null, seconds: 600 })],
+    world: [JSON.stringify({ reply: 'Here.', moves: [sale] }), JSON.stringify({ reply: 'Here.', moves: [sale] }),
+      JSON.stringify({ reply: 'It costs six.', moves: [] })] });
+  const whole = memoryStore(), full = script();
+  const outcome = await runLive({ world, journal: whole, respond: full.respond, model: 'stand-in', calls: 6, minutes: 100, pause: true });
+  assert.equal(outcome.refused, 1);
+  const directory = mkdtempSync(join(tmpdir(), 'sagents-prices-'));
+  try {
+    const path = join(directory, 'state.sqlite'), split = script();
+    let journal = openState(path, source);
+    try {
+      await runLive({ world, journal, respond: split.respond, model: 'stand-in', calls: 2, minutes: 100, pause: true });
+      const entries = [...journal.entries()], state = replay(world, entries), held = state.things.people.get('anna')!;
+      assert.equal(entries.length, 2);
+      assert.equal(state.things.places.get('counter')![1].holds![0].n, 46);
+      assert.equal(held[0].n, 4);
+      assert.equal(held[1].name, 'fish');
+      assert.equal(held[1].n, 1);
+      assert.equal(Object.hasOwn(held[1], 'price'), false);
+      assert.deepEqual(entries[1].event.moved?.map(move => [move.name, move.n, move.price]), [['fish', 1, undefined], ['euro', 6, true]]);
+      assert.match(linesOf(world, entries[1].event).at(-1)!, / \(price\)$/);
+    } finally { journal.close(); }
+    const meta = new DatabaseSync(path, { readOnly: true });
+    try { assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '47'); } finally { meta.close(); }
+    journal = openState(path, source);
+    try {
+      const outcome = await runLive({ world, journal, respond: split.respond, model: 'stand-in', calls: 4, minutes: 100, pause: true });
+      assert.equal(outcome.refused, 1);
+      const entries = [...journal.entries()], state = replay(world, entries), expected = replay(world, whole.all);
+      assert.deepEqual(entries, whole.all);
+      assert.deepEqual(state, expected);
+      assert.deepEqual(state.things, replay(world, entries.slice(0, 2)).things);
+      assert.deepEqual(state.minds, expected.minds);
+      assert.deepEqual(state.results, expected.results);
+      assert.deepEqual(state.said, expected.said);
+      assert.deepEqual(split.sent, full.sent);
+      assert.match(split.sent.world[2].messages[0].content, /the one who spoke carries less money than the price/);
+      assert.equal(entries.flatMap(entry => entry.event.moved ?? []).filter(move => move.price).length, 1);
+    } finally { journal.close(); }
+  } finally { rmSync(directory, { recursive: true }); }
+});
+
 test('optional hunger leaves old journals alone and keeps fed counts through a stopped run', async () => {
   const file = { title: 'Kitchen', about: 'A quiet kitchen.', clock: '15:30', dayStart: '15:30',
     places: [{ id: 'kitchen', name: 'Kitchen', about: 'A kitchen.', clock: true, things: [

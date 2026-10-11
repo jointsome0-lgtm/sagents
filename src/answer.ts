@@ -124,7 +124,7 @@ const settled = (world: World, people: Person[], things: Things, deed: Event, { 
   }
   const made = settle(deed.onWay ? { ...things, places: new Map(things.places).set(deed.place, []) } : things, deed.place, present,
     new Map([...namesOf(world), ...world.places].map(item => [item.id, item.name])),
-    deed.onWay ? [] : [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do', world.hunger === true, world.portions === true);
+    deed.onWay ? [] : [...(search ? sought(things, deed).found.map(thing => thing.label) : []), ...finds], moves, sets, deed.kind === 'do', world.hunger === true, world.portions === true, world.prices && deed.kind === 'say' ? deed.who : undefined);
   if (deed.onWay && !('code' in made)) made.lists.delete(deed.place);
   return made;
 };

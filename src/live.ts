@@ -22,7 +22,7 @@ import { CHARS_PER_WORD, GESTURE_WORDS, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_TRAC
 import type { Event, Person, Place, World } from './world.ts';
 
 // Journal records contain private text; resident requests may include only their owner's sheet, memory and perceived events.
-const residentInstructionsOf = (traces: boolean, oneSchema = false, deedEnds = false, portions = false) => `You are one person in a story that several people live through together. You are that person and not a narrator.
+const residentInstructionsOf = (traces: boolean, oneSchema = false, deedEnds = false, portions = false, prices = false) => `You are one person in a story that several people live through together. You are that person and not a narrator.
 
 Each turn you take exactly one action and answer with one JSON object. Every field is there; a field the action does not use is null.${oneSchema ? '\n- memory: null unless the turn asks you to rewrite your memory.' : ''}
 - note: with any action, and written before you choose it, a private line you keep for yourself: not a plan, but what is going on in you right now, what you notice in those with you, what your body feels, what you want and, when something holds you back, what it is. Nobody else ever reads it. Null when you have none.
@@ -46,7 +46,7 @@ Each turn also says the weather as it reaches you where you are, what you see of
 
 Speech is heard only in your own place and does not pass a door: a knock or a shout is a do, and the world says whether it is heard in the places next door, which the list of places names. A line \`From …, next door:\` is what you hear of such a deed done there, and it does not say who did it.
 
-A turn may also list people of the place you are in: those around, and some by name with an id. They are not among the people of the list above and cannot be called. They stay where they are and do nothing unless someone speaks to them: to speak to one, say with \`to\`. What one of them answers, everyone in the place hears.
+A turn may also list people of the place you are in: those around, and some by name with an id. They are not among the people of the list above and cannot be called. They stay where they are and do nothing unless someone speaks to them: to speak to one, say with \`to\`. What one of them answers, everyone in the place hears.${prices ? ' What you ask one of them for and get is paid for by the rules when it has a price: the price goes from the money you carry to the till at once, so do not pay again, and without that much money on you, you do not get it.' : ''}
 
 You know only your sheet, what you remember and what you perceived since, which is what a turn lists. Nothing else is known to you. You may keep things to yourself, and you need not say what you want.
 
@@ -63,7 +63,7 @@ const FELT = 'A line that begins `You feel:` is what your own body tells you, an
 const TOUCH_TOLD = 'A line `You touch …` or `… touches you` is a touch that holds now between you and someone here: its kind, how hard, for how long, and with what and where. It lasts until one of the two lets go, by a do, or leaves the place, so nobody has to renew it.';
 const MARK_TOLD = 'A line like `Your back (burn, strong): …` is a feeling that stays in that part of your body: what kind it is, how strong it is now, and where exactly and what it is like. It is told again on every turn, as it then is, until something that is done to it or time changes it, and nobody else is told it.';
 const instructionsOf = (world: World) => {
-  let text = residentInstructionsOf(traced(world), world.oneSchema, world.deedEnds, world.portions).replace(FELT, [FELT, ...(world.touch ? [TOUCH_TOLD] : []), ...(world.marks ? [MARK_TOLD] : [])].join(' '));
+  let text = residentInstructionsOf(traced(world), world.oneSchema, world.deedEnds, world.portions, world.prices).replace(FELT, [FELT, ...(world.touch ? [TOUCH_TOLD] : []), ...(world.marks ? [MARK_TOLD] : [])].join(' '));
   if (world.legMinutes !== undefined) text = text.replace('\n- do:', `\n${walkRule(world)}\n- do:`);
   if (world.vehicles?.length) text = text.replace('\n- do:', `\n${vehicleRule(world)}\n- do:`);
   return text;
@@ -158,7 +158,7 @@ const rewriteOf = (world: World, time: string, waking: boolean) => `${time} This
 Write your memory anew as one running text of about ${Math.floor(world.longWords * MEMORY_AIM)} words, in the language of your sheet, from what you remember and the lines above. The limit is ${world.longWords} words: a text past it is cut there, and its end is lost. Begin with what you want and what has changed in you, in one or two sentences. Then what will be needed later, with the figures, names and places as the lines give them: what is owed and to whom, what was promised and by when, sums agreed, times set, where a thing was put. Then what you know about people. Leave out passing chores, small talk and the prices of trifles that nothing hangs on. Write sentences, not a list, and do not number them. Write every sum and every time of day in figures, as the lines give it, never in words. Write in the past tense, as what has happened up to now. Do not say where you are or what you are doing at this moment: a turn says that. Record a deed as what you did, with its result only where the lines show one. Keep or drop, and add nothing that is not above. What you leave out is forgotten.
 Answer with one JSON object that has the single field \`memory\`.${world.oneSchema ? ' Write the memory in `memory`, set `action` to `wait`, and set every other field to null.' : ''}`;
 
-const notationOf = (traces: boolean, portions = false) => `Every thing here is listed once, under a label like t7. What a thing holds stands in square brackets after it: \`t8 parka [t9 cigarettes ×17; t10 lighter]\`. \`×17\` is how many there are, and a thing with no number is one. ${portions ? '`[empty]` means' : 'Empty brackets mean'} a thing that can hold others and holds nothing now; a thing with no brackets never holds anything. Under \`Things here\` is what stands or lies in the place. After \`Carries\` is what a person has in their hands or wears, in sight; what is in the brackets of such a thing is in its pockets or inside it, out of sight unless the thing is \`open\`. Marks after a thing: \`fixed\`, a part of the place, never moved; \`open\`, what it holds is in plain sight; \`stock\`, a supply with no count, which taking does not use up; \`food\`, it can be eaten or drunk;${portions ? ' `two thirds left` or `a third left`, that much of it is left after someone ate or drank a part;' : ''} \`burns\`, it can burn up; \`fire\`, it can set things alight; \`state\`, how it is now, and in brackets the states it can have. After \`Facts:\`, in the line of the place, is what is true of the place and of the things here and is not seen at once.${
+const notationOf = (traces: boolean, portions = false, prices = false) => `Every thing here is listed once, under a label like t7. What a thing holds stands in square brackets after it: \`t8 parka [t9 cigarettes ×17; t10 lighter]\`. \`×17\` is how many there are, and a thing with no number is one. ${portions ? '`[empty]` means' : 'Empty brackets mean'} a thing that can hold others and holds nothing now; a thing with no brackets never holds anything. Under \`Things here\` is what stands or lies in the place. After \`Carries\` is what a person has in their hands or wears, in sight; what is in the brackets of such a thing is in its pockets or inside it, out of sight unless the thing is \`open\`. Marks after a thing: \`fixed\`, a part of the place, never moved; \`open\`, what it holds is in plain sight; \`stock\`, a supply with no count, which taking does not use up; \`food\`, it can be eaten or drunk;${portions ? ' `two thirds left` or `a third left`, that much of it is left after someone ate or drank a part;' : ''} \`burns\`, it can burn up; \`fire\`, it can set things alight; \`state\`, how it is now, and in brackets the states it can have.${prices ? ' `price 6 euro` is what one of it costs when it is sold, and `till` marks where the money paid for such things is put.' : ''} After \`Facts:\`, in the line of the place, is what is true of the place and of the things here and is not seen at once.${
   traces ? ' After `Traces:` is what is on a person\'s body or clothes for now and in plain sight, such as a smear of food, a stain or wet hair, each under a label like m7; it is no thing, and it is never moved.' : ''}`;
 // The 2026-10-05 check measured A1f, A1 with feels, before thing facts, next-door sound, `wakes` reaching next door
 // and the current feels guidance.
@@ -167,7 +167,7 @@ const notationOf = (traces: boolean, portions = false) => `Every thing here is l
 // `feels`.
 // Two A1 variants with more hints did no better on a weak model, and one did harm.
 // The current wording needs another measurement; the check's harness compares both texts.
-const worldInstructionsOf = (traces: boolean, ways = false, deedEnds = false, portions = false) => `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.${deedEnds ? ' Give only what could come of the time actually spent, leaving unfinished work undone.' : ''}
+const worldInstructionsOf = (traces: boolean, ways = false, deedEnds = false, portions = false, prices = false) => `You are the world of a story: not a person in it and not a narrator. Someone does something, and you say what comes of it.${deedEnds ? ' Give only what could come of the time actually spent, leaving unfinished work undone.' : ''}
 
 You are told what is there, and nothing else exists: a search for something you were not told of finds nothing of the kind. Say what is there as the world itself. Never speak of facts, of what was mentioned or listed, of labels and marks, or of your task.
 
@@ -177,7 +177,7 @@ ${ways ? "You are told which place this is and which other places there are. A d
 
 You may be told which places are next door, behind a door or a thin wall, and who is in each, awake or asleep. Those people are not here: they see nothing of the deed, no entry of \`poses\` or \`feels\` is for them, and what they hear of it goes to \`beyond\`.
 
-${notationOf(traces, portions)}
+${notationOf(traces, portions, prices)}
 
 The lists are the truth about where each thing is, and what an earlier result says of a thing may be out of date. You keep no count and rewrite no list: you say which things the deed moved, by label, and the lists are kept from that. A thing never appears from nowhere and never vanishes: it stays where it is listed unless an entry of yours moves it. A deed that only looks, listens or speaks moves nothing. A deed that needs a thing that is not here moves nothing either, and the result says what was seen of that.${
   traces ? ' The traces listed with a person are the truth in the same way: a person has those and no others, and each stays on that person, wherever they go and however long, unless an entry of yours takes it off.' : ''}
@@ -198,19 +198,20 @@ Answer with one JSON object, its fields in this order.${ways ? "\n- leads: the i
 
 You may be told what is hidden here, each thing under its label. A hidden thing is seen by nobody, and no result, pose or entry of \`feels\` speaks of it or hints at it, whoever looks and wherever, until it is found. It is found in two ways. By a search that has lasted long enough: you are told which things this deed finds if it is a search, and you never decide whether a search has been long enough. Or by a deed that goes straight to the very spot named for it, however short the deed is: its label then goes into \`finds\`. A deed that names another spot, or names the thing and not the spot where it lies, does not go straight to it. When a thing is found either way, the result says where it turned up and what is seen of it, and from then on it lies in the place in sight. Only a deed that finds a hidden thing can move it or what it holds.`;
 export const WORLD_INSTRUCTIONS = worldInstructionsOf(false);
-const figureInstructionsOf = (traces: boolean, portions = false) => `You are the world of a story: not a narrator and not one of the people who live in it. In a place there are people whom nobody plays: those around, and some with a name. Someone has spoken to one of them, and you say what that one answers.
+const figureInstructionsOf = (traces: boolean, portions = false, prices = false) => `You are the world of a story: not a narrator and not one of the people who live in it. In a place there are people whom nobody plays: those around, and some with a name. Someone has spoken to one of them, and you say what that one answers.
 
 You are told what is there, and nothing else exists. The one who answers knows what its own facts say, what anyone in the place sees and hears, and what was said to the people of the place before. It does not know what others carry out of sight or what their facts say: you are told those so that the answer does not go against them. Never speak of facts, of labels and marks, or of your task.
 
-${notationOf(traces, portions)}
+${notationOf(traces, portions, prices)}
 
 The people whom nobody plays carry nothing of their own: what they have at hand is among the things of the place. The lists are the truth about where each thing is. A thing never appears from nowhere and never vanishes: it stays where it is listed unless an entry of yours moves it.
 
 Answer with one JSON object, its fields in this order.
 - reply: what that person says aloud, as such a person would say it, in the language of the world's description, ${MAX_WORDS} words at most. Speech only: no gestures and no thoughts. It answers what was said, briefly, and starts nothing of its own; it does not leave, follow anyone or speak for anyone else. Null when it says nothing.
-- moves: what the one who answers hands over or takes while speaking, or an empty list. An entry has \`what\`, \`n\` and \`to\`. \`what\` is the label of the thing. \`n\` is how many of it go: 1 for a thing with no number; for a thing with a number, the part that goes, or the whole number when all of it goes; for a stock, how many are taken. \`to\` is where it ends up: the id of a person here, in that person's hands or on them; the id of this place; the label of a thing with brackets, in it or on it. A thing goes with all that it holds, as one entry: never list what is inside a thing that moves.`;
+- moves: what the one who answers hands over or takes while speaking, or an empty list. An entry has \`what\`, \`n\` and \`to\`. \`what\` is the label of the thing. \`n\` is how many of it go: 1 for a thing with no number; for a thing with a number, the part that goes, or the whole number when all of it goes; for a stock, how many are taken. \`to\` is where it ends up: the id of a person here, in that person's hands or on them; the id of this place; the label of a thing with brackets, in it or on it. A thing goes with all that it holds, as one entry: never list what is inside a thing that moves.${prices ? ' A thing with a `price` is sold when you move it: list the thing and leave the money for it out, because the rules take its price from the money of the one who spoke and put it in the `till`. When the one who spoke has too little money, your answer is not taken.' : ''}`;
 export const FIGURE_INSTRUCTIONS = figureInstructionsOf(false);
 const CAUSES = {
+  price: 'the one who spoke carries less money than the price of what this answer hands over, and a thing with a `price` is never handed over unpaid: leave it out of `moves`, and let the reply say what it costs and that they do not have that much money with them',
   traces: `a person has ${MAX_TRACES} traces at most: take one off with \`wipes\`, or leave this entry out`,
   what: '`what` is not the label of a thing here',
   hidden: 'it names a hidden thing or what such a thing holds, and nothing in the answer finds that thing',
@@ -230,7 +231,7 @@ const TOUCHES = `- touches: the touches between two people here that the deed be
 // Avoid marks here because the thing notation already uses that word.
 const LINGERS = `- lingers: the feelings of a part of a body that outlast the deed, as the deed began, changed or ended them, or an empty list. What is felt only while the deed lasts stays in \`feels\`; an itch, a burn, an ache, a pain or a numbness that is still there after the deed gets an entry here, and so does one listed under \`Feelings that last now\` when the deed eases, worsens or ends it. An entry has \`of\`, the id of a person here; \`zone\`, the part of the body: ${ZONES.slice(0, -1).map(zone => `\`${zone}\``).join(', ')}, or \`${ZONES.at(-1)}\` for the whole of it; \`kind\`: ${MARK_KINDS.slice(0, -1).map(kind => `\`${kind}\``).join(', ')} or \`${MARK_KINDS.at(-1)}\`; \`level\`: \`${LEVELS[0]}\`, \`${LEVELS[1]}\` or \`${LEVELS[2]}\`, or \`none\` when it is gone; \`minutes\`; and \`text\`: where exactly and what it is like, ${MARK_WORDS} words at most, in the language of the world's description, naming nobody, and empty with \`none\`. There is one entry at most for a person, a zone and a kind. With \`minutes\` null the feeling is so from now on. With \`minutes\`, a whole number from 1 to ${MAX_MINUTES}, it is so for that long after the deed and is then, by itself, again as it was before the entry: a salve makes a burn \`faint\` for some minutes and the burn then returns as it was, and a stubbed toe is a \`pain\` for a minute or two where nothing was and is then gone. A feeling listed under \`Feelings that last now\` needs no entry unless the deed changes it: it stays as listed, and leaving it out does not end it. A deed that does something to the very part of the body where a listed feeling sits changes it, at least for a while, and so its entry is due: a cream spread on a burn, cold water on it, a rub of an aching muscle, a blow on a bruise.`;
 const worldTextOf = (world: World) => [...(world.touch ? [['\n- wakes:', TOUCHES]] : []), ...(world.marks ? [['\n- beyond:', LINGERS]] : [])]
-  .reduce((text, [before, point]) => text.replace(before, `\n${point}${before}`), worldInstructionsOf(traced(world), world.ways, world.deedEnds, world.portions));
+  .reduce((text, [before, point]) => text.replace(before, `\n${point}${before}`), worldInstructionsOf(traced(world), world.ways, world.deedEnds, world.portions, world.prices));
 const aboutOf = (world: World) => `The world: ${world.title}
 ${world.about}${world.facts === null ? '' : `\nFacts: ${world.facts}`}`;
 export const worldSystemOf = (world: World) => `${worldTextOf(world)}\n\n${aboutOf(world)}`;
@@ -404,8 +405,8 @@ export function requestLimit(world: World): number {
   const head = 2 * longest(namesOf(world).map(character => character.name)) + longest(world.places.map(place => place.name)) + (world.remote?.length ?? 0) + SENSED + 140;
   const spots = Math.max(...world.places.map(place => place.things.reduce((sum, thing) => sum + (thing.hidden ? thing.hidden.spot.length + 160 : 0), 0)));
   const holder = Math.max(longest(people), longest(places), NAME_WORDS * CHARS_PER_WORD);
-  const record = RECORD + (world.portions ? ', two thirds left'.length + 'empty'.length : 0);
-  const told = (MAX_MOVES + MAX_SETS) * (NAME_WORDS * CHARS_PER_WORD + 2 * holder + 80) + spots + MAX_IN_PLACE * NAME_WORDS * CHARS_PER_WORD + longest(people) + (world.portions ? MAX_MOVES * 'was eaten or drunk in part by : two thirds of it are left.'.length : 0);
+  const record = RECORD + (world.portions ? ', two thirds left'.length + 'empty'.length : 0) + (world.prices ? 25 + Math.max(0, ...all([...world.places.flatMap(place => place.things), ...world.characters.flatMap(character => character.carries)]).filter(thing => thing.money).map(thing => thing.name.length)) : 0);
+  const told = (MAX_MOVES + MAX_SETS + (world.prices ? MAX_ON_PERSON : 0)) * (NAME_WORDS * CHARS_PER_WORD + 2 * holder + 80) + spots + MAX_IN_PLACE * NAME_WORDS * CHARS_PER_WORD + longest(people) + (world.portions ? MAX_MOVES * 'was eaten or drunk in part by : two thirds of it are left.'.length : 0);
   const lines = (world.shortWords + 4 * (head + MAX_WORDS) + GESTURE_WORDS + head + SAYS_WORDS + head + LIMITS.feels + head + LIMITS.beyond) * (CHARS_PER_WORD + 1) + told;
   const laws = LAWS.reduce((sum, law) => sum + law.size(world), 0);
   const trace = LIMITS.trace * CHARS_PER_WORD + 20, kept = traced(world) ? MAX_TRACES * trace + 20 : 0;
@@ -435,7 +436,7 @@ export function requestLimit(world: World): number {
     + 2 * places.reduce((sum, item) => sum + item.length + 20, 0) + people.reduce((sum, item) => sum + item.length + 12, 0) + 80 + ofThings
     + world.characters.reduce((sum, character) => sum + tagged(character).length + facts(character) + looks(character) + visible + 40, 0)
     + (RESULT_WORDS + SAID_WORDS + 4 * (head + 2 * MAX_WORDS)) * (CHARS_PER_WORD + 1) + told + retold + laws + local(true) + touches + world.characters.length * marks + (world.marks ? 40 : 0) + 1200 + retry + allowed;
-  const answer = deed + figureInstructionsOf(traced(world), world.portions).length - worldTextOf(world).length;
+  const answer = deed + figureInstructionsOf(traced(world), world.portions, world.prices).length - worldTextOf(world).length;
   // Either base request can be longer; cover the larger instruction addition whichever sets the bound.
   const residentText = instructionsOf(world).length - INSTRUCTIONS.length, worldText = worldTextOf(world).length - WORLD_INSTRUCTIONS.length;
   const pending = world.deedEnds ? people.reduce((sum, name) => sum + name.length + MAX_WORDS * CHARS_PER_WORD + 200, 0)
@@ -470,7 +471,7 @@ export function linesOf(world: World, event: Event): string[] {
     ...(event.found ?? []).map(thing => `         found: ${thing.what} ${thing.name} (${thing.spot})`),
     ...(event.moved?.some(posting => posting.sink === 'fare') ? [`         ${who} pays ${event.moved.reduce((sum, posting) => sum + posting.n!, 0)} ${event.moved[0].name}`] : []),
     ...(event.moved ?? []).map(posting => `         moved: ${posting.what} ${posting.name}${posting.n === null ? '' : ` ×${posting.n}`}, ${posting.from} -> ${posting.to}${posting.sink === 'fare' ? ' (sink)' : ''}${
-      posting.as === null || posting.as === posting.what ? '' : ` as ${posting.as}`}${posting.to === 'tasted' && posting.left !== undefined ? ` (${posting.left === 2 ? 'two thirds left' : posting.left === 1 ? 'a third left' : 'nothing left'})` : ''}`),
+      posting.as === null || posting.as === posting.what ? '' : ` as ${posting.as}`}${posting.to === 'tasted' && posting.left !== undefined ? ` (${posting.left === 2 ? 'two thirds left' : posting.left === 1 ? 'a third left' : 'nothing left'})` : ''}${posting.price ? ' (price)' : ''}`),
     ...(event.set ?? []).map(thing => `         state: ${thing.what} ${thing.name}, ${thing.state}`),
     ...(event.poses ?? []).map(pose => `         pose of ${named(world.characters, pose.of)}: ${pose.text || 'none'}`),
     ...(event.touches ?? []).map(touch => `         touch of ${named(world.characters, touch.of)} on ${named(world.characters, touch.to)}: ${
@@ -595,7 +596,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
 
   // Simultaneous turns in separate places could run in parallel, except for remote contact.
   const judge = { ...(worldPlayer ?? everyone), name: worldPlayer ? worldPlayer.name ?? worldPlayer.model : everyone.name };
-  const worldSystem = worldSystemOf(world), figureSystem = `${figureInstructionsOf(traced(world), world.portions)}\n\n${aboutOf(world)}`;
+  const worldSystem = worldSystemOf(world), figureSystem = `${figureInstructionsOf(traced(world), world.portions, world.prices)}\n\n${aboutOf(world)}`;
   // journal.ts accepts only answers the rules have taken.
   const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null, allowed?: Allowed) => {
     let came: Came | null = null, again = '';

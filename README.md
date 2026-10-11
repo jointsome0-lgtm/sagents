@@ -191,6 +191,7 @@ beginning with a letter, unique across those four lists. It cannot be `eaten`, `
 | `marks` | Boolean, default false. | Keeps lasting feelings of a body, including temporary relief. It changes no body or ability. |
 | `deedEnds` | Boolean, default false. | Gives deeds a start and an end, as described under Action spans. |
 | `portions` | Boolean, default false. | Lets food be eaten or drunk in thirds, with parts and empty containers shown in the lists. Works without hunger. |
+| `prices` | Boolean, default false. | Prices on things of a place let a figure's answer move their payment into its till. |
 | `ways` | Boolean, default false. | Lets the world name a deed's way to another place; the rules then take an ordinary `go`. |
 | `fixedSchema` | Only true or absent, default off. | Keeps deed and figure reply schemas fixed for this world, with the values allowed now in the request text and checked by the engine. |
 | `hunger` | Only true or absent, default off. | Turns on hunger and thirst together. The world must contain a thing with `food` above zero and a thing with `drink: true`, anywhere in its lists. It causes no fainting, illness or death. |
@@ -271,6 +272,8 @@ Each thing is `{ name, … }`. A count holds nothing, so four mugs with contents
 | `holds` | List of things, absent for no container. | A table, bag or coat with pockets. Even an empty list makes a container; it cannot also be counted, a stock, food or something that burns. |
 | `open` | Boolean, default false; true needs `holds`. | Its contents are in plain sight. It does not open a door between places. |
 | `fixed` | Boolean, default false; allowed only at a place's top level or inside a fixed thing. | A part of the place that cannot move. Never allowed on a character or inside something movable. |
+| `price` | Object `{ name, n }`, absent for none; needs `prices`. | One costs `n` units of the counted money named by `name`, with the bounds of a fare. Only on movable things of an ordinary place, never money or things carried by a character. |
+| `till` | Boolean, default false; needs `prices`, `holds` and `fixed`. | Where prices are paid. Never hidden or inside a hidden thing, on a character, in a vehicle or at the fourth level, where it could hold nothing. A place has at most one at any depth, and exactly one when it has priced things. |
 | `stock` | Boolean, default false; cannot have `n` or be money. | A supply with no count; taking from it does not use it up. |
 | `food` | Finite number, zero or above, absent for none. | Calories of one, and permission to eat it. Only hunger accounts for the calories. |
 | `drink` | Boolean, default false; true needs `food`, zero for water. | Each one is a drink, including what comes from a stock. Read but does nothing without hunger; never shown in requests or thing notation. |
@@ -447,6 +450,7 @@ would ignore settings and lose their state.
 
 | Condition | Format |
 | --- | --- |
+| `prices` | `47` |
 | `portions` | `46` |
 | `deedEnds` | `45` |
 | `legMinutes` | `44` |
@@ -570,7 +574,10 @@ request's place and people, without hidden things, neighbours, touches or lastin
 every figure's looks and facts, recent deeds, and the latest 300 words said to the figures here and answered.
 These lines are shared by all figures, not a figure's private memory. The answer has `reply`, up to 65 words or
 null, and `moves` for something handed over while speaking. A figure's things are among the place's things;
-it cannot eat or burn through its answer. `reply` in `src/answer.ts` starts the answer when the speech ends and
+it cannot eat or burn through its answer. With `prices`, moving a priced thing that lies in the place sells it,
+wherever it ends up; the one who spoke pays into the place's till, and what arrives has no price. A thing left
+where it is sells nothing, and neither does a priced thing that a deed has put into someone's hands or into a
+place with no till. `reply` in `src/answer.ts` starts the answer when the speech ends and
 holds those who heard it as speech does; it wakes nobody, and `applied` in `src/journal.ts` writes it into their
 memories at that time. A deed's request includes what figures promised, too.
 
@@ -718,7 +725,8 @@ and on follow file order and are never reused or shown to residents. The world r
 With portions, `written` and `shown` in `src/things.ts` add `two thirds left` or `a third left`
 after food in the world's notation and after the name and count for residents. Empty containers read `[empty]`;
 residents see it only where they could see contents, through two levels of their own things or open things of others.
-There is no model-maintained list or count.
+`written` in `src/things.ts`, with `prices`, adds `price 6 euro` for what one costs and `till` for where payment
+goes, after the other marks; residents read neither. There is no model-maintained list or count.
 
 An answer is refused for its first unknown or unfound hidden thing, fixed thing, excess count or more than 20
 from stock, invalid holder, self-containment or nesting beyond four, non-food eaten, nonburnable burned or burning
@@ -729,6 +737,13 @@ Moves all to their current holders refuse it because prose could claim a move th
 actual move they are passed over. A refusal changes nothing and is not journalled. The world gets the same
 request once more with a sentence naming the entry and cause in its instructions' words. After the second,
 nothing comes of the deed or speech; totals count `refused` and `void`.
+
+With `prices`, `settle` also refuses a figure's answer with `price` when the one who spoke cannot pay,
+using its first sale as the refused entry. After moves and before sets, it sums each money name's prices,
+subtracts what the answer already took from that person's money, and moves the balance into the till.
+Money received in the answer increases the balance due. It takes directly carried money first, then contents,
+then their contents, in list order, as `pay` does. These are ordinary postings, marked `price` only for the
+printed line's ` (price)`; replay derives them again. A deed pays nothing and keeps a thing's price.
 
 Only stock creates things; only eating, burning and fares remove them. With `portions`, tasting the last third
 also removes a thing; tasting stock takes nothing from it. A thing with a part left still counts as one,
@@ -997,7 +1012,8 @@ thousands of steps with answers of every kind, checking laws from the journal al
 - Speech never passes a door, however loud. Calling through it needs a deed, and an answer another deed.
   Every neighbour hears the same `beyond`, the doer is not told who heard it, and hearing is the model's judgement.
 - Doors have no open, shut or bolted state. Description is all the world knows, every `go` passes, and sound does
-  not depend on doors. There is no shop, prices, manufacture or taking, giving and eating without the world.
+  not depend on doors. There is no shop or manufacture, or taking, giving and eating without the world. Prices serve only a figure's
+  answer: deeds do not pay, a resident who sells has no payment rule, and nothing in a vehicle or on a person is priced.
 - Walking is at one pace for everyone, whatever terrain or tiredness. Without `legMinutes` it cannot be interrupted
   and perceives nothing. Walkers receive no later weather notices between turns. Carried things go along regardless of size.
   A resident names a thing in words, and the world must find its label.
@@ -1013,7 +1029,8 @@ thousands of steps with answers of every kind, checking laws from the journal al
 
 #### What comes next for the live world
 
-1. What things still lack: food tags, a shop and prices, things made of other things, and residents who take,
+1. What things still lack: food tags, a shop, payment for deeds or a resident who sells, prices in vehicles or
+   on people, things made of other things, and residents who take,
    give and eat without the world.
 2. A larger seaside world than `examples/seaside-cafe.json`: four residents, houses, a sports pool, beach and cafés.
 3. An energy balance: hunger from daily shortfall, weight and fitness over weeks.

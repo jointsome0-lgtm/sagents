@@ -7,21 +7,21 @@ export const NAME_WORDS = 8, SPOT_WORDS = 20, MAX_STATES = 4;
 export const MAX_N = 1_000_000_000;
 
 export type Thing = { label: string; name: string; facts: string | null; n: number | null; fixed: boolean; open: boolean; stock: boolean; food: number | null; drink?: true; left?: 2 | 1; burns: boolean;
-  fire: boolean | string; states: string[] | null; state: string | null; money: boolean; holds: Thing[] | null; hidden: { spot: string; minutes: number } | null };
+  fire: boolean | string; states: string[] | null; state: string | null; money: boolean; price?: { name: string; n: number }; till?: true; holds: Thing[] | null; hidden: { spot: string; minutes: number } | null };
 export type Things = { places: Map<string, Thing[]>; people: Map<string, Thing[]>; next: number; searched: Map<string, number> };
 export type Move = { what: string; n: number; to: string };
 export type Setting = { what: string; state: string };
 export const SINKS = ['eaten', 'burned'];
-export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string; sink?: 'fare'; food?: number; drink?: true; thirds?: number; left?: 2 | 1 | 0 };
+export type Posting = { what: string; name: string; n: number | null; from: string; to: string; as: string | null; stock: boolean; out: string; into: string; sink?: 'fare'; price?: true; food?: number; drink?: true; thirds?: number; left?: 2 | 1 | 0 };
 // Refuse moves that all stay put, or the words could claim a move the lists never took.
-export const CODES = ['what', 'hidden', 'fixed', 'n', 'to', 'inside', 'sink', 'full', 'same', 'state'] as const;
+export const CODES = ['what', 'hidden', 'fixed', 'n', 'to', 'inside', 'sink', 'full', 'same', 'state', 'price'] as const;
 export type Refused = { code: typeof CODES[number]; entry: Move | Setting };
 export type Settled = { moved: Posting[]; set: { what: string; name: string; state: string }[]; found: { what: string; name: string; spot: string }[];
   lists: Map<string, Thing[]>; next: number };
 
 const SIGNS = /[,;[\]×]/;
 const flag = (value: unknown, field: string) => value === undefined || typeof value === 'boolean' ? value === true : refuse(field, 'must be true or false');
-export function readThings(value: unknown, field: string, labels: { next: number }, top = false, level = 1, fixable = top, hunger = false): Thing[] {
+export function readThings(value: unknown, field: string, labels: { next: number }, top = false, level = 1, fixable = top, hunger = false, pricing: { prices?: boolean; place?: boolean; hidden?: boolean } = {}): Thing[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) return refuse(field, 'must be a list of things');
   return value.map((item, at): Thing => {
@@ -45,7 +45,7 @@ export function readThings(value: unknown, field: string, labels: { next: number
       : item.state === undefined ? states[0] : states.find(known => known === item.state) ?? refuse(`${here}.state`, 'must be one of `states`');
     const fire = item.fire === undefined || item.fire === false ? false : item.fire === true ? true
       : states?.find(known => known === item.fire) ?? refuse(`${here}.fire`, 'must be true or one of `states`');
-    const holds = item.holds === undefined ? null : readThings(item.holds, `${here}.holds`, labels, false, level + 1, fixed, hunger);
+    const holds = item.holds === undefined ? null : readThings(item.holds, `${here}.holds`, labels, false, level + 1, fixed, hunger, { ...pricing, hidden: pricing.hidden || item.hidden !== undefined });
     if (holds && (n !== null || stock || food !== null || burns)) return refuse(`${here}.holds`, 'is not for a thing that is counted, a stock, food or something that burns');
     if (stock && (n !== null || money)) return refuse(`${here}.stock`, 'is a supply with no count, and never of money');
     if (money && n === null) return refuse(`${here}.money`, 'needs `n`');
@@ -59,8 +59,20 @@ export function readThings(value: unknown, field: string, labels: { next: number
       durationOf(Math.ceil(minutes * 60), `${here}.hidden.minutes`);
       hidden = { spot, minutes };
     }
+    let price;
+    if (item.price !== undefined) {
+      if (!pricing.prices) return refuse(`${here}.price`, 'needs `prices`');
+      if (!pricing.place || money || fixed) return refuse(`${here}.price`, 'is for a movable thing of a place, never money');
+      if (!isObject(item.price)) return refuse(`${here}.price`, 'must be an object');
+      const name = textOf(item.price.name, `${here}.price.name`), n = item.price.n;
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > MAX_N) return refuse(`${here}.price.n`, 'must be a whole number from 1 to 1,000,000,000');
+      price = { name, n };
+    }
+    if (item.till !== undefined && !pricing.prices) return refuse(`${here}.till`, 'needs `prices`');
+    const till = flag(item.till, `${here}.till`);
+    if (till && (!pricing.place || !holds || !fixed || hidden || pricing.hidden || level === MAX_DEPTH)) return refuse(`${here}.till`, `needs \`holds\` and \`fixed\`, in a place, outside hidden things and above level ${MAX_DEPTH}`);
     return { label, name, facts: boundedOf(item.facts, `${here}.facts`, MAX_FACTS), n, fixed, open, stock, food, burns, fire, states, state, money, holds, hidden,
-      ...(hunger && drink ? { drink: true as const } : {}) };
+      ...(price ? { price } : {}), ...(till ? { till: true as const } : {}), ...(hunger && drink ? { drink: true as const } : {}) };
   });
 }
 
@@ -68,7 +80,7 @@ export const all = (things: Thing[]): Thing[] => things.flatMap(thing => [thing,
 export const lit = (thing: Thing) => thing.fire === true || (thing.fire !== false && thing.fire === thing.state);
 export const written = (thing: Thing, portions = false): string => `${thing.label} ${thing.name}${thing.n === null ? '' : ` ×${thing.n}`}${
   [thing.fixed && 'fixed', thing.open && 'open', thing.stock && 'stock', thing.food !== null && 'food', portions && thing.left && (thing.left === 2 ? 'two thirds left' : 'a third left'), thing.burns && 'burns', lit(thing) && 'fire',
-    thing.states && `state: ${thing.state} (${thing.states.join('/')})`].filter(Boolean).map(mark => `, ${mark}`).join('')}${
+    thing.states && `state: ${thing.state} (${thing.states.join('/')})`, thing.price && `price ${thing.price.n} ${thing.price.name}`, thing.till && 'till'].filter(Boolean).map(mark => `, ${mark}`).join('')}${
   thing.holds ? ` [${thing.holds.map(thing => written(thing, portions)).join('; ') || (portions ? 'empty' : '')}]` : ''}`;
 export const shown = (things: Thing[], own: boolean, level = 1, portions = false): string => things.map(thing =>
   `${thing.name}${thing.n === null ? '' : ` ×${thing.n}`}${portions && thing.left ? `, ${thing.left === 2 ? 'two thirds left' : 'a third left'}` : ''}${
@@ -88,10 +100,11 @@ export function sought(things: Things, deed: { who: string; place: string; secon
 type Slot = { thing: Thing; list: Thing[]; key: string; top: Thing; level: number; root: string };
 const height = (thing: Thing): number => 1 + Math.max(0, ...(thing.holds ?? []).map(height));
 const alike = (one: Thing, other: Thing) => one.name === other.name && one.food === other.food && one.burns === other.burns && one.money === other.money
-  && one.fire === other.fire && one.fixed === other.fixed && one.facts === other.facts && one.drink === other.drink && one.left === other.left;
+  && one.fire === other.fire && one.fixed === other.fixed && one.facts === other.facts && one.drink === other.drink && one.left === other.left
+  && one.price?.name === other.price?.name && one.price?.n === other.price?.n;
 
 // refusal() in answer.ts relies on things staying unchanged here; keep() applies the result.
-export function settle(things: Things, place: string, present: string[], names: Map<string, string>, found: string[], moves: Move[], sets: Setting[], sinks = true, hunger = false, portions = false): Settled | Refused {
+export function settle(things: Things, place: string, present: string[], names: Map<string, string>, found: string[], moves: Move[], sets: Setting[], sinks = true, hunger = false, portions = false, payer?: string): Settled | Refused {
   const lists = new Map<string, Thing[]>([[place, structuredClone(things.places.get(place)!)], ...present.map((id): [string, Thing[]] => [id, structuredClone(things.people.get(id)!)])]);
   let next = things.next;
   const settled: Settled = { moved: [], set: [], found: [], lists, next };
@@ -112,7 +125,10 @@ export function settle(things: Things, place: string, present: string[], names: 
     return slots;
   };
   const said = (slots: Map<string, Slot>, key: string) => { const slot = slots.get(key); return !slot ? names.get(key)! : slot.root === place ? slot.top.name : names.get(slot.root)!; };
-  for (const entry of moves) {
+  const money = (held: Thing[], name: string) => all(held).reduce((sum, thing) => sum + (thing.money && thing.name === name ? thing.n! : 0), 0);
+  const owed = new Map<string, number>(), till = payer !== undefined && lists.has(payer) ? all(lists.get(place)!).find(thing => thing.till) : undefined;
+  let first: Move | undefined;
+  const move = (entry: Move, payment = false): Refused | null => {
     const slots = index(), slot = slots.get(entry.what);
     if (!slot) return { code: 'what', entry };
     const thing = slot.thing;
@@ -124,7 +140,7 @@ export function settle(things: Things, place: string, present: string[], names: 
     const target = sink ? null : lists.get(entry.to) ?? into?.thing.holds ?? null;
     if (!sink && !target) return { code: 'to', entry };
     if (into?.top.hidden) return { code: 'hidden', entry };
-    if (target === slot.list) continue;
+    if (target === slot.list) return null;
     const whole = !thing.stock && entry.n === (thing.n ?? 1);
     if (into && (into.thing === thing || all(thing.holds ?? []).includes(into.thing))) return { code: 'inside', entry };
     if (target && (into ? into.level : 0) + (whole ? height(thing) : 1) > MAX_DEPTH) return { code: 'inside', entry };
@@ -147,16 +163,49 @@ export function settle(things: Things, place: string, present: string[], names: 
       }
     } else if (whole) slot.list.splice(slot.list.indexOf(thing), 1);
     else if (!thing.stock) (thing.n as number) -= entry.n;
+    const sold = till && slot.root === place && thing.price && !payment ? thing.price : null;
+    if (sold) {
+      first ??= entry;
+      owed.set(sold.name, (owed.get(sold.name) ?? 0) + sold.n * entry.n);
+    }
+    const arriving = sold ? { ...thing } : thing;
+    if (sold) delete arriving.price;
     if (target) {
-      const twin = thing.n === null && !thing.stock ? undefined : target.find(item => item.n !== null && !item.hidden && alike(item, thing));
+      const twin = thing.n === null && !thing.stock ? undefined : target.find(item => item.n !== null && !item.hidden && alike(item, arriving));
       if (twin) (twin.n as number) += entry.n;
-      else target.push(whole ? thing : { ...thing, label: `t${next++}`, n: entry.n, stock: false });
+      else target.push(whole ? arriving : { ...arriving, label: `t${next++}`, n: entry.n, stock: false });
       as = twin?.label ?? target.at(-1)!.label;
     }
     for (const [id, list] of lists) if (all(list).length > (id === place ? MAX_IN_PLACE : MAX_ON_PERSON)) return { code: 'full', entry };
     settled.moved.push({ what: thing.label, name: thing.name, n: thing.n === null && !thing.stock ? null : entry.n, from: slot.key, to: entry.to, as, stock: thing.stock, out, into: where,
       ...(portions && tasted ? { thirds: 1, ...(!thing.stock ? { left } : {}) } : portions && entry.to === 'eaten' && thing.left ? { thirds: thing.left * entry.n } : {}),
-      ...(hunger && (entry.to === 'eaten' || tasted) ? { food: thing.food!, ...(thing.drink ? { drink: true as const } : {}) } : {}) });
+      ...(payment ? { price: true as const } : {}), ...(hunger && (entry.to === 'eaten' || tasted) ? { food: thing.food!, ...(thing.drink ? { drink: true as const } : {}) } : {}) });
+    return null;
+  };
+  for (const entry of moves) {
+    const refused = move(entry);
+    if (refused) return refused;
+  }
+  if (till && first) {
+    const held = lists.get(payer!)!, had = things.people.get(payer!)!;
+    for (const [name, n] of owed) {
+      const after = money(held, name), due = n - (money(had, name) - after);
+      if (due <= 0) continue;
+      if (due > after) return { code: 'price', entry: first };
+      let left = due;
+      const pockets = [held];
+      for (const list of pockets) {
+        if (!left) break;
+        for (const thing of [...list]) {
+          if (!left) break;
+          if (thing.money && thing.name === name) {
+            const n = Math.min(left, thing.n!), refused = move({ what: thing.label, n, to: till.label }, true);
+            if (refused) return { code: refused.code, entry: first };
+            left -= n;
+          } else if (thing.holds) pockets.push(thing.holds);
+        }
+      }
+    }
   }
   if (moves.length && !settled.moved.length) return { code: 'same', entry: moves[0] };
   for (const entry of sets) {
