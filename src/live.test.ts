@@ -12,7 +12,7 @@ import { ModelError } from './chatgpt.ts';
 import type { Request } from './chatgpt.ts';
 import { advance, begin, JournalError, memoryStore, replay } from './journal.ts';
 import type { Record } from './journal.ts';
-import { INSTRUCTIONS, requestLimit, runLive, WORLD_INSTRUCTIONS } from './live.ts';
+import { INSTRUCTIONS, linesOf, requestLimit, runLive, WORLD_INSTRUCTIONS } from './live.ts';
 import { readWorld } from './laws.ts';
 import { readAction } from './action.ts';
 import { readMemory, sameScript } from './memory.ts';
@@ -66,9 +66,10 @@ test('optional hunger leaves old journals alone and keeps fed counts through a s
   const file = { title: 'Kitchen', about: 'A quiet kitchen.', clock: '15:30', dayStart: '15:30',
     places: [{ id: 'kitchen', name: 'Kitchen', about: 'A kitchen.', clock: true, things: [
       { name: 'bread', stock: true, food: 80 }, { name: 'stew', stock: true, food: 600 },
-      { name: 'jug', holds: [{ name: 'water', n: 8, food: 0, drink: true }] }] }],
+      { name: 'jug', holds: [{ name: 'water', n: 8, food: -0, drink: true }] }] }],
     characters: [{ id: 'anna', name: 'Anna', place: 'kitchen', sheet: 'SHEET-ANNA' }, { id: 'boris', name: 'Boris', place: 'kitchen', sheet: 'SHEET-BORIS' }] };
   const fed = readWorld({ ...file, hunger: true }), plain = readWorld(file);
+  assert.equal(fed.places[0].things[2].holds![0].food, 0);
   const withoutDrink = readWorld({ ...file, places: [{ ...file.places[0], things: [...file.places[0].things.slice(0, 2), { name: 'jug', holds: [{ name: 'water', n: 8, food: 0 }] }] }] });
   const eat = (what: string, n = 1) => came({ moves: [{ what, n, to: 'eaten' }] });
   const waits = () => Array.from({ length: 4 }, () => act('wait', { seconds: 3600 }));
@@ -325,14 +326,28 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   const silent: string[] = [];
   const unmetered = await runLive({ world, respond: async () => ({ text: act('wait', { seconds: 60 }), usage: null }), model: 'stand-in', minutes: 600, tokens: 150, onEvent: event => { silent.push(`${event.kind} ${event.seconds}`); } });
   assert.deepEqual([unmetered.status, unmetered.reason, unmetered.calls, unmetered.invalid, unmetered.unreported, silent], ['done', 'unreported', 1, 0, 1, ['wait 60']]);
+  for (const code of ['output_limit', 'declined'] as const) {
+    const failed = standIn({ anna: [new ModelError(code)] });
+    const capped = await runLive({ world, respond: failed.respond, model: 'stand-in', tokens: 1 });
+    assert.deepEqual([capped.status, capped.reason, capped.calls, capped.unreported, capped.models['stand-in'].unreported, Object.values(failed.sent).flat().length], ['done', 'unreported', 1, 1, 1, 1]);
+  }
   let asked = 0;
   const invalid = await runLive({ world, respond: async () => { asked += 1; return { text: 'not an action', usage: null }; }, model: 'stand-in', minutes: 600, calls: 20 });
-  assert.deepEqual([invalid.status, invalid.reason, invalid.calls, invalid.invalid, asked], ['failed', 'invalid', 5, 5, 5]);
+  assert.deepEqual([invalid.status, invalid.reason, invalid.calls, invalid.invalid, asked], ['failed', 'stalled', 17, 17, 17]);
   let judged = 0;
   const alternating = await runLive({ world, model: 'resident', minutes: 600, calls: 20,
     respond: async () => ({ text: act('do', { text: 'looks', seconds: 1 }), usage: null }),
     worldPlayer: { model: 'world', respond: async () => ({ text: ++judged % 2 ? 'not an answer' : came({ moves: [{ what: 'absent', n: 1, to: 'anna' }] }), usage: null }) } });
-  assert.deepEqual([alternating.status, alternating.reason, alternating.calls, alternating.invalid, alternating.refused, judged], ['failed', 'invalid', 14, 5, 4, 9]);
+  assert.deepEqual([alternating.status, alternating.reason, alternating.calls, alternating.invalid, alternating.refused, judged], ['failed', 'stalled', 15, 5, 5, 10]);
+  const refused = standIn({ anna: Array(5).fill(act('do', { text: 'looks', seconds: 1 })), world: Array(10).fill(came({ moves: [{ what: 'absent', n: 1, to: 'anna' }] })) }), voids = memoryStore();
+  const ended = await runLive({ world: { ...world, characters: world.characters.slice(0, 1) }, respond: refused.respond, model: 'stand-in', minutes: 600, calls: 60, journal: voids });
+  assert.deepEqual([ended.reason, ended.calls, ended.refused, ended.void, voids.all.at(-1)!.record.kind], ['stalled', 15, 10, 5, 'result']);
+  for (const answer of ['not an action', new ModelError('output_limit')]) {
+    const shared = standIn({ anna: Array(5).fill(answer), boris: Array(5).fill(act('wait', { seconds: 30 })) }), journal = memoryStore();
+    const ended = await runLive({ world: { ...world, characters: world.characters.slice(0, 2) }, respond: shared.respond, model: 'stand-in', minutes: 600, calls: 60, journal });
+    assert.deepEqual([ended.reason, ended.calls, shared.sent.anna.length, shared.sent.boris.length, journal.all.at(-1)!.event.who], ['stalled', 9, 5, 4, 'anna']);
+    assert.equal(journal.all.filter(({ record }) => record.kind === 'act' && typeof record.action === 'string').length, 5);
+  }
 });
 
 test('a gesture is seen with its speech, and words said with a deed are heard in its place as a speech and never reach the world', async () => {
@@ -363,13 +378,28 @@ test('a gesture is seen with its speech, and words said with a deed are heard in
   // The journal replays, and it refuses a record that holds a field with an action that has none.
   replay(world, journal.all);
   assert.throws(() => advance(world, begin(world), { kind: 'act', who: 'anna', at: 0, limit: 65, action: { ...none, action: 'say', text: 'RED-WORD', says: 'aside' } }), JournalError);
+  const cut = standIn({ anna: [act('do', { text: words(80), seconds: 1 })] }), kept = memoryStore();
+  await runLive({ world, respond: cut.respond, model: 'stand-in', minutes: 2, journal: kept });
+  const deed = kept.all[0], warning = 'Your deed was longer than the limit: only its first words were done.';
+  assert.equal(deed.record.kind === 'act' && typeof deed.record.action === 'object' && deed.record.action.deedCut, true);
+  assert.deepEqual([deed.event.text, deed.event.deedCut], [words(65), true]);
+  assert.match(linesOf(world, deed.event)[0], /w65 \(cut\)$/);
+  const continued = standIn({}), saved = memoryStore();
+  saved.append(JSON.parse(JSON.stringify(kept.all.slice(0, 2))));
+  await runLive({ world, respond: continued.respond, model: 'stand-in', minutes: 2, journal: saved });
+  assert.equal(cut.sent.anna[1].messages[0].content.split(warning).length, 2);
+  assert.equal(continued.sent.anna[0].messages[0].content.split(warning).length, 2);
+  for (const id of ['boris', 'clara', 'dan', 'world']) {
+    assert.ok(!JSON.stringify(cut.sent[id] ?? []).includes(warning));
+    assert.ok(!JSON.stringify(continued.sent[id] ?? []).includes(warning));
+  }
 });
 
 test('a failing connection stops the run at once with the events so far', async () => {
   const { sent, respond } = standIn({ anna: [act('say', { text: 'one two' })], clara: [act('wait', { seconds: 5 })], dan: [new ModelError('budget_exceeded', 429)] });
   const journal = memoryStore();
   const outcome = await runLive({ world, respond, model: 'stand-in', journal });
-  assert.deepEqual([outcome.status, outcome.reason, outcome.calls], ['failed', 'budget_exceeded', 2]);
+  assert.deepEqual([outcome.status, outcome.reason, outcome.calls, outcome.models['stand-in'].calls, outcome.kinds.turn.calls, outcome.unreported, outcome.models['stand-in'].unreported], ['failed', 'budget_exceeded', 3, 3, 3, 1, 1]);
   assert.deepEqual(journal.all.map(({ event }) => `${event.who} ${event.kind}`), ['anna say', 'clara wait']);
   // The call that failed was the last one: nothing was tried again and nobody else was asked.
   assert.equal(Object.values(sent).flat().length, 3);
@@ -490,7 +520,7 @@ test('a rewrite in another script is asked again, without losing good memories o
     owed = 'I owed Александр Константинович 50 and Екатерина Александровна 70.';
   const memory = (text: string) => JSON.stringify({ memory: text });
   const played = async (sheet: string, answers: (string | Error)[], waking: boolean,
-    limits: { calls?: number; tokens?: number; invalidRun?: number; cutRun?: number; declinedRun?: number } = {}) => {
+    limits: { calls?: number; tokens?: number; failedRun?: number; declinedRun?: number } = {}) => {
     const given = readWorld({ title: 'A promise', about: 'A quiet room.', clock: '09:00', shortWords: waking ? 2000 : 1,
       places: [{ id: 'room', name: 'Room', about: 'A quiet room.' }],
       characters: [{ id: 'anna', name: 'Anna', place: 'room', sheet, memory: 'An old promise.' }] });
@@ -568,9 +598,9 @@ test('a rewrite in another script is asked again, without losing good memories o
   assert.deepEqual(readMemory(memory(`${mixed} »} ${russian}`), 400), { text: `${mixed} »`, cut: true });
   assert.equal(readMemory(memory('  } nothing to keep'), 400), null);
   for (const [answers, limits, reason, invalid] of [
-    [[memory(russian)], { invalidRun: 1 }, 'invalid', 1],
-    [[memory(russian), 'no memory'], { invalidRun: 2 }, 'invalid', 2],
-    [[memory(russian), new ModelError('output_limit')], { cutRun: 1 }, 'output_limit', 2],
+    [[memory(russian)], { failedRun: 1 }, 'horizon', 2],
+    [[memory(russian), 'no memory'], { failedRun: 2 }, 'horizon', 2],
+    [[memory(russian), new ModelError('output_limit')], { failedRun: 1 }, 'horizon', 2],
     [[memory(russian), new ModelError('declined')], { declinedRun: 1 }, 'declined', 2],
     [[memory(russian)], { calls: 2 }, 'calls', 1],
     [[memory(russian)], { tokens: 220 }, 'tokens', 1],
@@ -580,6 +610,8 @@ test('a rewrite in another script is asked again, without losing good memories o
     assert.deepEqual([kept.outcome.reason, kept.outcome.invalid, kept.outcome.rewrites, kept.outcome.lost], [reason, invalid, 1, 0]);
     assert.equal(kept.entries.find(({ record }) => record.kind === 'memory')?.event.text, russian);
   }
+  const stalled = await played(english, ['no memory', 'no memory'], false, { failedRun: 1 });
+  assert.deepEqual([stalled.outcome.reason, stalled.outcome.invalid, stalled.outcome.rewrites, stalled.outcome.lost, stalled.entries.at(-1)!.record.kind], ['stalled', 2, 1, 1, 'memory']);
 });
 
 test('a time of day is the next moment the clock shows it, within the span the action allows, and the journal takes nothing else; without a clock it is missed within bounds and no clock is told', async () => {
@@ -683,11 +715,10 @@ test('a character with a model of its own is asked through that connection under
   assert.ok(journal.all.filter(entry => entry.event.who !== 'anna').every(entry => entry.by === 'common'));
   assert.deepEqual(outcome.models['api:own'], { calls: 6, invalid: 1, overlong: 0, declined: 0, unreported: 0, inputTokens: 600, cachedInputTokens: 240, outputTokens: 60 });
   assert.equal(outcome.models.common.calls, outcome.calls - 6);
-  // An answer cut at the model's limit is a lost turn, and the third in a row of one model ends the run, whatever
-  // the other models answered meanwhile.
+  // Healthy residents must not clear the failing resident's streak and spend the remaining calls.
   const cut = standIn({ anna: Array.from({ length: 5 }, () => new ModelError('output_limit')) });
   const ended = await runLive({ world, respond: standIn({}).respond, model: 'common', cast: { anna: { respond: cut.respond, model: 'own' } }, minutes: 60 });
-  assert.deepEqual([ended.status, ended.reason, ended.models.own], ['failed', 'output_limit', { calls: 3, invalid: 3, overlong: 3, declined: 0, unreported: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }]);
+  assert.deepEqual([ended.status, ended.reason, ended.models.own], ['failed', 'stalled', { calls: 5, invalid: 5, overlong: 5, declined: 0, unreported: 5, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }]);
 });
 
 test('with a name for its journal a run gives each resident and the world a name of its own for a service\'s cache, the same when the world is continued, and keeps it nowhere', async () => {

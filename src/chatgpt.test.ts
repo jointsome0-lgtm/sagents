@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { createChatgpt, responsesBody, signIn } from './chatgpt.ts';
+import { createChatgpt, ModelError, responsesBody, signIn } from './chatgpt.ts';
 
 const SECRETS = ['ACCESS-OLD', 'ACCESS-NEW', 'REFRESH-OLD', 'REFRESH-NEW', 'ACCESS-SIGNIN', 'REFRESH-SIGNIN'];
 const leaks = (value: unknown) => SECRETS.filter(secret => JSON.stringify(value, Object.getOwnPropertyNames(value ?? {})).includes(secret) || String(value).includes(secret));
@@ -62,6 +62,60 @@ test('a request holds only what the caller gave, and the answer comes with its u
   assert.deepEqual({ ...calls[1].init.headers as object, authorization: '' }, { ...calls[0].init.headers as object, authorization: '', 'session-id': 'player-1', 'x-client-request-id': 'player-1' });
   const error = await chatgpt.respond({ ...request, cache: 'player\r\nx-other: 1' }).catch((thrown: unknown) => thrown) as { code?: string; param?: string };
   assert.deepEqual([error.code, error.param, calls.length], ['invalid_request', 'cache', 2]);
+});
+
+test('only a rejected connection is sent once more, after a pause within the same limit', async () => {
+  const path = join(folder(), 'chatgpt.json');
+  account(path);
+  for (const succeeds of [false, true]) {
+    const calls: { at: number; init: RequestInit }[] = [];
+    const chatgpt = createChatgpt({ path, fetch: async (_url, init) => {
+      calls.push({ at: performance.now(), init });
+      if (succeeds && calls.length === 2) return answer('ok');
+      throw new TypeError('ACCESS-OLD connection failed');
+    } });
+    if (succeeds) {
+      const result = await chatgpt.respond(request);
+      assert.deepEqual([result.text, result.tries], ['ok', 2]);
+    } else {
+      await assert.rejects(chatgpt.respond(request), error => {
+        assert.ok(error instanceof ModelError);
+        assert.deepEqual([error.code, error.stage, error.tries, error.httpStatus], ['provider_failed', 'connect', 2, undefined]);
+        assert.deepEqual(leaks(error), []);
+        return true;
+      });
+    }
+    assert.equal(calls.length, 2);
+    assert.ok(calls[1].at - calls[0].at >= 1900);
+    assert.deepEqual(calls[1].init, calls[0].init);
+  }
+  for (const response of [json(503, {}), new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(new TextEncoder().encode('data: {"type":"response.created"}\n\n'));
+    controller.error(new TypeError('ACCESS-OLD stream failed'));
+  } }))]) {
+    let calls = 0;
+    const chatgpt = createChatgpt({ path, fetch: async () => { calls++; return response; } });
+    await assert.rejects(chatgpt.respond(request), error => {
+      assert.ok(error instanceof ModelError);
+      assert.deepEqual([error.stage, error.httpStatus, error.tries], ['stream', response.status === 200 ? undefined : response.status, undefined]);
+      assert.deepEqual(leaks(error), []);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+  for (const cancel of [false, true]) {
+    let calls = 0;
+    const controller = new AbortController();
+    const chatgpt = createChatgpt({ path, fetch: async () => { calls++; throw new TypeError('connection failed'); } });
+    const pending = chatgpt.respond(request, { timeoutMs: 50, signal: controller.signal });
+    if (cancel) setTimeout(() => controller.abort(), 10);
+    await assert.rejects(pending, error => {
+      assert.ok(error instanceof ModelError);
+      assert.deepEqual([error.code, error.stage, error.tries], [cancel ? 'cancelled' : 'timeout', 'connect', undefined]);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
 });
 
 test('an expiring token is refreshed once, both tokens are replaced together and the file stays private', async () => {

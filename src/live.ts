@@ -433,7 +433,7 @@ export function linesOf(world: World, event: Event): string[] {
                 : event.kind === 'weather' ? `the weather changes: ${event.text}${event.indoors == null ? '' : ` Under a roof: ${event.indoors}`}`
                 : event.kind === 'result' ? `what came of what ${who} did: ${event.text ?? 'nothing that could be noticed'}${
                   event.wakes?.length ? ` (wakes ${event.wakes.map(id => named(world.characters, id)).join(', ')})` : ''}${event.search ? ' (a search)' : ''}`
-                  : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}` : `${who} waits (${event.seconds} s)`;
+                  : event.kind === 'do' ? `${who} does (${event.seconds} s): ${event.text}${event.deedCut ? ' (cut)' : ''}` : `${who} waits (${event.seconds} s)`;
   return [...(event.kind === 'wait' && !event.note ? [] : [`${event.clock} ${event.place ? `[${named(places, event.place)}] ` : ''}${what}`]),
     ...(event.says === undefined ? [] : [`         says with it: "${event.says}"${event.cut ? ' (cut)' : ''}`]),
     ...(event.found ?? []).map(thing => `         found: ${thing.what} ${thing.name} (${thing.spot})`),
@@ -456,7 +456,7 @@ export function linesOf(world: World, event: Event): string[] {
 // A paused run is not the story's end, so its horizon must not shorten speech or be told to residents.
 export type Player = { respond: (request: Request) => Promise<Result>; model: string; name?: string };
 export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number; tokens?: number;
-  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; cutRun?: number; declinedRun?: number; invalidRun?: number; cache?: string;
+  onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; failedRun?: number; declinedRun?: number; cache?: string;
   onAsk?: (kind: Asked | 'reply', who: string | null, name: string) => unknown };
 export type Tally = { calls: number; invalid: number; overlong: number; declined: number; unreported: number; inputTokens: number; cachedInputTokens: number; outputTokens: number };
 export type Asked = 'turn' | 'memory' | 'world';
@@ -472,7 +472,7 @@ const CUT = Symbol('cut'), DECLINED = Symbol('declined');
 const spent = (): Spent => ({ calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
 // The request that crosses a token limit is the last; its cost is known only after the answer.
 export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, tokens, onEvent = () => {}, journal = memoryStore(),
-  pause = false, cutRun = 3, declinedRun = 3, invalidRun = 5, cache, onAsk = () => {} }: Live): Promise<Outcome> {
+  pause = false, failedRun = 5, declinedRun = 3, cache, onAsk = () => {} }: Live): Promise<Outcome> {
   const given = world, state = replay(world, journal.entries());
   world = worldOf(given, state);
   const broughtFor = (actor: Person) => LAWS.map(law => law.due?.(world, state.laws, actor) ?? null).find(record => record !== null);
@@ -492,13 +492,18 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   // Hash cache names so headers contain neither story ids nor the journal's own name.
   const owned = (...whose: string[]) => cache === undefined ? {} : { cache: createHash('sha256').update(JSON.stringify([cache, ...whose])).digest('hex').slice(0, 32) };
   const tallyOf = (player: { name: string }) => own(outcome.models, player.name, () => ({ invalid: 0, overlong: 0, declined: 0, unreported: 0, ...spent() }));
-  const invalids = new Map<string, number>();
   const unusable = (player: { name: string }) => {
     outcome.invalid += 1;
     tallyOf(player).invalid += 1;
-    invalids.set(player.name, (invalids.get(player.name) ?? 0) + 1);
-    if (invalids.get(player.name)! < invalidRun) return false;
-    Object.assign(outcome, { status: 'failed', reason: 'invalid' });
+  };
+  const failures = new Map<string, number>();
+  const finish = (kind: Asked, who: string | null, accepted: boolean) => {
+    const key = JSON.stringify([kind, who]);
+    if (accepted) { failures.delete(key); return false; }
+    const count = (failures.get(key) ?? 0) + 1;
+    failures.set(key, count);
+    if (count < failedRun) return false;
+    Object.assign(outcome, { status: 'failed', reason: 'stalled' });
     return true;
   };
   // Persist before onEvent so a watcher cannot see progress a restart would lose.
@@ -509,8 +514,6 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     journal.append([{ seq, record, event, by }]);
     await onEvent(event, by);
   };
-  // Repeated output cuts could spend every allowed call; repeated declines must also stop the run.
-  const cuts = new Map<string, number>();
   const ask = async (player: Required<Player>, kind: Asked, content: Omit<Request, 'model'>, who: string | null = null, asked: Asked | 'reply' = kind): Promise<string | typeof CUT | typeof DECLINED | null> => {
     if (outcome.calls >= most) {
       outcome.reason = 'calls';
@@ -526,34 +529,26 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       return null;
     }
     onAsk(asked, who, player.name);
+    for (const tally of [outcome, tallyOf(player), outcome.kinds[kind]]) tally.calls += 1;
     let answer: Result;
     try { answer = await player.respond({ model: player.model, ...content }); } catch (error) {
       if (!(error instanceof ModelError)) throw error;
+      for (const tally of [outcome, tallyOf(player)]) tally.unreported += 1;
       if (error.code === 'output_limit') {
-        for (const tally of [outcome, tallyOf(player)]) {
-          tally.calls += 1;
-          tally.overlong += 1;
-        }
-        outcome.kinds[kind].calls += 1;
-        cuts.set(player.name, (cuts.get(player.name) ?? 0) + 1);
-        if (cuts.get(player.name)! < cutRun) return CUT;
-        // The final cut has no caller left to count it.
-        unusable(player);
+        for (const tally of [outcome, tallyOf(player)]) tally.overlong += 1;
+        return CUT;
       }
       if (error.code === 'declined') {
-        for (const tally of [outcome, tallyOf(player), outcome.kinds[kind]]) tally.calls += 1;
         for (const tally of [outcome, tallyOf(player)]) tally.declined += 1;
         unusable(player);
-        if (outcome.declined < declinedRun) return outcome.status === 'failed' ? null : DECLINED;
+        if (outcome.declined < declinedRun) return DECLINED;
       }
       Object.assign(outcome, { status: 'failed', reason: error.code, ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}),
         ...(error.providerCode ? { providerCode: error.providerCode } : {}), ...(error.param ? { param: error.param } : {}) });
       return null;
     }
-    cuts.delete(player.name);
     for (const tally of [outcome, tallyOf(player)]) if (!answer.usage) tally.unreported += 1;
     for (const tally of [outcome, tallyOf(player), outcome.kinds[kind]]) {
-      tally.calls += 1;
       tally.inputTokens += answer.usage?.inputTokens ?? 0;
       tally.cachedInputTokens += answer.usage?.cachedInputTokens ?? 0;
       tally.outputTokens += answer.usage?.outputTokens ?? 0;
@@ -580,8 +575,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       if (answer === DECLINED) break;
       came = answer === CUT ? null : read(answer);
       const refused = came && refusal(world, state.people, state.things, deed, came, state.traces);
-      if (!came) { if (unusable(judge)) return null; }
-      else if (!refused) invalids.delete(judge.name);
+      if (!came) unusable(judge);
       if (refused) {
         outcome.refused += 1;
         [came, again] = [null, `\n${againOf(refused)}`];
@@ -599,6 +593,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       const got = await answered(deed, figureSystem, replySchemaOf(state, place, world), replyOf(world, state, deed), answer => readReply(answer, allowed), allowed);
       if (!got) return outcome;
       await happened({ kind: 'reply', who: deed.who, at: deed.at, figure: deed.to as string, text: got.came?.text ?? null, moves: got.came?.moves ?? [] }, judge.name);
+      if (finish('world', null, got.came !== null)) return outcome;
       continue;
     }
     if (deed) {
@@ -617,6 +612,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       if (!got) return outcome;
       await happened({ kind: 'result', who: deed.who, at: deed.at, ...(got.came ?? { text: null, wakes: [], moves: [], sets: [], poses: [], feels: [], beyond: null, search: false, finds: [], ...(held ? { touches: [] } : {}), ...(lasting ? { lingers: [] } : {}),
         ...(state.traces ? { traces: [], wipes: [] } : {}), ...(world.ways ? { goes: null } : {}) }) }, judge.name);
+      if (finish('world', null, got.came !== null)) return outcome;
       continue;
     }
     const actor = next(state.people);
@@ -663,14 +659,14 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
           aside = memory;
           memory = null;
         }
-        if (!memory) { if (unusable(player)) { if (!aside) return outcome; stopped = true; break; } }
-        else invalids.delete(player.name);
+        if (!memory) unusable(player);
       }
       memory ??= aside;
       outcome.rewrites += 1;
       if (!memory) outcome.lost += 1;
       await happened({ kind: 'memory', who, at: now, text: memory?.text ?? null, upTo: folding.at(-1)!.seq, cut: memory?.cut ?? false }, player.name);
       if (stopped) return outcome;
+      if (finish('memory', who, memory !== null)) return outcome;
       continue;
     }
     const place = actor.place;
@@ -710,11 +706,11 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const answer = await ask(player, 'turn', { system: request.system, schema, ...owned('resident', who), messages: request.messages }, who);
     if (answer === null) return outcome;
     const action = answer === CUT ? 'long' : answer === DECLINED ? 'declined' : readTurn(world, actor, answer, state);
-    if (typeof action === 'string' && answer !== DECLINED) { if (unusable(player)) return outcome; }
-    else if (typeof action !== 'string') invalids.delete(player.name);
+    if (typeof action === 'string' && answer !== DECLINED) unusable(player);
     const vehicle = spot.vehicle, drive = vehicle && typeof action !== 'string' && action.action === 'go' && action.place !== vehicle.at
       ? { vehicle: spot.id, from: vehicle.at!, to: action.place!, at: now + driveSeconds(world, vehicle.at!, action.place!, vehicle.faster) } : undefined;
     await happened({ kind: 'act', who, at: now, limit, action, ...(drive ? { drive } : {}),
       ...(action === 'fare' ? { place: JSON.parse(answer as string).place } : {}) }, player.name);
+    if (finish('turn', who, typeof action !== 'string')) return outcome;
   }
 }

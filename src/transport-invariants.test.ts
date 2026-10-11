@@ -329,7 +329,7 @@ test('thousands of steps with vehicles leave a journal in which every law of the
   const neighbours = (spot: string) => current.places.find(place => place.id === spot)?.nextDoor ?? [];
   const journal = memoryStore();
   const { seen, respond } = standIn(() => journal.all.length);
-  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity });
+  const whole = await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 6000, journal, pause: true, failedRun: Infinity, declinedRun: Infinity });
   assert.deepEqual([whole.status, whole.reason, whole.calls], ['done', 'calls', 6000]);
   const turns = seen.turns!;
   seen.turns = null;
@@ -897,7 +897,7 @@ test('thousands of steps with vehicles leave a journal in which every law of the
         assert.throws(() => openState(path, source, ENVIRONMENT), StateError);
         caches.add(state.cache);
         let last = '';
-        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity, onEvent: event => { last = event.kind; } });
+        await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls, journal: state, pause: true, failedRun: Infinity, declinedRun: Infinity, onEvent: event => { last = event.kind; } });
         stops.push(last);
       } finally { state.close(); }
     }
@@ -911,7 +911,7 @@ test('thousands of steps with vehicles leave a journal in which every law of the
     moving.close();
     moving = openState(pathOnWay, source, ENVIRONMENT);
     try {
-      await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: throughArrival, journal: moving, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity });
+      await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: throughArrival, journal: moving, pause: true, failedRun: Infinity, declinedRun: Infinity });
       const continued = [...moving.entries()];
       law('resume', isDeepStrictEqual(continued, journal.all.slice(0, continued.length)), continued.length);
       assert.ok(continued.some(entry => entry.event.kind === 'park' && entry.event.who === drive.event.place && entry.event.at === drive.event.arrival));
@@ -925,7 +925,7 @@ test('thousands of steps with vehicles leave a journal in which every law of the
     busState.close();
     busState = openState(busPath, source, ENVIRONMENT);
     try {
-      await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 10, journal: busState, pause: true, cutRun: Infinity, declinedRun: Infinity, invalidRun: Infinity });
+      await runLive({ world, respond, model: 'stand-in', minutes: 10_000_000, calls: 10, journal: busState, pause: true, failedRun: Infinity, declinedRun: Infinity });
       const continued = [...busState.entries()];
       law('resume', isDeepStrictEqual(continued, journal.all.slice(0, continued.length)), continued.length);
     } finally { busState.close(); }

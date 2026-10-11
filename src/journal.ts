@@ -70,6 +70,7 @@ const NO_REMOTE = 'There is no means of remote contact here: to reach someone, g
 export const refused = (world: World, reason: Refusal, place?: string) => `${UNUSABLE} ${reason === 'fare' ? `You need ${world.places.find(item => item.id === place)!.vehicle!.fare!.n} ${world.places.find(item => item.id === place)!.vehicle!.fare!.name} for the fare.`
   : reason === 'to' && world.remote === null ? NO_REMOTE : INSTEAD[reason === 'declined' ? 'json' : reason]}`;
 export const CUT = 'Your speech was longer than the limit: the others heard only its first words.';
+const DEED_CUT = 'Your deed was longer than the limit: only its first words were done.';
 const NOTHING = 'Nothing came of it that could be noticed.';
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
@@ -118,7 +119,7 @@ function own(world: World, event: Event, when: string, span = `${event.seconds} 
           : event.kind === 'sleep' ? `You lie down to sleep (${span}).`
             : event.kind === 'wake' ? 'You wake.'
               : event.kind === 'do' ? `You do (${span}): ${event.text}` : `You wait (${span}).`;
-  return [...(event.says === undefined ? [] : [`You say: "${event.says}"`]), what, ...(event.moved?.some(posting => posting.sink === 'fare') ? [`You pay ${event.moved.reduce((sum, posting) => sum + posting.n!, 0)} ${event.moved[0].name}.`] : []), ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : [])].map(line => `${when} ${line}`);
+  return [...(event.says === undefined ? [] : [`You say: "${event.says}"`]), what, ...(event.moved?.some(posting => posting.sink === 'fare') ? [`You pay ${event.moved.reduce((sum, posting) => sum + posting.n!, 0)} ${event.moved[0].name}.`] : []), ...(event.note ? [`Your note: ${event.note}`] : []), ...(event.cut ? [CUT] : []), ...(event.deedCut ? [DEED_CUT] : [])].map(line => `${when} ${line}`);
 }
 
 export const worldOf = (world: World, state: State, at = state.buses?.at ?? 0): World => {
@@ -354,8 +355,11 @@ function applied(world: World, state: State, record: Record): Event {
     // Read a capped span from one second more to verify that the cap could have come from readAction().
     const reason = typeof record.action === 'string' ? record.action : null, taken = typeof record.action === 'string' ? null : record.action as Action | null,
       asked = taken?.capped === undefined ? taken : { ...taken, seconds: (taken.seconds ?? 0) + 1 };
+    const checked = reason ? null : readAction(world, actor, JSON.stringify(asked), people, state.things);
+    // The original deed text is not kept, so replay checks the cut flag separately.
+    if (checked && typeof checked !== 'string' && checked.action === 'do' && taken?.deedCut === true) checked.deedCut = true;
     if (reason === 'fare' ? readAction(world, actor, JSON.stringify({ action: 'go', place: record.place }), people, state.things) !== reason
-      : reason ? !isRefusal(reason) || (['vehicle', 'full', 'driving', 'driver', 'reach'].includes(reason) && !world.vehicles?.length) || (reason === 'round' && !state.buses) : !isDeepStrictEqual(readAction(world, actor, JSON.stringify(asked), people, state.things), record.action)) {
+      : reason ? !isRefusal(reason) || (['vehicle', 'full', 'driving', 'driver', 'reach'].includes(reason) && !world.vehicles?.length) || (reason === 'round' && !state.buses) : !isDeepStrictEqual(checked, record.action)) {
       return refuse('holds an action its character cannot take');
     }
     const action = typeof record.action === 'string' ? { action: 'wait' as const, text: null, to: null, place: null, seconds: LOST_SECONDS, until: null, note: null } : record.action;

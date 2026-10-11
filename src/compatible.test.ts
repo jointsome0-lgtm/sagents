@@ -214,7 +214,7 @@ test('ask prints one line with codes for a refusal that quotes the key and the r
   const live = spawnSync(process.execPath, ['--import', preload.replace(encodeURIComponent(JSON.stringify(body)), encodeURIComponent(JSON.stringify(broken))).replace('402', '502'),
     join(import.meta.dirname, 'cli.ts'), 'live', join(import.meta.dirname, '../examples/night-station.json'), '--model', `api:${request.model}`], { encoding: 'utf8', timeout: 30_000,
     env: { PATH: process.env.PATH, HOME: mkdtempSync(join(tmpdir(), 'compatible-check-')), SAGENTS_API_URL: 'https://server.invalid/v1', SAGENTS_API_KEY: KEY } });
-  assert.match(live.stdout, /^failed \(provider_failed 502 bad_gateway\): 0 story minutes, 0 calls, /m);
+  assert.match(live.stdout, /^failed \(provider_failed 502 bad_gateway\): 0 story minutes, 1 calls, /m);
   assert.equal(live.status, 1);
   assert.deepEqual(leaks(`${live.stdout}${live.stderr}`), []);
   // A run whose answers came from two endpoints of one model counts them in the model's line.

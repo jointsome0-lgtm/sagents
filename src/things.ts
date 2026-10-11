@@ -32,7 +32,7 @@ export function readThings(value: unknown, field: string, labels: { next: number
     const label = `t${labels.next++}`;
     const n = item.n === undefined ? null : typeof item.n === 'number' && Number.isInteger(item.n) && item.n > 0 && item.n <= MAX_N ? item.n : refuse(`${here}.n`, 'must be a whole number from 1 to 1,000,000,000');
     const stock = flag(item.stock, `${here}.stock`), money = flag(item.money, `${here}.money`), open = flag(item.open, `${here}.open`);
-    const food = item.food === undefined ? null : typeof item.food === 'number' && Number.isFinite(item.food) && item.food >= 0 ? item.food : refuse(`${here}.food`, 'must be the calories of one, zero or more');
+    const food = item.food === undefined ? null : typeof item.food === 'number' && Number.isFinite(item.food) && item.food >= 0 ? item.food + 0 : refuse(`${here}.food`, 'must be the calories of one, zero or more');
     const drink = flag(item.drink, `${here}.drink`);
     if (drink && food === null) return refuse(`${here}.drink`, 'needs `food`, zero for water');
     const burns = flag(item.burns, `${here}.burns`), fixed = flag(item.fixed, `${here}.fixed`);

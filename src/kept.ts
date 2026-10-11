@@ -42,10 +42,17 @@ export function keepRun(dir: string, world: string, environment?: string) {
         const answer = await respond(request);
         Object.assign(row, { ms: Math.round(performance.now() - began), input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null,
           output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });
+        if (answer.tries === 2) row.tries = 2;
         return answer;
       } catch (error) {
         // Usage logs must not contain the service's failure text.
         Object.assign(row, { ms: Math.round(performance.now() - began), error: error instanceof ModelError ? error.code : 'unexpected' });
+        if (error instanceof ModelError) {
+          if (typeof error.httpStatus === 'number') row.status = error.httpStatus;
+          if (error.stage === 'connect' || error.stage === 'stream') row.stage = error.stage;
+          if (error.tries === 2) row.tries = 2;
+          if (error.code === 'declined' && ['event', 'filter', 'part'].includes(error.refusal ?? '')) row.refusal = error.refusal;
+        }
         throw error;
       } finally { appendFileSync(usage, `${JSON.stringify(row)}\n`); }
     };

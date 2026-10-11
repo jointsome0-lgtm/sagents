@@ -100,7 +100,7 @@ of tokens is never lost unsaved, and a call whose limit passed meanwhile ends wi
 
 | Field | Meaning |
 | --- | --- |
-| `model` | `api:<id>`, a model of [your own server](#a-server-of-your-own); or a model id of the ChatGPT plan, alone or as `<id>@<effort>` with `minimal`, `low`, `medium`, `high` or `xhigh`. |
+| `model` | `api:<id>`, a model of [your own server](#a-server-of-your-own); or a model id of the ChatGPT plan, alone or as `<id>@<effort>` with `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. |
 | `messages` | `user` and `assistant` messages with text `content`. |
 | `system` | Optional instructions. |
 | `schema` | Optional JSON Schema, in OpenAI's strict form, that the answer must follow. |
@@ -117,6 +117,8 @@ and `ask` and `live` take nothing else. A program that calls `src/chatgpt.ts` it
 the text as the stream brings it, before the answer is known to be whole or to come from the model asked for, so a
 call that ends in a failure, `wrong_model` included, may have handed over a part by then. The same holds for
 `src/compatible.ts` with `SAGENTS_API_STREAM`; without it an `api:` server's text is handed over once, whole and checked.
+`createChatgpt` in `src/chatgpt.ts` sends once more after two seconds only when the connection rejects before a response,
+within the same time limit and unless cancelled or timed out; a failure after any response is never sent again.
 
 | `reason` | What happened |
 | --- | --- |
@@ -379,8 +381,8 @@ sagents live examples/night-station.json [--model <id>] [--cast <character>=<id>
 | `--cast <character id>=<model name>` | Repeatable, absent for no overrides. Names a character id exactly once and a model name in the same form as `--model`. Both turns and rewrites go to that model. An unknown character, repeated id or missing half is refused. |
 | `--world-model <id>` | The `--model` name. `--world-model` answers deeds and speaks for figures. |
 | `--minutes <n>` | 30 story minutes; a number above zero and at most 1440. Ends at the story horizon, or pauses a kept world. |
-| `--calls <n>` | 60; a whole number at least 1. Counts every request, including retries, rewrites, cuts and declines. |
-| `--tokens <n>` | No ceiling; a positive safe whole number when given. `--tokens` stops with reason `tokens` before another request once reported input plus output reach it; the last request can cross it. An answer that reports no usage is read under the usual rules and no further request is sent: the ceiling cannot be kept without the counts, and `--calls` is the limit for a server that reports none. The reason is then `unreported`, unless the horizon, the call limit or the limit of unusable answers ends the run first. An answer cut at the output limit or declined adds nothing. |
+| `--calls <n>` | 60; a whole number at least 1. Counts every request when sent, including retries, rewrites, cuts, declines and the request that ends the run. |
+| `--tokens <n>` | No ceiling; a positive safe whole number when given. `--tokens` stops with reason `tokens` before another request once reported input plus output reach it; the last request can cross it. An answer that reports no usage is read under the usual rules; a failed request also leaves spending unknown. No further request is sent: the ceiling cannot be kept without the counts, and `--calls` is the limit for a server that reports none. The reason is then `unreported`, unless another stop ends the run first. |
 | `--state <file>` | None. Opens or creates a SQLite journal and continues it. |
 | `--run <dir>` | None. Keeps an experiment directory and continues it as another stretch. Cannot be given with `--state`. |
 | `--environment <name>` | The world file's choice, or none. Same name bounds as the field; reads `environments/<name>.json`. |
@@ -391,17 +393,19 @@ limit shortens towards the end. With state, the end is a pause, no resident is t
 counts from an unfinished deed's moment, else the next due clock law or vehicle arrival, else the next person's turn.
 The library's `runLive()` given a journal without `pause` still tells the horizon; the CLI always uses pause with state.
 
-The run stops at the first model-connection failure and switches nobody to another model. Two failures have their
-own limits. An `output_limit` loses that turn or takes one of the world's or memory's two tries, with no usage
-known; three cuts of one model in a row, with no whole answer in between, end as `failed (output_limit)`.
+The run stops at the first model-connection failure except cuts and declines, and switches nobody to another model.
+An `output_limit` loses that turn or takes one of the world's or memory's two tries, with no usage known.
 A `declined` request is never sent again with the same words: its turn becomes a wait, its deed has no result,
 and its rewrite is lost unless a readable first answer was set aside. The third decline in the run, for any model
 or purpose, ends as `failed (declined)`. Both count as calls and unusable answers.
-Five unusable answers of one model name with none used in between end as `failed (invalid)`, across turns,
-world answers and rewrites. A refusal by the rules of things is counted as `refused`, neither adding to nor ending
-that row. A cut or decline limit wins if that answer also reaches the invalid limit. The answer that ends the run
-is counted but not journalled, except a readable memory set aside is saved even when its retry stops the run.
-`cutRun`, `declinedRun` and `invalidRun` of the library's `runLive()` have no CLI flags.
+Five consecutive tasks left with nothing usable end as `failed (stalled)`, after the finished task is journalled.
+Each resident has a separate streak for turns and rewrites; the world has one for deeds and figure replies together.
+A turn with no action, a lost rewrite or a world answer not accepted after its tries adds to that streak; acceptance
+clears only that streak. Unreadable answers, rule refusals, cuts and declines can all leave a task unusable.
+`invalid` counts and cut streaks no longer end a run by themselves. A terminal connection failure or the decline
+limit ends it without a record of that task, except a readable memory set aside is saved even when its retry stops
+the run. `failedRun` and `declinedRun` of the library's `runLive()` have no CLI flags; their defaults are 5 and 3,
+and `Infinity` turns each limit off. Streaks and counters start fresh at each start.
 `runLive` in `src/live.ts` holds these stops. No real service refusal was seen; the documented shapes that count
 as `declined` are in the [table of reasons](#what-works-today).
 
@@ -415,8 +419,8 @@ service's words (`failed (provider_failed 502 bad_gateway)`; `httpStatus`, `prov
 
 The totals count story minutes, calls, `invalid`, `overlong` cuts, `declined`, memory `rewrites` and `lost`,
 world answers `refused`, deeds and speeches left `void`, input tokens, `cachedInputTokens` and output tokens.
-They sum only reported usage: `unreported` names how many answers reported none, rather than calling them zero;
-an absent cached count adds nothing. `kinds` divides requests and tokens into turns, rewrites and world answers,
+They sum only reported usage: `unreported` counts answers without usage and requests that failed with a `ModelError`,
+rather than calling their spending zero; an absent cached count adds nothing. `kinds` divides requests and tokens into turns, rewrites and world answers,
 including figure replies and retries. Text prints one line for each kind. `models` also divides calls, unusable
 answers and tokens by model name, with text lines when several models played. Endpoint names can add that line
 for a single model too, as [the connection](#a-server-of-your-own) says.
@@ -469,7 +473,7 @@ sends them. This groups requests without putting story text or ids in the names.
 | `world.json` | The world file as given. A directory with another world file is refused. |
 | `state.sqlite` | The state described above. |
 | `part<N>.events.jsonl` | One event per line for that start, beginning with `part1`, then `part2` and so on. |
-| `usage-part<N>.jsonl` | One row per request: when sent, purpose (`turn`, `memory`, `world`, `reply`), owner, model, milliseconds, reported input, cached, output and reasoning tokens, and failure code. No request, answer or failure text. |
+| `usage-part<N>.jsonl` | One row per request: when sent, purpose (`turn`, `memory`, `world`, `reply`), owner, model, milliseconds, reported input, cached, output and reasoning tokens, and failure code `error`. A failure keeps `status` when it has an HTTP status; on the plan, `stage` is `connect` before a response or `stream` after one, and a decline keeps `refusal` as `event`, `filter` or `part`. A second try keeps `tries: 2`, even on success; these fields are absent otherwise. No request, answer, failure text or service code. |
 | `about.txt` | Your description of the experiment, when you add one; the lab shows it. |
 
 A second start adds the next stretch. Files are made only where absent, lines only appended; nothing is
@@ -577,6 +581,7 @@ those near the caller. A sleeper or traveller gets its waiting calls on waking o
 reads actions. Speech and a call are cut at 65 words and at the turn's limit, with the speaker's rate and a minimum
 of two seconds. Notes and deeds are cut at 65, gestures at 12, words with a deed at 20 and the turn's limit.
 A deed lasts at least as long as its words, and they hold listeners like speech.
+`own` in `src/journal.ts` tells only the doer of a cut deed, on its own line like cut speech: `Your deed was longer than the limit: only its first words were done.`
 [Speaker rates were checked with stand-ins](docs/measured.md#speech-rates), with no changed instruction text.
 The walking fields above give the time. Walking hears nothing,
 cannot stop and takes no turn on the way.

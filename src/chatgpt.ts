@@ -21,7 +21,7 @@ const SCOPES = `openid profile email offline_access resource.invoke ${PLAN_SCOPE
 // These failures mean the refresh token cannot work again; another sign-in is needed.
 const SPENT = ['invalid_grant', 'invalid_refresh_token', 'token_expired', 'refresh_token_expired', 'refresh_token_invalidated',
   'refresh_token_reused'];
-const EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+const EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const PASSIVE_ITEMS = ['message', 'reasoning'];
 // Access tokens live an hour.
 const MARGIN_MS = 5 * 60_000;
@@ -41,6 +41,9 @@ export class ModelError extends Error {
   httpStatus: number | undefined;
   providerCode: string | undefined;
   param: string | undefined;
+  stage?: 'connect' | 'stream';
+  tries?: 2;
+  refusal?: 'event' | 'filter' | 'part';
   constructor(code: string, httpStatus?: number, providerCode?: unknown, param?: unknown) {
     super(code);
     this.code = code;
@@ -57,7 +60,7 @@ export type Request = { model: string; system?: string; messages: Message[]; sch
 // Cache names enter headers and must fit the service's key limit.
 export const CACHE = /^[A-Za-z0-9_-]{1,64}$/;
 export type Usage = { inputTokens: number | null; cachedInputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null };
-export type Result = { text: string; usage: Usage | null; endpoint?: string };
+export type Result = { text: string; usage: Usage | null; endpoint?: string; tries?: 2 };
 export const ENDPOINT = /^[A-Za-z0-9 ./_-]{1,40}$/, OTHER_ENDPOINT = 'other';
 // onText may receive pieces before a later failure; only the return value is a complete answer.
 export type Controls = { signal?: AbortSignal; onText?: (delta: string) => unknown; timeoutMs?: number };
@@ -325,14 +328,25 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       if (signal?.aborted) throw new ModelError('cancelled');
       // A failure to save rotated tokens must not be hidden by a caller timeout.
       const token = await accessToken().catch(error => { throw error instanceof ModelError ? error : new ModelError('internal_error'); });
+      let status: number | undefined, tries: 2 | undefined;
       try {
         return await untilStopped(async () => {
           current.throwIfAborted();
           // The plan route refuses max_output_tokens.
           // With the cache key in the body and both headers, cache hits occurred in 8 or 9 of 20 requests, versus 1 to 3 without them.
-          const response = await fetcher(`${API}/responses`, { method: 'POST', redirect: 'error', signal: current, body,
+          const send = () => fetcher(`${API}/responses`, { method: 'POST', redirect: 'error', signal: current, body,
             headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'text/event-stream',
               ...(request.cache ? { 'session-id': request.cache, 'x-client-request-id': request.cache } : {}) } });
+          let response: Response;
+          try { response = await send(); } catch (error) {
+            if (current.aborted || performance.now() >= until) throw error;
+            await sleep(2000, undefined, { signal: current });
+            current.throwIfAborted();
+            if (performance.now() >= until) throw new ModelError('timeout');
+            tries = 2;
+            response = await send();
+          }
+          status = response.status;
           if (response.status === 402) {
             if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
             throw failure(undefined, 402);
@@ -370,9 +384,10 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
             const answering = isObject(event.response) ? event.response.model : undefined;
             if (typeof answering === 'string' && answering && answering !== sent.model) throw new ModelError('wrong_model');
             if (event.type === 'response.failed') throw failure(event.response?.error?.code, undefined, event.response?.error?.param);
-            if (event.type === 'response.refusal.delta' || event.type === 'response.refusal.done') throw new ModelError('declined');
+            if (event.type === 'response.refusal.delta' || event.type === 'response.refusal.done') throw Object.assign(new ModelError('declined'), { refusal: 'event' as const });
             const stopped = event.response?.incomplete_details?.reason;
-            if (event.type === 'response.incomplete') throw new ModelError(stopped === 'max_output_tokens' ? 'output_limit' : stopped === 'content_filter' ? 'declined' : 'incomplete_stream');
+            if (event.type === 'response.incomplete') throw Object.assign(new ModelError(stopped === 'max_output_tokens' ? 'output_limit' : stopped === 'content_filter' ? 'declined' : 'incomplete_stream'),
+              stopped === 'content_filter' ? { refusal: 'filter' as const } : {});
             // No tools were sent, so other item kinds cannot be an answer.
             if (event.type === 'response.output_item.added' && !PASSIVE_ITEMS.includes(event.item?.type as string)) throw new ModelError('unexpected_tools');
             if (['response.output_item.added', 'response.output_item.done'].includes(event.type as string)
@@ -394,7 +409,7 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
           const output = completed.response.output;
           if (output !== undefined && !Array.isArray(output)) throw new ModelError('invalid_stream');
           if (Array.isArray(output) && output.some(item => !isObject(item) || !PASSIVE_ITEMS.includes(item.type as string))) throw new ModelError('unexpected_tools');
-          if (Array.isArray(output) && output.some(item => isObject(item) && Array.isArray(item.content) && item.content.some(part => isObject(part) && part.type === 'refusal'))) throw new ModelError('declined');
+          if (Array.isArray(output) && output.some(item => isObject(item) && Array.isArray(item.content) && item.content.some(part => isObject(part) && part.type === 'refusal'))) throw Object.assign(new ModelError('declined'), { refusal: 'part' as const });
           if (Array.isArray(output)) output.forEach((item, index) => { if (item.type === 'message' && item.phase === 'commentary') interim(index); });
           const text = pieces.filter(piece => piece.index === undefined || !commentary.has(piece.index)).map(piece => piece.text).join('');
           if (Array.isArray(output)) {
@@ -409,12 +424,14 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
           const inputTokens = count(usage?.input_tokens), outputTokens = count(usage?.output_tokens);
           return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
             cachedInputTokens: count(usage?.input_tokens_details?.cached_tokens), outputTokens,
-            reasoningTokens: count(usage?.output_tokens_details?.reasoning_tokens) } };
+            reasoningTokens: count(usage?.output_tokens_details?.reasoning_tokens) }, ...(tries ? { tries } : {}) };
         }, current, until);
       } catch (error) {
-        if (signal?.aborted) throw new ModelError('cancelled');
-        if (timer.aborted || performance.now() >= until) throw new ModelError('timeout');
-        throw error instanceof ModelError ? error : new ModelError('provider_failed');
+        const failed = signal?.aborted ? new ModelError('cancelled') : timer.aborted || performance.now() >= until ? new ModelError('timeout')
+          : error instanceof ModelError ? error : new ModelError('provider_failed');
+        failed.stage = status === undefined ? 'connect' : 'stream';
+        if (tries) failed.tries = tries;
+        throw failed;
       }
     },
 

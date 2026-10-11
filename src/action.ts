@@ -8,7 +8,7 @@ import type { Event, Kind, Person, Place, World } from './world.ts';
 // `gesture` and `says` stay absent when unused so older journal records read back unchanged.
 // `capped` is for journal counts only; requests and events must not carry it.
 export type Action = { note: string | null; action: Kind; text: string | null; to: string | null; place: string | null; seconds: number | null; until: string | null;
-  gesture?: string; says?: string; capped?: true };
+  gesture?: string; says?: string; capped?: true; deedCut?: true };
 export const REFUSALS = ['json', 'action', 'text', 'to', 'here', 'place', 'time', 'long', 'declined', 'vehicle', 'full', 'driving', 'driver', 'reach', 'round', 'fare'] as const;
 export type Refusal = typeof REFUSALS[number];
 export const isRefusal = (value: unknown): value is Refusal => REFUSALS.some(reason => reason === value);
@@ -74,8 +74,8 @@ export function readAction(world: World, actor: Person, answer: string, people: 
     return { ...none, action: 'go', place: to.id };
   }
   if (value.action === 'do') {
-    const done = short(text), lasts = span(MAX_SECONDS);
-    return !done ? 'text' : lasts ? { ...none, ...lasts, action: 'do', text: done, ...(says === null ? {} : { says }) } : 'time';
+    const done = text === null ? null : cut(text, MAX_WORDS), lasts = span(MAX_SECONDS);
+    return !done?.text ? 'text' : lasts ? { ...none, ...lasts, action: 'do', text: done.text, ...(says === null ? {} : { says }), ...(done.cut ? { deedCut: true as const } : {}) } : 'time';
   }
   if (value.action === 'wait' || value.action === 'sleep') {
     const lasts = span(value.action === 'wait' ? MAX_SECONDS : MAX_SLEEP);
@@ -102,7 +102,7 @@ export function apply(world: World, people: Person[], actor: Person, action: Act
   const event: Event = { at: now, clock: clockAt(world, now), kind: action.action, who: actor.id, place, to: null, text: action.text,
     seconds: action.until === null ? action.seconds ?? 0 : lasting(world, actor, action.action as 'do' | 'wait' | 'sleep', now, action.until), cut: false,
     heard: here.map(person => person.id),
-    note: action.note, ...(action.gesture === undefined ? {} : { gesture: action.gesture }) };
+    note: action.note, ...(action.gesture === undefined ? {} : { gesture: action.gesture }), ...(action.deedCut ? { deedCut: true } : {}) };
   actor.began = now;
   if (action.action === 'say' || action.action === 'call') {
     Object.assign(event, cut(action.text as string, limit));

@@ -35,7 +35,7 @@ export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // journal.ts relies on a result following its do, with the same who.
 // fromDeed links even a refused way to its result; it must not add a memory line.
 export type Event = { at: number; clock: string; kind: Kind | 'drive' | 'park' | 'arrive' | 'wake' | 'memory' | 'result' | 'reply' | 'weather'; who: string; place: string; to: string | null;
-  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; gesture?: string; says?: string; wakes?: string[];
+  text: string | null; seconds: number; cut: boolean; heard: string[]; note: string | null; gesture?: string; says?: string; wakes?: string[]; deedCut?: true;
   transfer?: true; from?: string; arrival?: number; indoors?: string | null; search?: boolean; finds?: string[]; moved?: Posting[]; set?: { what: string; name: string; state: string }[];
   poses?: { of: string; text: string }[]; feels?: { of: string; text: string }[]; beyond?: string | null; nearby?: string[]; found?: { what: string; name: string; spot: string }[]; touches?: Change[]; lingers?: Lingering[];
   traced?: Mark[]; wiped?: Mark[]; goes?: string | null; fromDeed?: number };
