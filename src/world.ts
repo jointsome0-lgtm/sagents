@@ -16,7 +16,7 @@ export const MAX_SECONDS = 3600;
 export const MAX_SLEEP = 43_200;
 export const LOST_SECONDS = 30;
 
-export type Figure = { id: string; name: string; looks: string | null; facts: string | null; wordsPerMinute?: number };
+export type Figure = { id: string; name: string; looks: string | null; facts: string | null; wordsPerMinute?: number; hours?: [string, string] };
 export type Vehicle = { at: string | null; heading: { from: string; to: string; at: number } | null; faster: number; seats: number; drivers: string[] | null; reach: string[];
   route?: string[]; leaves?: string[]; stands?: number; fare?: { name: string; n: number }; departure?: { to: string; at: number } };
 export type Place = { id: string; name: string; about: string; facts: string | null; things: Thing[]; open: boolean; clock: boolean;
@@ -99,8 +99,14 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
     const figures = ((place.figures ?? []) as unknown[]).map((figure, at): Figure => {
       const name = `${field}.figures[${at}]`;
       if (!isObject(figure)) return refuse(name, 'must be an object');
+      const hours = figure.hours;
+      if (hours !== undefined) {
+        if (!(Array.isArray(hours) && hours.length === 2 && hours.every(time => typeof time === 'string' && TIME.test(time)))) return refuse(`${name}.hours`, 'must be two times of day like `["07:30", "23:00"]`');
+        if (hours[0] === hours[1]) return refuse(`${name}.hours`, 'must be two different times of day');
+      }
       return { id: figure.id as string, name: textOf(figure.name, `${name}.name`), looks: boundedOf(figure.looks, `${name}.looks`, LIMITS.looks),
         facts: factsOf(figure.facts, `${name}.facts`),
+        ...(hours === undefined ? {} : { hours: hours as [string, string] }),
         ...(figure.wordsPerMinute === undefined ? {} : { wordsPerMinute: rateOf(figure.wordsPerMinute, `${name}.wordsPerMinute`, wordsPerMinute) }) };
     });
     const at = place.at === undefined || place.at === null ? null : place.at;

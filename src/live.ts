@@ -17,9 +17,9 @@ import { FORCES, KINDS, MAX_TOUCHES, NONE } from './touch.ts';
 import type { Touch } from './touch.ts';
 import { KINDS as MARK_KINDS, LEVELS, MARK_WORDS, marksAt, MAX_MARKS, MAX_MINUTES, ZONES } from './marks.ts';
 import type { Mark } from './marks.ts';
-import { clockAt, driveSeconds, DRIFT, hasClock, sensed, SENSED, travelSeconds, walkAt, turnSeconds, wordLimit } from './time.ts';
+import { clockAt, driveSeconds, DRIFT, figureHere, hasClock, sensed, SENSED, travelSeconds, walkAt, turnSeconds, wordLimit } from './time.ts';
 import { CHARS_PER_WORD, GESTURE_WORDS, LIMITS, MAX_SECONDS, MAX_SLEEP, MAX_TRACES, MAX_WORDS, namesOf, SAYS_WORDS } from './world.ts';
-import type { Event, Person, Place, World } from './world.ts';
+import type { Event, Figure, Person, Place, World } from './world.ts';
 
 // Journal records contain private text; resident requests may include only their owner's sheet, memory and perceived events.
 const residentInstructionsOf = (traces: boolean, oneSchema = false, deedEnds = false, portions = false, prices = false) => `You are one person in a story that several people live through together. You are that person and not a narrator.
@@ -330,8 +330,15 @@ const earlierOf = (state: State, place: Place) => {
   return [...(results.length ? ['What came of earlier deeds here:', ...results.map(line => line.text)] : []),
     ...(said.length ? ['What was said to the people of this place before:', ...said.map(line => line.text)] : [])];
 };
-const crowdOf = (place: Place) => [...(place.crowd === null ? [] : [`Around, played by nobody: ${closed(place.crowd)}`]),
-  ...(place.figures.length ? ['Of this place, played by nobody:', ...place.figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}${part('Facts', figure.facts)}`)] : [])];
+const hoursOf = (figure: Figure) => figure.hours ? ` Here from ${figure.hours[0]} to ${figure.hours[1]}.` : '';
+const awayOf = (figures: Figure[], resident = false) => figures.length ? [`${resident
+  ? 'People of this place who are away now and do not answer:' : 'Of this place, away now, not seen and not heard:'} ${figures.map(figure => `${figure.name} (here from ${figure.hours![0]} to ${figure.hours![1]})`).join(', ')}.`] : [];
+const crowdOf = (world: World, place: Place, at: number) => {
+  const figures = place.figures.filter(figure => figureHere(world, figure, at));
+  return [...(place.crowd === null ? [] : [`Around, played by nobody: ${closed(place.crowd)}`]),
+    ...(figures.length ? ['Of this place, played by nobody:', ...figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}${part('Facts', figure.facts)}${hoursOf(figure)}`)] : []),
+    ...awayOf(place.figures.filter(figure => !figureHere(world, figure, at)))];
+};
 // A labelled facts block after the lists led a weak model to move things where no deed had put them.
 const placeOf = (state: State, place: Place, deed: boolean, world: World) => {
   const facts = [...(place.facts === null ? [] : [closed(place.facts)]), ...namedOf(state, place, deed, world.portions).facts];
@@ -341,7 +348,7 @@ const placeOf = (state: State, place: Place, deed: boolean, world: World) => {
 function replyOf(world: World, state: State, said: Event): string {
   const place = world.places.find(item => item.id === said.place)!;
   return [...placeOf(state, place, false, world),
-    ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...doingOf(world, state, place.id), ...crowdOf(place),
+    ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...doingOf(world, state, place.id), ...crowdOf(world, place, said.at),
     ...earlierOf(state, place),
     `Now ${said.clock}. ${named(world.characters, said.who)} says to ${tagged(place.figures.find(figure => figure.id === said.to)!)}: "${said.text}"`,
     `What does ${named(place.figures, said.to)} answer?`].join('\n');
@@ -375,7 +382,7 @@ function deedOf(world: World, state: State, deed: Event): string {
     ...(place.nextDoor.length ? ['Next door:', ...place.nextDoor.map(id => `- ${tagged(world.places.find(item => item.id === id)!)}: ${world.characters.flatMap((character, index) =>
       state.people[index].place === id ? [`${tagged(character)}, ${state.people[index].asleep ? 'asleep' : 'awake'}`] : []).join('; ') || 'nobody'}.`)] : []),
     ...LAWS.flatMap(law => law.world?.(world, state.laws, place) ?? []), 'Here:', ...hereOf(world, state, place), ...doingOf(world, state, place.id, deed.who),
-    ...(world.touch ? heldOf(state, place, deed.at) : []), ...(world.marks ? lastingOf(state, place, deed.at) : []), ...crowdOf(place),
+    ...(world.touch ? heldOf(state, place, deed.at) : []), ...(world.marks ? lastingOf(state, place, deed.at) : []), ...crowdOf(world, place, deed.at),
     ...earlierOf(state, place),
     `Now ${deed.clock}. ${named(world.characters, deed.who)} ${world.deedEnds ? stoppedOf(deed) : `does, for ${deed.seconds} s: ${deed.text}`}`,
     `What comes of it?${world.ways ? ` This place is \`${place.id}\`, and \`leads\` is \`${place.id}\` unless the deed is the way to another place${boards ? ' or into a vehicle that stands here' : ''}.` : ''}`].join('\n');
@@ -415,7 +422,8 @@ export function requestLimit(world: World): number {
   const touches = world.touch ? MAX_TOUCHES * (2 * longest(people) + LIMITS.touch * CHARS_PER_WORD + 100) + 100 : 0;
   const marks = world.marks ? MAX_MARKS * (MARK_WORDS * CHARS_PER_WORD + longest(world.characters.map(character => character.id)) + 100) : 0;
   const local = (withFacts: boolean) => Math.max(...world.places.map(place => (place.crowd?.length ?? 0) + 150
-    + place.figures.reduce((sum, figure) => sum + tagged(figure).length + looks(figure) + (withFacts ? (figure.facts?.length ?? 0) + 20 : 0) + 20, 0)));
+    + place.figures.reduce((sum, figure) => sum + tagged(figure).length + looks(figure) + (withFacts ? (figure.facts?.length ?? 0) + 20 : 0) + hoursOf(figure).length + 20, 0)
+    + awayOf(place.figures.filter(figure => figure.hours), !withFacts).join('').length));
   const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + SENSED + 900
     + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + laws + local(false) + touches + marks;
   const resident = system + world.longWords * CHARS_PER_WORD + lines + now + Math.max(rewriteOf(world, '', true).length, rewriteOf(world, '', false).length) + 200;
@@ -718,6 +726,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     });
     const limit = pause ? MAX_WORDS : wordLimit(world, who, horizon - now);
     const spot = road ? roadPlace() : world.places.find(item => item.id === place)!;
+    const figures = spot.figures.filter(figure => figureHere(world, figure, now));
     const pending = state.pending?.get(who)?.event;
     const body = `${part('Your pose', actor.pose)}${onOf(state, who, 'On you')}${carries('You carry', who, true)}`.slice(1);
     const called = (id: string) => named(world.characters, id);
@@ -730,10 +739,11 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
     const request = known(system, mind, mind.lines, [
       road ? `${nowOf(world, actor, now)} ${wayLine(world, { from: road.from, to: road.to, behind: road.behind, ahead: road.seconds - road.behind })}${road.to === actor.heading ? '' : ` Your destination is ${tagged(world.places.find(place => place.id === actor.heading)!)}.`} ${others.length ? 'Walking with you:' : 'Nobody walks with you.'}` : `${nowOf(world, actor, now)} You are in ${tagged(spot)}${spot.vehicle ? spot.vehicle.heading
         ? `, on the way to ${tagged(world.places.find(place => place.id === spot.vehicle!.heading!.to)!)}, ${Math.floor((spot.vehicle.heading.at - now) / 60)} min ${(spot.vehicle.heading.at - now) % 60} s of the drive are left`
-        : `, standing at ${tagged(world.places.find(place => place.id === spot.vehicle!.at)!)}${spot.vehicle.route ? `, leaving for ${named(world.places, spot.vehicle.departure!.to)} in ${Math.floor((spot.vehicle.departure!.at - now) / 60)} min ${(spot.vehicle.departure!.at - now) % 60} s` : ''}` : ''}. ${others.length ? 'Here with you:' : spot.figures.length || spot.crowd !== null ? 'None of the people of the list is here with you.' : 'Nobody else is here.'}`,
+        : `, standing at ${tagged(world.places.find(place => place.id === spot.vehicle!.at)!)}${spot.vehicle.route ? `, leaving for ${named(world.places, spot.vehicle.departure!.to)} in ${Math.floor((spot.vehicle.departure!.at - now) / 60)} min ${(spot.vehicle.departure!.at - now) % 60} s` : ''}` : ''}. ${others.length ? 'Here with you:' : figures.length || spot.crowd !== null ? 'None of the people of the list is here with you.' : 'Nobody else is here.'}`,
       ...others, ...doingOf(world, state, place, who), ...watched,
       ...vehicleView(world, state, actor, now).map(([, text]) => text),
-      ...(spot.figures.length ? ['People of this place, who answer when you say with `to`:', ...spot.figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}`)] : []),
+      ...(figures.length ? ['People of this place, who answer when you say with `to`:', ...figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}${hoursOf(figure)}`)] : []),
+      ...awayOf(spot.figures.filter(figure => !figureHere(world, figure, now)), true),
       ...(spot.crowd === null ? [] : [`Around you: ${closed(spot.crowd)}`]),
       ...(pending ? [`You are still doing, ${Math.min(now - pending.at, pending.seconds)} of ${pending.seconds} s so far: ${closed(pending.text!)} To go on with it, answer wait: a do, a go or a sleep would stop it.`] : []),
       ...(body ? [body] : []), ...touching,

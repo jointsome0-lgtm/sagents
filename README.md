@@ -247,7 +247,7 @@ Put today's debt, a sum owed or where something was put in memory, rather than i
 ##### Figure
 
 `Figure` in `src/world.ts` is a named person of one place whom no model plays.
-Each figure is `{ id, name, looks, facts, wordsPerMinute }`. It has no sheet, memory, turn or carried things, never speaks first, wakes nobody and follows nobody.
+Each figure is `{ id, name, looks, facts, wordsPerMinute, hours }`. It has no sheet, memory, turn or carried things, never speaks first, wakes nobody and follows nobody.
 A call cannot reach it. Asking it to answer costs a request even when it says nothing.
 
 | Field | Type, default and bounds | What it means |
@@ -257,6 +257,14 @@ A call cannot reach it. Asking it to answer costs a request even when it says no
 | `looks` | Text or null, absent for none; 60 words at most. | What anyone in the place sees. |
 | `facts` | Text or null, absent for none; 300 words at most. | What the world knows when speaking for it, never sent to residents. |
 | `wordsPerMinute` | Number above zero, absent for the world's rate; same speech-duration bound. | The rate of its answer. |
+| `hours` | Two different times read with `TIME` in `src/reading.ts`, like `["07:00", "12:00"]`; absent for always here. | Its daily hours, from the first time up to the second, the second excluded; an earlier second time runs over midnight. |
+
+`figureHere` in `src/time.ts` decides presence from the world file and the moment alone. Outside its hours a figure
+is away, cannot be seen or heard and does not answer. Requests give only its name and hours in the away line;
+its looks and facts are withheld. A figure here with hours has `Here from F to T.` after its list line.
+`hoursOf` and `awayOf` in `src/live.ts` build these additions. No arrival or departure is saved or asks a model.
+Past speech and answers keep the figure's name and speech rate, through `namesOf` and `figuresOf` in `src/world.ts`,
+which still include every figure of the file. A file without hours keeps its requests and saved state unchanged.
 
 ##### Thing
 
@@ -450,6 +458,7 @@ would ignore settings and lose their state.
 
 | Condition | Format |
 | --- | --- |
+| Any figure has `hours` | `48` |
 | `prices` | `47` |
 | `portions` | `46` |
 | `deedEnds` | `45` |
@@ -505,7 +514,9 @@ id, description, seats and allowed drivers by name, or anyone; a bus instead giv
 The list opens `Vehicles:`. It never gives their position and stays fixed; the action schema names vehicles from the first turn, even as they move.
 Only worlds with vehicles add the vehicle rule line, with the round and automatic fare clauses only when relevant.
 
-A turn lists figures under ``People of this place, who answer when you say with `to`:`` and the crowd as
+A turn lists figures here under ``People of this place, who answer when you say with `to`:`` only when some are here,
+then names any away figures with their hours. Without another resident here, the choice of nobody or no played people
+counts only figures here and the crowd. `runLive` in `src/live.ts` builds these lists. It lists the crowd as
 `Around you: …`. It gives its owner its pose, traces and carried things three levels deep with counts. For people in its place
 it gives looks, pose, traces and visibly carried things. Open containers show contents; closed ones conceal them.
 It gives figures' names and looks, the crowd, sleep debt, its owner's hunger and thirst when needed, local weather,
@@ -517,7 +528,9 @@ answer; hidden things and all facts are withheld. Its own looks are in the syste
 The `action` is `say`, `call`, `go`, `do`, `wait` or `sleep`, with an optional private `note` written before the action.
 The note is what goes on in the character now, what it notices, feels, wants and holds back, rather than a plan.
 A `say` can have a `gesture`, what its face, hands or body do, seen with the speech but not sent to the world.
-Only a figure here can be its `to`; any other `to` is dropped. A `do` can have `says`, spoken aloud
+Only a figure here at the turn's moment can be its `to`; `readAction` in `src/action.ts` drops any other `to`,
+saying the speech to the room without a reply request. A speech begun while the figure is here is answered.
+A `do` can have `says`, spoken aloud
 before the world answers; the world still receives the deed alone. [Gestures, words and note order were checked
 together](docs/measured.md#gestures-words-and-notes), without counting whether the action follows its note.
 `schemaOf` in `src/live.ts` lists the world's actions and place ids, omitting `call` without remote contact.
@@ -527,7 +540,8 @@ compared invalid destinations; a server ignoring the schema can still write one,
 `worldSystemOf`, `deedOf`, `placeOf` and `hereOf` in `src/live.ts` build a deed's request. It has the world's
 description and facts, the place and its facts, listed and hidden things, ordinary other places, the clock, doer,
 deed and span. For people here, awake or asleep, it has name, id, looks, pose, things and facts; for neighbours
-only names, ids and whether awake or asleep, or nobody. It has the crowd and figures with looks and facts,
+only names, ids and whether awake or asleep, or nobody. `crowdOf` in `src/live.ts` gives the crowd and figures here
+with looks and facts at the deed's moment, followed by the away line,
 recent deeds, and recent speeches to figures and their answers. With deed ends it describes the place when the
 answer is due, and `doingOf` in `src/live.ts` also lists other deeds still going here. A vehicle inside has its
 description and the places between which it drives or the stop where it stands; a deed outside sees only vehicles standing there.
@@ -571,7 +585,8 @@ Answer texts are cut at their word limits. An empty `beyond` is null, and an emp
 
 `replyOf`, `replySchemaOf` and `figureInstructionsOf` in `src/live.ts` build a figure's request. It has the deed
 request's place and people, without hidden things, neighbours, touches or lasting feelings. It includes crowd,
-every figure's looks and facts, recent deeds, and the latest 300 words said to the figures here and answered.
+figures here with looks and facts at the speech's moment and the away line through `crowdOf` in `src/live.ts`,
+recent deeds, and the latest 300 words said to the figures of this place and answered.
 These lines are shared by all figures, not a figure's private memory. The answer has `reply`, up to 65 words or
 null, and `moves` for something handed over while speaking. A figure's things are among the place's things;
 it cannot eat or burn through its answer. With `prices`, moving a priced thing that lies in the place sells it,

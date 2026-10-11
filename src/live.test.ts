@@ -62,6 +62,24 @@ Means of remote contact: telephone.
 You are Boris (boris).
 SHEET-BORIS`;
 
+test('figure hours take format 48 before other settings and refuse an older mark', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'sagents-figure-hours-'));
+  try {
+    const path = join(directory, 'state.sqlite'), source = JSON.stringify({ title: 'Market', about: 'An invented market.', clock: '11:58', portions: true, deedEnds: true,
+      stableFirst: true, fixedSchema: true, oneSchema: true, hunger: true, ways: true, marks: true, touch: true,
+      places: [{ id: 'market', name: 'Market', about: 'A counter.', things: [{ name: 'soup', food: 300, drink: true }], figures: [{ id: 'raya', name: 'Raya', hours: ['07:00', '12:00'] }] }],
+      characters: [{ id: 'ada', name: 'Ada', place: 'market', sheet: 'S' }] });
+    readWorld(JSON.parse(source));
+    openState(path, source).close();
+    const meta = new DatabaseSync(path);
+    try {
+      assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '48');
+      meta.prepare("UPDATE meta SET value = '46' WHERE key = 'format'").run();
+    } finally { meta.close(); }
+    assert.throws(() => openState(path, source), /written by another version of `live`/);
+  } finally { rmSync(directory, { recursive: true }); }
+});
+
 test('a pending meal survives a kept stop with the same result, memories, history and next request', async () => {
   const file = { title: 'Meal', about: 'An invented meal.', clock: '09:00', deedEnds: true, hunger: true,
     stableFirst: true, fixedSchema: true, oneSchema: true,

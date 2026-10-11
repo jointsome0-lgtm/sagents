@@ -1,7 +1,7 @@
 import { all } from './things.ts';
 import type { Things } from './things.ts';
 import { cut, isObject, wordsOf } from './reading.ts';
-import { clockAt, driveSeconds, lasting, secondsUntil, speechSeconds, travelSeconds, walkAt, legAt } from './time.ts';
+import { clockAt, driveSeconds, figureHere, lasting, secondsUntil, speechSeconds, travelSeconds, walkAt, legAt } from './time.ts';
 import { GESTURE_WORDS, MAX_SECONDS, MAX_SLEEP, MAX_WORDS, SAYS_WORDS } from './world.ts';
 import type { Event, Kind, Person, Place, World } from './world.ts';
 
@@ -44,7 +44,7 @@ export function readAction(world: World, actor: Person, answer: string, people: 
     const until = time ? `${time[1].padStart(2, '0')}:${time[2]}` : null;
     return !until ? null : secondsUntil(world, actor.freeAt, until) > most ? capped : { seconds: null, until };
   };
-  const figure = world.places.find(place => place.id === actor.place)?.figures.find(item => item.id === value.to)?.id ?? null;
+  const figure = world.places.find(place => place.id === actor.place)?.figures.find(item => item.id === value.to && figureHere(world, item, actor.freeAt))?.id ?? null;
   const gesture = short(value.gesture, GESTURE_WORDS), says = short(value.says, SAYS_WORDS);
   if (value.action === 'say') return text ? { ...none, action: 'say', text, to: figure, ...(gesture === null ? {} : { gesture }) } : 'text';
   if (value.action === 'call') {

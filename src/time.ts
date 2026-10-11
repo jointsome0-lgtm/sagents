@@ -1,6 +1,6 @@
 import { secondsOfDay } from './reading.ts';
 import { MAX_SECONDS, MAX_SLEEP, MAX_WORDS, namesOf } from './world.ts';
-import type { Person, Vehicle, Walk, World } from './world.ts';
+import type { Figure, Person, Vehicle, Walk, World } from './world.ts';
 
 export function clockAt(world: World, at: number): string {
   const [hours, minutes] = world.clock.split(':').map(Number);
@@ -57,6 +57,11 @@ export function travelSeconds(world: Distances, from: string, to: string): numbe
 export const driveSeconds = (world: Distances, from: string, to: string, faster: number) => Math.max(30, Math.ceil(travelSeconds(world, from, to) / faster));
 
 const sinceMidnight = (world: World, at: number) => secondsOfDay(world.clock) + at;
+export function figureHere(world: World, figure: Figure, at: number): boolean {
+  if (!figure.hours) return true;
+  const [from, to] = figure.hours.map(secondsOfDay), second = sinceMidnight(world, at) % 86_400;
+  return from < to ? from <= second && second < to : second >= from || second < to;
+}
 export function secondsUntil(world: World, at: number, until: string): number {
   return (secondsOfDay(until) - sinceMidnight(world, at) % 86_400 + 86_400 - 1) % 86_400 + 1;
 }
