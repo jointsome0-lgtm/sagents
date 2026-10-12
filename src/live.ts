@@ -88,15 +88,21 @@ const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: [
 
 // Replay reads the stored action without the response-only memory field.
 const readTurn = (world: World, actor: Person, answer: string, state: State) => {
+  let dropped = false;
   if (world.oneSchema) {
     let value: unknown;
     try { value = JSON.parse(answer); } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
-      return 'json' as const;
+      return { action: 'json' as const, answer, dropped };
     }
-    if (!isObject(value) || value.memory !== null) return 'json' as const;
+    if (!isObject(value)) return { action: 'json' as const, answer, dropped };
+    if (value.memory !== null) {
+      dropped = true;
+      const { memory, ...turn } = value;
+      answer = JSON.stringify(turn);
+    }
   }
-  return readAction(world, actor, answer, state.people, state.things);
+  return { action: readAction(world, actor, answer, state.people, state.things), answer, dropped };
 };
 
 const named = (list: { id: string; name: string }[], id: string | null) => list.find(item => item.id === id)?.name ?? '';
@@ -515,7 +521,7 @@ export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 
 // Token totals cover only reported usage; unreported keeps a partial sum from appearing whole.
 // Router endpoints are accounting data and must not affect replay.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string;
-  seconds: number; rewrites: number; lost: number; refused: number; void: number; causes: { [kind in 'turn' | 'world' | 'reply']: Partial<{ [cause in Cause]: number }> };
+  seconds: number; rewrites: number; lost: number; dropped: number; refused: number; void: number; causes: { [kind in 'turn' | 'world' | 'reply']: Partial<{ [cause in Cause]: number }> };
   models: { [name: string]: Tally }; kinds: { [kind in Asked]: Spent }; endpoints: { [name: string]: { [endpoint: string]: number } } };
 const MAX_ENDPOINTS = 16;
 
@@ -531,7 +537,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const stands = state.deed?.at ?? Math.min(vehicleDue(world, state)?.at ?? first.freeAt, broughtFor(first)?.at ?? first.freeAt);
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(given), shared = sharedOf(given);
-  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, dropped: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
     models: {}, kinds: { turn: spent(), memory: spent(), world: spent() }, endpoints: {}, causes: { turn: {}, world: {}, reply: {} } };
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
@@ -780,13 +786,16 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       if (outcome.declined > declined) await untaken('turn', 'declined', null, null);
       return outcome;
     }
-    const action = answer === CUT ? 'long' : answer === DECLINED ? 'declined' : readTurn(world, actor, answer, state);
-    if (typeof action === 'string') await untaken('turn', action, null, typeof answer === 'string' ? answer : null);
+    const turn = typeof answer === 'string' ? readTurn(world, actor, answer, state)
+      : { action: answer === CUT ? 'long' as const : 'declined' as const, answer: null, dropped: false };
+    const { action } = turn;
+    if (turn.dropped) outcome.dropped += 1;
+    if (typeof action === 'string') await untaken('turn', action, null, turn.answer);
     if (typeof action === 'string' && answer !== DECLINED) unusable(player);
     const vehicle = spot.vehicle, drive = vehicle && typeof action !== 'string' && action.action === 'go' && action.place !== vehicle.at
       ? { vehicle: spot.id, from: vehicle.at!, to: action.place!, at: now + driveSeconds(world, vehicle.at!, action.place!, vehicle.faster) } : undefined;
     await happened({ kind: 'act', who, at: now, limit, action, ...(drive ? { drive } : {}),
-      ...(action === 'fare' ? { place: JSON.parse(answer as string).place } : {}) }, player.name);
+      ...(action === 'fare' ? { place: JSON.parse(turn.answer!).place } : {}) }, player.name);
     if (finish('turn', who, typeof action !== 'string')) return outcome;
   }
 }

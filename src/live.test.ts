@@ -437,7 +437,7 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.match(sent.anna[3].messages[0].content, /may hold 65 words at most\. 1 min 15 s of the story are left\.$/);
   // Nobody is free before the horizon any more: the run ends without another call.
   assert.deepEqual({ ...outcome, events: journal.all.length },
-    { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90, events: 9,
+    { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, dropped: 0, refused: 0, void: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90, events: 9,
       models: { 'stand-in': { calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90 } },
       kinds: { turn: { calls: 8, inputTokens: 800, cachedInputTokens: 320, outputTokens: 80 }, memory: { calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, world: { calls: 1, inputTokens: 100, cachedInputTokens: 40, outputTokens: 10 } }, endpoints: {}, causes: { turn: { json: 1 }, world: {}, reply: {} } });
 
@@ -617,7 +617,7 @@ This turn the \`text\` of a say or a call may hold 65 words at most.` }]);
   assert.match(sent.dan[4].messages[0].content, /^So far:\n09:01:40 You wake\.\n\nNow 09:01:40\./);
 });
 
-test('one schema refuses a memory on a turn and retries a null rewrite without applying its other fields', async () => {
+test('one schema drops a memory on a turn and retries a null rewrite without applying its other fields', async () => {
   const file = { title: 'A promise', about: 'A quiet room.', clock: '09:00',
     places: [{ id: 'room', name: 'Room', about: 'A quiet room.' }],
     characters: [{ id: 'anna', name: 'Anna', place: 'room', sheet: 'SHEET-ANNA', memory: 'An old promise.' }] };
@@ -630,12 +630,13 @@ test('one schema refuses a memory on a turn and retries a null rewrite without a
       onAsk: next => { kind = next; }, respond: async request => {
         sent.push({ kind, request: structuredClone(request) });
         const answer = kind === 'memory' ? act('do', { memory: ++memories === 1 ? null : 'A kept promise.', text: 'NEVER-APPLY', seconds: 1, note: 'NEVER-KEEP' })
-          : ++turns === (waking ? 3 : 2) ? act('say', { memory: 'NEVER-REMEMBER', text: 'NEVER-SAY' })
+          : ++turns === (waking ? 3 : 2) ? act('say', { memory: 'NEVER-REMEMBER', text: 'I kept my promise.' })
           : act(waking && turns === 2 ? 'sleep' : 'wait', { memory: null, seconds: turns === 1 ? 1 : waking && turns === 2 ? 60 : 600,
             note: turns === 1 ? 'I remembered a meeting.' : null });
         return { text: answer, usage: null };
       } });
-    assert.deepEqual([outcome.status, outcome.invalid, outcome.lost], ['done', 2, 0]);
+    assert.deepEqual([outcome.status, outcome.invalid, outcome.lost], ['done', 1, 0]);
+    assert.equal(outcome.dropped, 1);
     const rewrite = sent.findIndex(item => item.kind === 'memory'), before = sent[rewrite - 1].request, after = sent[rewrite].request;
     assert.equal(after.system, before.system);
     assert.equal(JSON.stringify(after.schema), JSON.stringify(before.schema));
@@ -648,7 +649,7 @@ test('one schema refuses a memory on a turn and retries a null rewrite without a
     assert.ok(sent.every(({ request }) => (request.system?.length ?? 0) + request.messages.reduce((sum, message) => sum + message.content.length, 0) <= requestLimit(given)));
     const kept = journal.all.find(({ record }) => record.kind === 'memory')!;
     assert.equal(kept.event.text, 'A kept promise.');
-    assert.ok(journal.all.some(({ record, event }) => record.kind === 'act' && record.action === 'json' && event.kind === 'wait' && event.seconds === 30));
+    assert.ok(journal.all.some(({ record }) => record.kind === 'act' && typeof record.action !== 'string' && record.action.action === 'say' && record.action.text === 'I kept my promise.'));
     assert.doesNotMatch(JSON.stringify(journal.all), /NEVER-/);
     assert.deepEqual(replay(given, JSON.parse(JSON.stringify(journal.all))), replay(given, journal.all));
   }

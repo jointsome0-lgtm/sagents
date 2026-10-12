@@ -438,11 +438,12 @@ service's words (`failed (provider_failed 502 bad_gateway)`; `httpStatus`, `prov
 `provider_failed` without a status means the service could not be reached. A failed run exits with code 1.
 
 The totals count story minutes, calls, `invalid`, `overlong` cuts, `declined`, memory `rewrites` and `lost`,
-world answers `refused`, deeds and speeches left `void`, input tokens, `cachedInputTokens` and output tokens.
+memories `dropped` from turns, world answers `refused`, deeds and speeches left `void`, input tokens,
+`cachedInputTokens` and output tokens.
 `Outcome` in `src/live.ts` also counts each untaken resident turn, world answer and figure reply by cause in
 `causes.turn`, `causes.world` and `causes.reply`, with only causes that occurred. A turn's cause is the word of
 `REFUSALS` in `src/action.ts` that its `act` record holds; a final service decline with no record also counts as
-`declined`. JSON totals include `causes`; text leaves the closing line unchanged and adds
+`declined`. JSON totals include `causes` and `dropped`; text leaves the closing line unchanged and adds
 `not taken: turn json 5, here 1; world to 4, sink 5; reply what 2` when any occurred, with kinds in that order
 and causes in the order of `UNTAKEN_CAUSES` in `src/live.ts`.
 They sum only reported usage: `unreported` counts answers without usage and requests that failed with a `ModelError`,
@@ -986,9 +987,12 @@ meets it. Nothing checks that instruction. Seeded weather is replayable and does
 
 A world file with `oneSchema: true` uses the turn schema with `memory` first, a string or null, for both
 turns and rewrites. `schemaOf` and `residentInstructionsOf` in `src/live.ts` give both requests the same
-schema and fixed instructions; `known` puts memory before perceived lines in both. A turn requires null
-memory; a rewrite writes it, sets `action` to `wait` and the rest to null, and only its memory is read.
-`readTurn` in `src/live.ts` and `readMemory` in `src/memory.ts` reject the wrong form with the existing retry.
+schema and fixed instructions; `known` puts memory before perceived lines in both. `readTurn` in `src/live.ts`
+reads a turn as its action, drops any memory written in it and counts that turn in `Outcome.dropped`, even if
+the action is refused. When the count is not zero, `live` prints `memory dropped in 18 turns` or
+`memory dropped in 1 turn` after the closing line and `not taken: …` if present. A rewrite writes its memory,
+sets `action` to `wait` and the rest to null, and only its memory is read by `readMemory` in `src/memory.ts`,
+which rejects the wrong form with the existing retry.
 Records keep their form. Without the setting, requests and stored rows stay unchanged.
 
 `oldest`, `rewrite` and `idle` in `src/memory.ts` keep short memory as perceived lines with local times, own
