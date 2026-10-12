@@ -333,6 +333,13 @@ const earlierOf = (state: State, place: Place) => {
 const hoursOf = (figure: Figure) => figure.hours ? ` Here from ${figure.hours[0]} to ${figure.hours[1]}.` : '';
 const awayOf = (figures: Figure[], resident = false) => figures.length ? [`${resident
   ? 'People of this place who are away now and do not answer:' : 'Of this place, away now, not seen and not heard:'} ${figures.map(figure => `${figure.name} (here from ${figure.hours![0]} to ${figure.hours![1]})`).join(', ')}.`] : [];
+// Wrap the previous second on the daily clock, even at the play's first midnight.
+const figureChangesOf = (world: World, place: Place, at: number) => place.figures.flatMap(figure => {
+  if (!figure.hours) return [];
+  const here = figureHere(world, figure, at);
+  return here === figureHere(world, figure, at + 86_400 - 1) ? []
+    : [here ? `${tagged(figure)} has just come.` : `${figure.name} has just left.`];
+});
 const crowdOf = (world: World, place: Place, at: number) => {
   const figures = place.figures.filter(figure => figureHere(world, figure, at));
   return [...(place.crowd === null ? [] : [`Around, played by nobody: ${closed(place.crowd)}`]),
@@ -422,7 +429,8 @@ export function requestLimit(world: World): number {
   const touches = world.touch ? MAX_TOUCHES * (2 * longest(people) + LIMITS.touch * CHARS_PER_WORD + 100) + 100 : 0;
   const marks = world.marks ? MAX_MARKS * (MARK_WORDS * CHARS_PER_WORD + longest(world.characters.map(character => character.id)) + 100) : 0;
   const local = (withFacts: boolean) => Math.max(...world.places.map(place => (place.crowd?.length ?? 0) + 150
-    + place.figures.reduce((sum, figure) => sum + tagged(figure).length + looks(figure) + (withFacts ? (figure.facts?.length ?? 0) + 20 : 0) + hoursOf(figure).length + 20, 0)
+    + place.figures.reduce((sum, figure) => sum + tagged(figure).length + looks(figure) + (withFacts ? (figure.facts?.length ?? 0) + 20 : 0) + hoursOf(figure).length + 20
+      + (figure.hours && !withFacts ? tagged(figure).length + ' has just come.\n'.length : 0), 0)
     + awayOf(place.figures.filter(figure => figure.hours), !withFacts).join('').length));
   const now = [...people, ...places].reduce((sum, item) => sum + item.length + 30, 0) + longest(places) + SENSED + 900
     + world.characters.reduce((sum, character) => sum + looks(character) + visible, 0) + laws + local(false) + touches + marks;
@@ -757,6 +765,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       ...vehicleView(world, state, actor, now).map(([, text]) => text),
       ...(figures.length ? ['People of this place, who answer when you say with `to`:', ...figures.map(figure => `- ${tagged(figure)}.${part('Looks', figure.looks)}${hoursOf(figure)}`)] : []),
       ...awayOf(spot.figures.filter(figure => !figureHere(world, figure, now)), true),
+      ...figureChangesOf(world, spot, now),
       ...(spot.crowd === null ? [] : [`Around you: ${closed(spot.crowd)}`]),
       ...(pending ? [`You are still doing, ${Math.min(now - pending.at, pending.seconds)} of ${pending.seconds} s so far: ${closed(pending.text!)} To go on with it, answer wait: a do, a go or a sleep would stop it.`] : []),
       ...(body ? [body] : []), ...touching,

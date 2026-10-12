@@ -265,6 +265,7 @@ its looks and facts are withheld. A figure here with hours has `Here from F to T
 `hoursOf` and `awayOf` in `src/live.ts` build these additions. No arrival or departure is saved or asks a model.
 A resident's wait in the place ends at the next coming or going if it would last longer, through `figureChangeIn`
 in `src/time.ts` and `apply` in `src/action.ts`; a wait on a walk, in a vehicle or continuing a deed keeps its span.
+A turn in the place at that moment says who has just come or has just left, through `figureChangesOf` in `src/live.ts`.
 Past speech and answers keep the figure's name and speech rate, through `namesOf` and `figuresOf` in `src/world.ts`,
 which still include every figure of the file. A file without hours keeps its requests and saved state unchanged.
 
