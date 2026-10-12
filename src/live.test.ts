@@ -437,7 +437,7 @@ test('speech takes the time of its words, holds its listeners and is cut at the 
   assert.match(sent.anna[3].messages[0].content, /may hold 65 words at most\. 1 min 15 s of the story are left\.$/);
   // Nobody is free before the horizon any more: the run ends without another call.
   assert.deepEqual({ ...outcome, events: journal.all.length },
-    { status: 'done', reason: 'horizon', seconds: 180, calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, dropped: 0, refused: 0, void: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90, events: 9,
+    { status: 'done', reason: 'horizon', seconds: 180, again: 0, calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, dropped: 0, refused: 0, void: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90, events: 9,
       models: { 'stand-in': { calls: 9, invalid: 1, overlong: 0, declined: 0, unreported: 0, inputTokens: 900, cachedInputTokens: 360, outputTokens: 90 } },
       kinds: { turn: { calls: 8, inputTokens: 800, cachedInputTokens: 320, outputTokens: 80 }, memory: { calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, world: { calls: 1, inputTokens: 100, cachedInputTokens: 40, outputTokens: 10 } }, endpoints: {}, causes: { turn: { json: 1 }, world: {}, reply: {} } });
 
@@ -577,6 +577,35 @@ test('a request that the service declined is counted and not sent again, and the
   const night = memoryStore();
   const woke = await runLive({ world, respond: asleep.respond, model: 'stand-in', minutes: 2, journal: night });
   assert.deepEqual([asleep.sent.anna.length, woke.rewrites, woke.lost, woke.declined, woke.kinds.memory.calls, night.all.find(({ record }) => record.kind === 'memory')?.event.text], [4, 1, 1, 1, 1, null]);
+});
+
+test('a marked connection failure gets one counted second send, only with room for calls and no token ceiling', async () => {
+  const failed = (again = true) => Object.assign(new ModelError('provider_failed'), again ? { again: true as const } : {});
+  const given = { ...world, characters: world.characters.slice(0, 1) };
+  const cases = [
+    { marked: true, tokens: undefined, calls: 3, second: false, count: 2, again: 1, reason: 'horizon' },
+    { marked: true, tokens: 1000, calls: 3, second: false, count: 1, again: 0, reason: 'provider_failed' },
+    { marked: true, tokens: undefined, calls: 1, second: false, count: 1, again: 0, reason: 'provider_failed' },
+    { marked: true, tokens: undefined, calls: 3, second: true, count: 2, again: 1, reason: 'provider_failed' },
+    { marked: false, tokens: undefined, calls: 3, second: false, count: 1, again: 0, reason: 'provider_failed' },
+  ];
+  for (const item of cases) {
+    const journal = memoryStore(), asks: unknown[] = [];
+    const answer = standIn({ anna: [failed(item.marked), ...(item.second ? [failed()] : [])] });
+    const outcome = await runLive({ world: given, respond: answer.respond, model: 'server', name: 'api:server',
+      minutes: 1, calls: item.calls, tokens: item.tokens, againMs: 0, journal, cache: 'same-play',
+      onAsk: (kind, who, name) => { asks.push([kind, who, name]); } });
+    assert.deepEqual([outcome.status, outcome.reason, outcome.calls, outcome.again],
+      [item.reason === 'horizon' ? 'done' : 'failed', item.reason, item.count, item.again]);
+    const unreported = item.second ? 2 : 1;
+    assert.deepEqual([outcome.models['api:server'].calls, outcome.kinds.turn.calls, outcome.unreported, outcome.models['api:server'].unreported],
+      [item.count, item.count, unreported, unreported]);
+    assert.deepEqual(asks, Array.from({ length: item.count }, () => ['turn', 'anna', 'api:server']));
+    assert.equal(answer.sent.anna.length, item.count);
+    if (item.again) assert.deepEqual(answer.sent.anna[1], answer.sent.anna[0]);
+    assert.deepEqual([journal.all.length, outcome.inputTokens, outcome.outputTokens, outcome.kinds.turn.inputTokens],
+      item.reason === 'horizon' ? [1, 100, 10, 100] : [0, 0, 0, 0]);
+  }
 });
 
 test('a sleeper perceives nothing and wakes with the memory it wrote and the calls that waited; a rewrite that fails twice is lost in the open', async () => {

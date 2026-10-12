@@ -89,6 +89,8 @@ test('settings that cannot be used are refused by name before anything is sent',
     assert.equal(await refusedBy({ ...env, SAGENTS_API_EXTRA: extra }), 'SAGENTS_API_EXTRA');
   assert.equal(await refusedBy({ ...env, SAGENTS_API_MAX_TOKENS: '2k' }), 'SAGENTS_API_MAX_TOKENS');
   for (const stream of ['true', '0', ' 1']) assert.equal(await refusedBy({ ...env, SAGENTS_API_STREAM: stream }), 'SAGENTS_API_STREAM');
+  // Another send is allowed by its own setting alone, and only for a stream.
+  for (const again of [{ SAGENTS_API_AGAIN: '1' }, { SAGENTS_API_STREAM: '1', SAGENTS_API_AGAIN: 'yes' }]) assert.equal(await refusedBy({ ...env, ...again }), 'SAGENTS_API_AGAIN');
   assert.equal(await refusedBy(env, { ...request, model: 'google/gemma-4-31b-it@high' }), 'model');
   // The field for a player's name replaces no field of this module and none of the extra ones, and a name is plain.
   for (const field of ['max_tokens', 'reasoning', 'Session Id']) assert.equal(await refusedBy({ ...env, SAGENTS_API_CACHE_FIELD: field }), 'SAGENTS_API_CACHE_FIELD');
@@ -129,6 +131,61 @@ test('a used up balance is budget_exceeded, nothing is sent again, and a failure
   const unreachable = await respond(request).catch((thrown: unknown) => thrown) as Thrown;
   assert.equal(unreachable.code, 'provider_failed');
   assert.deepEqual(leaks(unreachable), []);
+});
+
+test('one send marks a streamed transport rejection for another call only when the setting allows it, and notes a response before a stop', async () => {
+  type Marked = Thrown & { stage?: string; tries?: number; again?: true };
+  const check = async (reply: () => Promise<Response>, mode: 'again' | 'stream' | 'whole', expected: [string, string, true | undefined], controls: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
+    let sent = 0;
+    const { respond } = createCompatible({ env: { ...env, SAGENTS_API_STREAM: mode === 'whole' ? '' : '1', SAGENTS_API_AGAIN: mode === 'again' ? '1' : '' },
+      fetch: () => { sent += 1; return reply(); } });
+    const error = await respond(request, controls).then(() => assert.fail('an answer'), (thrown: unknown) => thrown as Marked);
+    assert.deepEqual([error.code, error.stage, error.again], expected);
+    assert.equal(error.tries, undefined);
+    assert.equal(sent, 1);
+    assert.deepEqual(leaks(error), []);
+  };
+  const rejected = (code?: string) => async () => {
+    throw new TypeError(`fetch failed ${KEY}`, { cause: Object.assign(new Error(`${WORDS} ${KEY} ${STORY}`), { code }) });
+  };
+  for (const code of ['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH',
+    'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT']) {
+    await check(rejected(code), 'again', ['provider_failed', 'connect', true]);
+    await check(rejected(code), 'stream', ['provider_failed', 'connect', undefined]);
+    await check(rejected(code), 'whole', ['provider_failed', 'connect', undefined]);
+  }
+  for (const code of [undefined, 'UND_ERR_HEADERS_TIMEOUT', 'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID', 'ERR_INVALID_URL'])
+    await check(rejected(code), 'again', ['provider_failed', 'connect', undefined]);
+  await check(async () => { throw new TypeError(`fetch failed ${KEY}`); }, 'again', ['provider_failed', 'connect', undefined]);
+  await check(async () => refusal(503), 'again', ['model_unavailable', 'stream', undefined]);
+  await check(async () => new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(new TextEncoder().encode('data: {"choices":[{"index":0,"delta":{"content":"o"},"finish_reason":null}]}\n\n'));
+    controller.error(new TypeError(`stream failed ${KEY}`, { cause: { code: 'ECONNRESET', message: WORDS } }));
+  } }), { status: 200, headers: { 'content-type': 'text/event-stream' } }), 'again', ['provider_failed', 'stream', undefined]);
+  await check(async () => {
+    const until = performance.now() + 30;
+    while (performance.now() < until) {}
+    return answer('ok');
+  }, 'again', ['timeout', 'stream', undefined], { timeoutMs: 20 });
+  const stopped = new AbortController();
+  await check(async () => { stopped.abort(); return answer('ok'); }, 'again', ['cancelled', 'stream', undefined], { signal: stopped.signal });
+  const cancelled = new AbortController();
+  await check(async () => { cancelled.abort(); return rejected('ECONNRESET')(); }, 'again', ['cancelled', 'connect', undefined], { signal: cancelled.signal });
+  await check(async () => {
+    const until = performance.now() + 30;
+    while (performance.now() < until) {}
+    return rejected('ECONNRESET')();
+  }, 'again', ['timeout', 'connect', undefined], { timeoutMs: 20 });
+  const before = new AbortController();
+  before.abort();
+  for (const [settings, controls, code] of [[env, { signal: before.signal }, 'cancelled'],
+    [env, { timeoutMs: 0 }, 'invalid_request'], [{ ...env, SAGENTS_API_STREAM: 'bad' }, {}, 'invalid_request']] as const) {
+    let sent = 0;
+    const { respond } = createCompatible({ env: settings, fetch: async () => { sent += 1; return answer('ok'); } });
+    const error = await respond(request, controls).catch((thrown: unknown) => thrown) as Marked;
+    assert.deepEqual([error.code, error.stage, error.again, sent], [code, undefined, undefined, 0]);
+    assert.deepEqual(leaks(error), []);
+  }
 });
 
 test('an answer cut by the output limit, or without text, is a failure and its text is not given', async () => {

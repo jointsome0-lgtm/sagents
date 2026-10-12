@@ -5,6 +5,8 @@ import type { Controls, Request, Result } from './chatgpt.ts';
 const DEFAULT_MAX_TOKENS = 2048;
 const MAX_ANSWER = 4_000_000;
 const MAX_TEXT = 100_000;
+const CONNECTION_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH',
+  'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT']);
 // Extra fields must not change the shape or number of answers we can read.
 const FIXED = ['model', 'messages', 'max_tokens', 'max_completion_tokens', 'response_format', 'stream', 'stream_options', 'n'];
 // Other characters could inject a header or make an error quote the key.
@@ -48,7 +50,10 @@ function settingsOf(env: Env) {
   const cacheField = env.SAGENTS_API_CACHE_FIELD || undefined;
   if (cacheField && (!FIELD.test(cacheField) || FIXED.includes(cacheField) || Object.hasOwn(extra, cacheField))) throw refused('SAGENTS_API_CACHE_FIELD');
   if (env.SAGENTS_API_STREAM && env.SAGENTS_API_STREAM !== '1') throw refused('SAGENTS_API_STREAM');
-  return { url: `${base.origin}${base.pathname.replace(/\/+$/, '')}/chat/completions`, key, maxTokens, extra, cacheField, stream: !!env.SAGENTS_API_STREAM };
+  // Without a stream, the server may finish and charge for its answer before any response arrives.
+  if (env.SAGENTS_API_AGAIN && (env.SAGENTS_API_AGAIN !== '1' || !env.SAGENTS_API_STREAM)) throw refused('SAGENTS_API_AGAIN');
+  return { url: `${base.origin}${base.pathname.replace(/\/+$/, '')}/chat/completions`, key, maxTokens, extra, cacheField,
+    stream: !!env.SAGENTS_API_STREAM, again: !!env.SAGENTS_API_AGAIN };
 }
 
 export function completionsBody(request: Request, env: Env = process.env) {
@@ -180,7 +185,7 @@ type Options = { fetch?: Fetch; env?: Env };
 export function createCompatible({ fetch: fetcher = globalThis.fetch, env = process.env }: Options = {}) {
   return {
     async respond(request: Request, { onText = async () => {}, signal, timeoutMs = 180_000 }: Controls = {}): Promise<Result> {
-      const { url, key, stream } = settingsOf(env);
+      const { url, key, stream, again } = settingsOf(env);
       const body = JSON.stringify(completionsBody(request, env));
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
       const until = performance.now() + timeoutMs;
@@ -188,62 +193,76 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       const current = signal ? AbortSignal.any([signal, timer]) : timer;
       const stopped = () => signal?.aborted ? new ModelError('cancelled') : timer.aborted || performance.now() >= until ? new ModelError('timeout') : null;
       if (signal?.aborted) throw new ModelError('cancelled');
-      let response: Response | undefined, answer: unknown, streamed = false;
+      let response: Response | undefined, answer: unknown, streamed = false, sent = false;
       try {
-        // A redirect could carry the key and request text to another server.
-        response = await untilStopped(() => fetcher(url, { method: 'POST', redirect: 'error', signal: current, body,
-          headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json' } }), current, until);
-        if (response.status === 402) {
-          // A broken body must not hide an exhausted balance.
-          if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
-          throw failure(402, undefined);
+        try {
+          // A redirect could carry the key and request text to another server.
+          response = await untilStopped(async () => {
+            sent = true;
+            response = await fetcher(url, { method: 'POST', redirect: 'error', signal: current, body,
+              headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json' } });
+            return response;
+          }, current, until);
+          if (response.status === 402) {
+            // A broken body must not hide an exhausted balance.
+            if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
+            throw failure(402, undefined);
+          }
+          // A server may return JSON even when a stream was requested.
+          streamed = stream && response.ok && !response.headers.get('content-type')?.includes('application/json');
+          answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until), stopped), current, until)
+            : await untilStopped(() => jsonOf(response!).catch(error => {
+              if (response!.ok || !(error instanceof Error)) throw error;
+              return null;
+            }), current, until);
+        } catch (error) {
+          const reason = stopped();
+          if (reason) throw reason;
+          if (error instanceof TypeError) {
+            const failure = new ModelError('provider_failed', response?.status);
+            // The server may have received the request all the same, so only its own setting marks it for another send.
+            if (again && sent && !response && isObject(error.cause) && typeof error.cause.code === 'string' && CONNECTION_CODES.has(error.cause.code)) failure.again = true;
+            throw failure;
+          }
+          throw error;
         }
-        // A server may return JSON even when a stream was requested.
-        streamed = stream && response.ok && !response.headers.get('content-type')?.includes('application/json');
-        answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until), stopped), current, until)
-          : await untilStopped(() => jsonOf(response!).catch(error => {
-            if (response!.ok || !(error instanceof Error)) throw error;
-            return null;
-          }), current, until);
-      } catch (error) {
         const reason = stopped();
         if (reason) throw reason;
-        if (error instanceof TypeError) throw new ModelError('provider_failed', response?.status);
+        if (!response.ok) throw failure(response.status, isObject(answer) ? answer.error : undefined);
+        if (!isObject(answer)) throw new ModelError('invalid_response');
+        if (answer.error) throw failure(undefined, answer.error);
+        const choice: unknown = Array.isArray(answer.choices) && answer.choices.length === 1 ? answer.choices[0] : undefined;
+        if (!isObject(choice)) throw new ModelError('invalid_response');
+        if (choice.error) throw failure(undefined, choice.error);
+        const message = isObject(choice.message) ? choice.message : {};
+        // No tools were sent, so a tool call cannot be an answer.
+        if (choice.finish_reason === 'tool_calls' || (Array.isArray(message.tool_calls) && message.tool_calls.length)) throw new ModelError('unexpected_tools');
+        if (choice.finish_reason === 'content_filter' || (typeof message.refusal === 'string' && message.refusal.trim())) throw new ModelError('declined');
+        if (choice.finish_reason === 'length') throw new ModelError('output_limit');
+        if (choice.finish_reason !== 'stop') throw new ModelError('incomplete_stream');
+        // Reasoning may use the whole turn and leave no content.
+        const text = message.content ?? '';
+        if (typeof text !== 'string') throw new ModelError('invalid_response');
+        if (text.length > MAX_TEXT) throw new ModelError('output_limit');
+        if (!text.trim()) throw new ModelError('empty_response');
+        if (!streamed) {
+          try { await untilStopped(() => onText(text), current, until); } catch (error) { throw stopped() ?? error; }
+        }
+        const ended = stopped();
+        if (ended) throw ended;
+        // prompt_tokens includes cached tokens; completion_tokens includes reasoning.
+        const usage = isObject(answer.usage) ? answer.usage : {};
+        const input = isObject(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
+        const output = isObject(usage.completion_tokens_details) ? usage.completion_tokens_details : {};
+        const inputTokens = count(usage.prompt_tokens), outputTokens = count(usage.completion_tokens);
+        // A router may send two requests for one model to different providers.
+        const endpoint = typeof answer.provider !== 'string' ? {} : { endpoint: ENDPOINT.test(answer.provider) ? answer.provider : OTHER_ENDPOINT };
+        return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
+          cachedInputTokens: count(input.cached_tokens), outputTokens, reasoningTokens: count(output.reasoning_tokens) }, ...endpoint };
+      } catch (error) {
+        if (error instanceof ModelError && sent) error.stage = response ? 'stream' : 'connect';
         throw error;
       }
-      const reason = stopped();
-      if (reason) throw reason;
-      if (!response.ok) throw failure(response.status, isObject(answer) ? answer.error : undefined);
-      if (!isObject(answer)) throw new ModelError('invalid_response');
-      if (answer.error) throw failure(undefined, answer.error);
-      const choice: unknown = Array.isArray(answer.choices) && answer.choices.length === 1 ? answer.choices[0] : undefined;
-      if (!isObject(choice)) throw new ModelError('invalid_response');
-      if (choice.error) throw failure(undefined, choice.error);
-      const message = isObject(choice.message) ? choice.message : {};
-      // No tools were sent, so a tool call cannot be an answer.
-      if (choice.finish_reason === 'tool_calls' || (Array.isArray(message.tool_calls) && message.tool_calls.length)) throw new ModelError('unexpected_tools');
-      if (choice.finish_reason === 'content_filter' || (typeof message.refusal === 'string' && message.refusal.trim())) throw new ModelError('declined');
-      if (choice.finish_reason === 'length') throw new ModelError('output_limit');
-      if (choice.finish_reason !== 'stop') throw new ModelError('incomplete_stream');
-      // Reasoning may use the whole turn and leave no content.
-      const text = message.content ?? '';
-      if (typeof text !== 'string') throw new ModelError('invalid_response');
-      if (text.length > MAX_TEXT) throw new ModelError('output_limit');
-      if (!text.trim()) throw new ModelError('empty_response');
-      if (!streamed) {
-        try { await untilStopped(() => onText(text), current, until); } catch (error) { throw stopped() ?? error; }
-      }
-      const ended = stopped();
-      if (ended) throw ended;
-      // prompt_tokens includes cached tokens; completion_tokens includes reasoning.
-      const usage = isObject(answer.usage) ? answer.usage : {};
-      const input = isObject(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
-      const output = isObject(usage.completion_tokens_details) ? usage.completion_tokens_details : {};
-      const inputTokens = count(usage.prompt_tokens), outputTokens = count(usage.completion_tokens);
-      // A router may send two requests for one model to different providers.
-      const endpoint = typeof answer.provider !== 'string' ? {} : { endpoint: ENDPOINT.test(answer.provider) ? answer.provider : OTHER_ENDPOINT };
-      return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
-        cachedInputTokens: count(input.cached_tokens), outputTokens, reasoningTokens: count(output.reasoning_tokens) }, ...endpoint };
     },
   };
 }

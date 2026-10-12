@@ -32,6 +32,15 @@ counts from an unfinished deed's moment, else the next due clock law or vehicle 
 The library's `runLive()` given a journal without `pause` still tells the horizon; the CLI always uses pause with state.
 
 The run stops at the first model-connection failure except cuts and declines, and switches nobody to another model.
+One more exception is yours to allow. With [`SAGENTS_API_AGAIN=1`](connection.md#a-server-of-your-own), a request
+to a server whose connection fails with a transport code before any response is sent once more after two seconds,
+only without `--tokens` and with room under `--calls`. The server may have received the first request all the same
+and may charge for both, so nothing is sent again unless you set it. The failed request stays counted as a call
+with unreported spending; the second send is another call of the same purpose and owner, with the same request.
+This rule sends no third: the second's answer or failure is handled as any other, and the two tries of a world
+answer or a rewrite still hold. Stopping the run during the wait sends nothing more. A status refusal or a failure
+after any response is never sent again by this rule.
+The library's `againMs` option of `runLive()` sets the wait in milliseconds, 2000 by default, with no CLI flag.
 An `output_limit` loses that turn or takes one of the world's or memory's two tries, with no usage known.
 A `declined` request is never sent again with the same words: its turn becomes a wait, its deed has no result,
 and its rewrite is lost unless a readable first answer was set aside. The third decline in the run, for any model
@@ -57,14 +66,15 @@ service's words (`failed (provider_failed 502 bad_gateway)`; `httpStatus`, `prov
 `provider_failed` without a status means the service could not be reached. A failed run exits with code 1.
 
 The totals count story minutes, calls, `invalid`, `overlong` cuts, `declined`, memory `rewrites` and `lost`,
-memories `dropped` from turns, world answers `refused`, deeds and speeches left `void`, input tokens,
-`cachedInputTokens` and output tokens.
+memories `dropped` from turns, requests sent `again` after a connection failure, world answers `refused`, deeds and
+speeches left `void`, input tokens, `cachedInputTokens` and output tokens.
 `Outcome` in `src/live.ts` also counts each untaken resident turn, world answer and figure reply by cause in
 `causes.turn`, `causes.world` and `causes.reply`, with only causes that occurred. A turn's cause is the word of
 `REFUSALS` in `src/action.ts` that its `act` record holds; a final service decline with no record also counts as
 `declined`. JSON totals include `causes` and `dropped`; text leaves the closing line unchanged and adds
 `not taken: turn json 5, here 1; world to 4, sink 5; reply what 2` when any occurred, with kinds in that order
-and causes in the order of `UNTAKEN_CAUSES` in `src/live.ts`.
+and causes in the order of `UNTAKEN_CAUSES` in `src/live.ts`. When any request was sent again, text also adds
+`sent again after a connection that failed before any response: 3`; JSON totals hold the count in `again`.
 They sum only reported usage: `unreported` counts answers without usage and requests that failed with a `ModelError`,
 rather than calling their spending zero; an absent cached count adds nothing. `kinds` divides requests and tokens into turns, rewrites and world answers,
 including figure replies and retries. Text prints one line for each kind. `models` also divides calls, unusable
@@ -125,7 +135,7 @@ sends them. This groups requests without putting story text or ids in the names.
 | `world.json` | The world file as given. A directory with another world file is refused. |
 | `state.sqlite` | The state described above. |
 | `part<N>.events.jsonl` | One event per line for that start, beginning with `part1`, then `part2` and so on. |
-| `usage-part<N>.jsonl` | One row per request: when sent, purpose (`turn`, `memory`, `world`, `reply`), owner, model, milliseconds, reported input, cached, output and reasoning tokens, and failure code `error`. A failure keeps `status` when it has an HTTP status; on the plan, `stage` is `connect` before a response or `stream` after one, and a decline keeps `refusal` as `event`, `filter` or `part`. A second try keeps `tries: 2`, even on success; these fields are absent otherwise. No request, answer, failure text or service code. |
+| `usage-part<N>.jsonl` | One row per request: when sent, purpose (`turn`, `memory`, `world`, `reply`), owner, model, milliseconds, reported input, cached, output and reasoning tokens, and failure code `error`. A failure keeps `status` when it has an HTTP status; `stage` is `connect` before a response or `stream` after one, and on the plan a decline keeps `refusal` as `event`, `filter` or `part`. A second try within the plan connection keeps `tries: 2`, even on success; these fields are absent otherwise. A play's second send to a server has its own row. No request, answer, failure text or service code. |
 | `untaken-part<N>.jsonl` | One row per untaken resident turn, world answer or figure reply, after judgment: `n` names its usage row, `kind` is `turn`, `world` or `reply`, and `cause` is the code counted above. Empty when every answer was taken. With `--untaken-text` only, also the rule's refused `entry` when there is one and the model's `answer` when there was text; a turn has no `entry`, and a cut or decline has no `answer`. This file then holds model words like the events file. Use the option only for worlds whose text may be kept. |
 | `about.txt` | Your description of the experiment, when you add one; the lab shows it. |
 

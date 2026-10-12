@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import { ENDPOINT, ModelError, OTHER_ENDPOINT } from './chatgpt.ts';
 import type { Request, Result } from './chatgpt.ts';
@@ -511,7 +512,7 @@ export function linesOf(world: World, event: Event): string[] {
 export type Player = { respond: (request: Request) => Promise<Result>; model: string; name?: string };
 export const UNTAKEN_CAUSES = [...new Set(['cut', 'declined', 'unread', ...CODES, ...TRACE_CODES, ...REFUSALS] as const)];
 export type Cause = typeof UNTAKEN_CAUSES[number];
-export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number; tokens?: number;
+export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number; tokens?: number; againMs?: number;
   onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; failedRun?: number; declinedRun?: number; cache?: string;
   onAsk?: (kind: Asked | 'reply', who: string | null, name: string) => unknown;
   onUntaken?: (kind: 'turn' | 'world' | 'reply', cause: Cause, entry: Rejected['entry'] | null, answer: string | null) => unknown };
@@ -521,14 +522,14 @@ export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 
 // Token totals cover only reported usage; unreported keeps a partial sum from appearing whole.
 // Router endpoints are accounting data and must not affect replay.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string;
-  seconds: number; rewrites: number; lost: number; dropped: number; refused: number; void: number; causes: { [kind in 'turn' | 'world' | 'reply']: Partial<{ [cause in Cause]: number }> };
+  seconds: number; again: number; rewrites: number; lost: number; dropped: number; refused: number; void: number; causes: { [kind in 'turn' | 'world' | 'reply']: Partial<{ [cause in Cause]: number }> };
   models: { [name: string]: Tally }; kinds: { [kind in Asked]: Spent }; endpoints: { [name: string]: { [endpoint: string]: number } } };
 const MAX_ENDPOINTS = 16;
 
 const CUT = Symbol('cut'), DECLINED = Symbol('declined');
 const spent = (): Spent => ({ calls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
 // The request that crosses a token limit is the last; its cost is known only after the answer.
-export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, tokens, onEvent = () => {}, journal = memoryStore(),
+export async function runLive({ world, respond, model, name, cast = {}, worldPlayer, minutes = 30, calls: most = 60, tokens, againMs = 2000, onEvent = () => {}, journal = memoryStore(),
   pause = false, failedRun = 5, declinedRun = 3, cache, onAsk = () => {}, onUntaken = () => {} }: Live): Promise<Outcome> {
   const given = world, state = replay(world, journal.entries());
   world = worldOf(given, state);
@@ -537,7 +538,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const stands = state.deed?.at ?? Math.min(vehicleDue(world, state)?.at ?? first.freeAt, broughtFor(first)?.at ?? first.freeAt);
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(given), shared = sharedOf(given);
-  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, dropped: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, again: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, dropped: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
     models: {}, kinds: { turn: spent(), memory: spent(), world: spent() }, endpoints: {}, causes: { turn: {}, world: {}, reply: {} } };
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
@@ -585,24 +586,32 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       outcome.reason = 'unreported';
       return null;
     }
-    onAsk(asked, who, player.name);
-    for (const tally of [outcome, tallyOf(player), outcome.kinds[kind]]) tally.calls += 1;
+    const request = { model: player.model, ...content };
     let answer: Result;
-    try { answer = await player.respond({ model: player.model, ...content }); } catch (error) {
-      if (!(error instanceof ModelError)) throw error;
-      for (const tally of [outcome, tallyOf(player)]) tally.unreported += 1;
-      if (error.code === 'output_limit') {
-        for (const tally of [outcome, tallyOf(player)]) tally.overlong += 1;
-        return CUT;
+    for (let attempt = 0; ; attempt += 1) {
+      onAsk(asked, who, player.name);
+      for (const tally of [outcome, tallyOf(player), outcome.kinds[kind]]) tally.calls += 1;
+      if (attempt) outcome.again += 1;
+      try { answer = await player.respond(request); break; } catch (error) {
+        if (!(error instanceof ModelError)) throw error;
+        for (const tally of [outcome, tallyOf(player)]) tally.unreported += 1;
+        if (!attempt && error.again === true && tokens === undefined && outcome.calls < most) {
+          await sleep(againMs);
+          continue;
+        }
+        if (error.code === 'output_limit') {
+          for (const tally of [outcome, tallyOf(player)]) tally.overlong += 1;
+          return CUT;
+        }
+        if (error.code === 'declined') {
+          for (const tally of [outcome, tallyOf(player)]) tally.declined += 1;
+          unusable(player);
+          if (outcome.declined < declinedRun) return DECLINED;
+        }
+        Object.assign(outcome, { status: 'failed', reason: error.code, ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}),
+          ...(error.providerCode ? { providerCode: error.providerCode } : {}), ...(error.param ? { param: error.param } : {}) });
+        return null;
       }
-      if (error.code === 'declined') {
-        for (const tally of [outcome, tallyOf(player)]) tally.declined += 1;
-        unusable(player);
-        if (outcome.declined < declinedRun) return DECLINED;
-      }
-      Object.assign(outcome, { status: 'failed', reason: error.code, ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}),
-        ...(error.providerCode ? { providerCode: error.providerCode } : {}), ...(error.param ? { param: error.param } : {}) });
-      return null;
     }
     for (const tally of [outcome, tallyOf(player)]) if (!answer.usage) tally.unreported += 1;
     for (const tally of [outcome, tallyOf(player), outcome.kinds[kind]]) {

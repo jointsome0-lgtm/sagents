@@ -6,8 +6,9 @@ The server settings and the ChatGPT plan connection are here.
 ## The model connection
 
 There are two; `modelFor` in `src/model.ts` chooses by the model name. A failure comes back as a code, and the
-caller decides. A server's request is never sent a second time; the plan's is sent once more only when the
-connection rejects before a response, as [One request](ask.md) says.
+caller decides. The connection to a server never sends twice; with `SAGENTS_API_AGAIN`
+[a play](live.md#the-commands-and-a-run) may send once more after a connection fails before any response. The plan's
+connection sends once more only when the connection rejects before a response, as [One request](ask.md) says.
 
 ### A server of your own
 
@@ -22,6 +23,7 @@ through `createCompatible` in `src/compatible.ts`: vLLM or llama.cpp on a card y
 | `SAGENTS_API_EXTRA` | One JSON object of further body fields, such as `{"reasoning":{"enabled":false}}`, which keeps a model's reasoning off on OpenRouter. |
 | `SAGENTS_API_CACHE_FIELD` | The name of the body field that a request's `cache` name is sent under, such as `session_id` or `prompt_cache_key`. It is 1 to 40 lower-case letters, digits and `_`, starting with a letter. Not set, the name is not sent. |
 | `SAGENTS_API_STREAM` | `1` asks for the answer as a stream, for a server that gives no other. Empty or not set gives one JSON body; any other nonempty value is refused. |
+| `SAGENTS_API_AGAIN` | `1` lets [a play](live.md#the-commands-and-a-run) send a request once more when its connection fails before any response. The server may have received the first one all the same and may charge for both, so set it only where that is acceptable, such as a card of your own. It needs `SAGENTS_API_STREAM=1`: without a stream a server may finish its answer before any response arrives. Empty or not set, nothing is sent twice; any other nonempty value, or `1` without the stream, is refused. |
 
 ```sh
 export SAGENTS_API_URL=https://openrouter.ai/api/v1 SAGENTS_API_EXTRA='{"reasoning":{"enabled":false}}'

@@ -43,6 +43,7 @@ export class ModelError extends Error {
   param: string | undefined;
   stage?: 'connect' | 'stream';
   tries?: 2;
+  again?: true;
   refusal?: 'event' | 'filter' | 'part';
   constructor(code: string, httpStatus?: number, providerCode?: unknown, param?: unknown) {
     super(code);
