@@ -83,22 +83,24 @@ test('untaken answers keep only codes unless the run asks to keep their text', a
   const action = JSON.stringify({ action: 'do', text: 'DEED-TEXT', seconds: 1, note: 'PRIVATE-NOTE' });
   const answer = JSON.stringify({ search: false, finds: [], moves: [entry], sets: [], poses: [], wakes: [], feels: [], beyond: null, result: 'REFUSED-TEXT' });
   const unread = 'UNREAD-TEXT';
+  const turn = 'TURN-NOT-JSON';
   for (const text of [false, true]) {
     const dir = mkdtempSync(join(tmpdir(), 'sagents-untaken-')), kept = keepRun(dir, JSON.stringify(file), undefined, text);
-    const answers = [action, answer, unread];
+    const answers = [action, answer, unread, turn];
     try {
       await runLive({ world: readWorld(file), model: 'stand-in', respond: kept.count(async () => ({ text: answers.shift()!, usage: null })),
-        journal: kept.state, onAsk: kept.onAsk, onUntaken: kept.onUntaken, onEvent: kept.onEvent, calls: 3, minutes: 1 });
+        journal: kept.state, onAsk: kept.onAsk, onUntaken: kept.onUntaken, onEvent: kept.onEvent, calls: 4, minutes: 1 });
     } finally { kept.close(); }
     const saved = readFileSync(join(dir, 'untaken-part1.jsonl'), 'utf8'), rows = saved.trim().split('\n').map(line => JSON.parse(line));
-    assert.deepEqual(rows.map(({ n, kind, cause }) => ({ n, kind, cause })), [{ n: 2, kind: 'world', cause: 'what' }, { n: 3, kind: 'world', cause: 'unread' }]);
+    assert.deepEqual(rows.map(({ n, kind, cause }) => ({ n, kind, cause })), [{ n: 2, kind: 'world', cause: 'what' }, { n: 3, kind: 'world', cause: 'unread' }, { n: 4, kind: 'turn', cause: 'json' }]);
     for (const row of rows) assert.ok(UNTAKEN_CAUSES.includes(row.cause));
     if (text) {
       assert.deepEqual(rows[0], { n: 2, kind: 'world', cause: 'what', entry, answer });
       assert.deepEqual(rows[1], { n: 3, kind: 'world', cause: 'unread', answer: unread });
+      assert.deepEqual(rows[2], { n: 4, kind: 'turn', cause: 'json', answer: turn });
     } else {
       for (const row of rows) assert.deepEqual(Object.keys(row), ['n', 'kind', 'cause']);
-      for (const words of [entry.what, entry.to, action, 'DEED-TEXT', 'PRIVATE-NOTE', answer, 'REFUSED-TEXT', unread]) assert.ok(!saved.includes(words));
+      for (const words of [entry.what, entry.to, action, 'DEED-TEXT', 'PRIVATE-NOTE', answer, 'REFUSED-TEXT', unread, turn]) assert.ok(!saved.includes(words));
     }
   }
 });

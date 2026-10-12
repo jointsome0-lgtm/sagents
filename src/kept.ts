@@ -35,7 +35,7 @@ export function keepRun(dir: string, world: string, environment?: string, untake
     let asked: { kind: string; who: string | null; name: string } | null = null, sent = 0;
     const onAsk: NonNullable<Live['onAsk']> = (kind, who, name) => { asked = { kind, who, name }; };
     const onUntaken: NonNullable<Live['onUntaken']> = (kind, cause, entry, answer) => appendFileSync(untaken, `${JSON.stringify({ n: sent, kind, cause,
-      ...(untakenText && entry !== null ? { entry } : {}), ...(untakenText && answer !== null ? { answer } : {}) })}\n`);
+      ...(untakenText && kind !== 'turn' && entry !== null ? { entry } : {}), ...(untakenText && answer !== null ? { answer } : {}) })}\n`);
     const count = (respond: Player['respond']): Player['respond'] => async request => {
       const row: { [field: string]: unknown } = { n: sent += 1, at: new Date().toISOString(), kind: asked?.kind ?? 'other', who: asked?.who ?? null, model: asked?.name ?? request.model };
       asked = null;

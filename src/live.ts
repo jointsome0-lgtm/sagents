@@ -8,7 +8,7 @@ import { idle, oldest, readMemory, sameScript } from './memory.ts';
 import type { Line, Mind } from './memory.ts';
 import { LAWS } from './laws.ts';
 import { closed, isObject } from './reading.ts';
-import { next, onWay, presentAt, roadPlace, together, readAction, waysOf, sleepersNear } from './action.ts';
+import { next, onWay, presentAt, roadPlace, together, readAction, REFUSALS, waysOf, sleepersNear } from './action.ts';
 import { labelsOn, readReply, readResult, refusal, TRACE_CODES } from './answer.ts';
 import type { Allowed, Answer, Rejected } from './answer.ts';
 import { all, CODES, MAX_IN_PLACE, MAX_MOVES, MAX_ON_PERSON, MAX_SETS, MAX_STOCK, NAME_WORDS, RECORD, shown, SINKS, sought, written } from './things.ts';
@@ -495,19 +495,19 @@ export function linesOf(world: World, event: Event): string[] {
 
 // A paused run is not the story's end, so its horizon must not shorten speech or be told to residents.
 export type Player = { respond: (request: Request) => Promise<Result>; model: string; name?: string };
-export const UNTAKEN_CAUSES = ['cut', 'declined', 'unread', ...CODES, ...TRACE_CODES] as const;
+export const UNTAKEN_CAUSES = [...new Set(['cut', 'declined', 'unread', ...CODES, ...TRACE_CODES, ...REFUSALS] as const)];
 export type Cause = typeof UNTAKEN_CAUSES[number];
 export type Live = Player & { world: World; cast?: { [id: string]: Player }; worldPlayer?: Player; minutes?: number; calls?: number; tokens?: number;
   onEvent?: (event: Event, by: string | null) => unknown; journal?: Store; pause?: boolean; failedRun?: number; declinedRun?: number; cache?: string;
   onAsk?: (kind: Asked | 'reply', who: string | null, name: string) => unknown;
-  onUntaken?: (kind: 'world' | 'reply', cause: Cause, entry: Rejected['entry'] | null, answer: string | null) => unknown };
+  onUntaken?: (kind: 'turn' | 'world' | 'reply', cause: Cause, entry: Rejected['entry'] | null, answer: string | null) => unknown };
 export type Tally = { calls: number; invalid: number; overlong: number; declined: number; unreported: number; inputTokens: number; cachedInputTokens: number; outputTokens: number };
 export type Asked = 'turn' | 'memory' | 'world';
 export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 'outputTokens'>;
 // Token totals cover only reported usage; unreported keeps a partial sum from appearing whole.
 // Router endpoints are accounting data and must not affect replay.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string;
-  seconds: number; rewrites: number; lost: number; refused: number; void: number; causes: { [kind in 'world' | 'reply']: Partial<{ [cause in Cause]: number }> };
+  seconds: number; rewrites: number; lost: number; refused: number; void: number; causes: { [kind in 'turn' | 'world' | 'reply']: Partial<{ [cause in Cause]: number }> };
   models: { [name: string]: Tally }; kinds: { [kind in Asked]: Spent }; endpoints: { [name: string]: { [endpoint: string]: number } } };
 const MAX_ENDPOINTS = 16;
 
@@ -524,7 +524,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(given), shared = sharedOf(given);
   const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
-    models: {}, kinds: { turn: spent(), memory: spent(), world: spent() }, endpoints: {}, causes: { world: {}, reply: {} } };
+    models: {}, kinds: { turn: spent(), memory: spent(), world: spent() }, endpoints: {}, causes: { turn: {}, world: {}, reply: {} } };
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
   // Names like constructor must not find inherited properties.
@@ -608,23 +608,23 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   // Simultaneous turns in separate places could run in parallel, except for remote contact.
   const judge = { ...(worldPlayer ?? everyone), name: worldPlayer ? worldPlayer.name ?? worldPlayer.model : everyone.name };
   const worldSystem = worldSystemOf(world), figureSystem = `${figureInstructionsOf(traced(world), world.portions, world.prices)}\n\n${aboutOf(world)}`;
+  const untaken = async (kind: 'turn' | 'world' | 'reply', cause: Cause, entry: Rejected['entry'] | null, answer: string | null) => {
+    outcome.causes[kind][cause] = (outcome.causes[kind][cause] ?? 0) + 1;
+    await onUntaken(kind, cause, entry, answer);
+  };
   // journal.ts accepts only answers the rules have taken.
   const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null, allowed?: Allowed) => {
     let came: Came | null = null, again = '';
     const kind = system === figureSystem ? 'reply' : 'world';
-    const untaken = async (cause: Cause, entry: Rejected['entry'] | null, answer: string | null) => {
-      outcome.causes[kind][cause] = (outcome.causes[kind][cause] ?? 0) + 1;
-      await onUntaken(kind, cause, entry, answer);
-    };
     for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
       const declined = outcome.declined;
       const answer = await ask(judge, 'world', { system, schema, ...owned('world'), messages: [{ role: 'user', content: `${content}${again}${allowed ? `\n${allowedTextOf(allowed)}` : ''}` }] }, null, kind);
       if (answer === null) {
-        if (outcome.declined > declined) await untaken('declined', null, null);
+        if (outcome.declined > declined) await untaken(kind, 'declined', null, null);
         return null;
       }
       // The same words would be declined again, so the world is not asked twice: nothing comes of the deed.
-      if (answer === DECLINED) { await untaken('declined', null, null); break; }
+      if (answer === DECLINED) { await untaken(kind, 'declined', null, null); break; }
       came = answer === CUT ? null : read(answer);
       const refused = came && refusal(world, state.people, state.things, deed, came, state.traces);
       if (!came) unusable(judge);
@@ -632,7 +632,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
         outcome.refused += 1;
         [came, again] = [null, `\n${againOf(refused, world.portions && system !== figureSystem)}`];
       }
-      if (!came) await untaken(refused ? refused.code : answer === CUT ? 'cut' : 'unread', refused ? refused.entry : null, answer === CUT ? null : answer);
+      if (!came) await untaken(kind, refused ? refused.code : answer === CUT ? 'cut' : 'unread', refused ? refused.entry : null, answer === CUT ? null : answer);
     }
     if (!came) outcome.void += 1;
     return { came };
@@ -765,9 +765,14 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       `This turn the \`text\` of a say or a call may hold ${limit} words at most.${
         pause ? '' : ` ${Math.floor((horizon - now) / 60)} min ${(horizon - now) % 60} s of the story are left.`}`,
     ].join('\n'), world.stableFirst === true);
+    const declined = outcome.declined;
     const answer = await ask(player, 'turn', { system: request.system, schema, ...owned('resident', who), messages: request.messages }, who);
-    if (answer === null) return outcome;
+    if (answer === null) {
+      if (outcome.declined > declined) await untaken('turn', 'declined', null, null);
+      return outcome;
+    }
     const action = answer === CUT ? 'long' : answer === DECLINED ? 'declined' : readTurn(world, actor, answer, state);
+    if (typeof action === 'string') await untaken('turn', action, null, typeof answer === 'string' ? answer : null);
     if (typeof action === 'string' && answer !== DECLINED) unusable(player);
     const vehicle = spot.vehicle, drive = vehicle && typeof action !== 'string' && action.action === 'go' && action.place !== vehicle.at
       ? { vehicle: spot.id, from: vehicle.at!, to: action.place!, at: now + driveSeconds(world, vehicle.at!, action.place!, vehicle.faster) } : undefined;

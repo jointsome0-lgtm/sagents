@@ -305,7 +305,7 @@ else if (command === 'numbers') {
           : `${totals.status} (${[totals.reason, ...Object.values(failure)].join(' ')}): ${played} story minutes, ${totals.calls} calls, ${totals.invalid} invalid, ${totals.overlong} of them cut at the output limit, ${totals.declined} of them declined by the service, ${totals.rewrites} memory rewrites, ${
             totals.lost} lost, ${totals.refused} answers of the world refused, ${totals.void} deeds left with nothing, ${tokens(totals)}${unreported(totals.unreported)}`);
         if (!json) {
-          const causes = (['world', 'reply'] as const).map(kind => {
+          const causes = (['turn', 'world', 'reply'] as const).map(kind => {
             const counts = UNTAKEN_CAUSES.filter(cause => totals.causes[kind][cause]).map(cause => `${cause} ${totals.causes[kind][cause]}`);
             return counts.length ? `${kind} ${counts.join(', ')}` : '';
           }).filter(Boolean);

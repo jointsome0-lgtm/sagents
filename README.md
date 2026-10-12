@@ -438,9 +438,12 @@ service's words (`failed (provider_failed 502 bad_gateway)`; `httpStatus`, `prov
 
 The totals count story minutes, calls, `invalid`, `overlong` cuts, `declined`, memory `rewrites` and `lost`,
 world answers `refused`, deeds and speeches left `void`, input tokens, `cachedInputTokens` and output tokens.
-`Outcome` in `src/live.ts` also counts each untaken world answer and figure reply by cause in `causes.world` and
-`causes.reply`, with only causes that occurred. JSON totals include `causes`; text leaves the closing line unchanged
-and adds `not taken: world to 4, sink 5; reply what 2` when any occurred, in the order of `UNTAKEN_CAUSES` in `src/live.ts`.
+`Outcome` in `src/live.ts` also counts each untaken resident turn, world answer and figure reply by cause in
+`causes.turn`, `causes.world` and `causes.reply`, with only causes that occurred. A turn's cause is the word of
+`REFUSALS` in `src/action.ts` that its `act` record holds; a final service decline with no record also counts as
+`declined`. JSON totals include `causes`; text leaves the closing line unchanged and adds
+`not taken: turn json 5, here 1; world to 4, sink 5; reply what 2` when any occurred, with kinds in that order
+and causes in the order of `UNTAKEN_CAUSES` in `src/live.ts`.
 They sum only reported usage: `unreported` counts answers without usage and requests that failed with a `ModelError`,
 rather than calling their spending zero; an absent cached count adds nothing. `kinds` divides requests and tokens into turns, rewrites and world answers,
 including figure replies and retries. Text prints one line for each kind. `models` also divides calls, unusable
@@ -502,7 +505,7 @@ sends them. This groups requests without putting story text or ids in the names.
 | `state.sqlite` | The state described above. |
 | `part<N>.events.jsonl` | One event per line for that start, beginning with `part1`, then `part2` and so on. |
 | `usage-part<N>.jsonl` | One row per request: when sent, purpose (`turn`, `memory`, `world`, `reply`), owner, model, milliseconds, reported input, cached, output and reasoning tokens, and failure code `error`. A failure keeps `status` when it has an HTTP status; on the plan, `stage` is `connect` before a response or `stream` after one, and a decline keeps `refusal` as `event`, `filter` or `part`. A second try keeps `tries: 2`, even on success; these fields are absent otherwise. No request, answer, failure text or service code. |
-| `untaken-part<N>.jsonl` | One row per untaken world answer or figure reply, after judgment: `n` names its usage row, `kind` is `world` or `reply`, and `cause` is a code. Empty when every answer was taken. With `--untaken-text` only, also the rule's refused `entry` when there is one and the model's `answer` when there was text; this file then holds model words like the events file. Use the option only for worlds whose text may be kept. |
+| `untaken-part<N>.jsonl` | One row per untaken resident turn, world answer or figure reply, after judgment: `n` names its usage row, `kind` is `turn`, `world` or `reply`, and `cause` is the code counted above. Empty when every answer was taken. With `--untaken-text` only, also the rule's refused `entry` when there is one and the model's `answer` when there was text; a turn has no `entry`, and a cut or decline has no `answer`. This file then holds model words like the events file. Use the option only for worlds whose text may be kept. |
 | `about.txt` | Your description of the experiment, when you add one; the lab shows it. |
 
 A second start adds the next stretch. Files are made only where absent, lines only appended; nothing is
@@ -758,10 +761,10 @@ The id `tasted` is reserved with `eaten` and `burned` only with the setting.
 Moves all to their current holders refuse it because prose could claim a move that did not happen; beside an
 actual move they are passed over. A refusal changes nothing and is not journalled. The world gets the same
 request once more with a sentence naming the entry and cause in its instructions' words. After the second,
-nothing comes of the deed or speech; totals count `refused` and `void`. `runLive` in `src/live.ts` counts the cause
-of each untaken attempt and passes it to `Live.onUntaken` for the kept file above. The closed list `UNTAKEN_CAUSES`
+nothing comes of the deed or speech; totals count `refused` and `void`. `runLive` in `src/live.ts` passes each
+untaken attempt to `Live.onUntaken` for the kept file above. The closed list `UNTAKEN_CAUSES`
 in `src/live.ts` is `cut`, `declined`, `unread`, the rule codes of `CODES` in `src/things.ts` and `TRACE_CODES` in
-`src/answer.ts`; no untaken answer enters the journal.
+`src/answer.ts`, then the words of `REFUSALS` not already in the list, each once; no untaken answer enters the journal.
 
 With `prices`, `settle` also refuses a figure's answer with `price` when the one who spoke cannot pay,
 using its first sale as the refused entry. After moves and before sets, it sums each money name's prices,
