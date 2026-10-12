@@ -5,8 +5,11 @@ Orientation for AI coding assistants and people working in this project. Keep it
 ## What this is
 
 sagents runs story agents: models with tools for an interactive story where a coding agent has tools for a repository.
-[README.md](README.md) says what is written and what is only planned, with the long accounts of the judge and of
-the lab in [docs/judge.md](docs/judge.md) and [docs/lab.md](docs/lab.md) and what was measured in
+[README.md](README.md) says what is written and what is only planned, with the long accounts of
+one request in [docs/ask.md](docs/ask.md), the world file in [docs/world-file.md](docs/world-file.md),
+the live commands in [docs/live.md](docs/live.md), the requests in [docs/requests.md](docs/requests.md),
+the mechanisms in [docs/mechanisms.md](docs/mechanisms.md), the model connection in [docs/connection.md](docs/connection.md),
+the judge in [docs/judge.md](docs/judge.md), the lab in [docs/lab.md](docs/lab.md) and what was measured in
 [docs/measured.md](docs/measured.md). These pages point at code by a symbol and its file.
 `npm run pointers` checks that every pointer still names a top-level declaration of its file. Run it after a rename.
 Today the code is the two model connections

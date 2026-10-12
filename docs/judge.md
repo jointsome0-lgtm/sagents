@@ -25,7 +25,7 @@ its instructions, then the run's head and the first 30 memory rewrites, or `Memo
 It answers one strict schema with its notes, findings, `drop`, a required list of integers empty when nothing is
 taken back, and one tool.
 `INSTRUCTIONS` in `src/eval.ts` gives the judge the live world's rules of perception, memory and time,
-as described in [README](../README.md#what-a-model-is-sent). A lost obligation, promise, sum, time, location or knowledge that a
+as described in [What a model is sent](requests.md#what-a-model-is-sent). A lost obligation, promise, sum, time, location or knowledge that a
 rewrite was asked to keep is a fault. The judge can also read a library run with a journal but no `pause`, whose
 residents were told the horizon, unlike a kept CLI run.
 The two texts of a rewrite and the records it folded are compared before anything
