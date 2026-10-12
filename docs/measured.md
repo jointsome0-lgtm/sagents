@@ -84,6 +84,13 @@ twenty minutes of waking. One start of the open model spent its 250 requests on 
 Going to an unknown place cost a resident played by a weak model
 14 turns of 28 in one run and 3 of 23 in another.
 
+Under `oneSchema` the field `memory` stands last in the turn schema. With it first, Gemma 4 31B through OpenRouter
+filled it in ordinary turns of a walk of two: in 51 of 136 turns of three plays of 60 requests, in 15 of 123 on a
+copy of that world mended of a contradiction, and in none of 35 on a copy whose short memory folds early. With it
+last it filled it in none of 219 turns of five plays, and all 10 of its memory rewrites were read. GPT-6 Luna at low
+effort filled it in neither place: in none of 130 turns of three plays with it first, and in none of 98 turns of three
+plays with it last, where all 13 of its memory rewrites were read.
+
 ## Facts of things
 
 A block of these facts under

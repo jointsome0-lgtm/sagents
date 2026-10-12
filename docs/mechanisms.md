@@ -380,7 +380,7 @@ meets it. Nothing checks that instruction. Seeded weather is replayable and does
 
 ### Folding memory
 
-A world file with `oneSchema: true` uses the turn schema with `memory` first, a string or null, for both
+A world file with `oneSchema: true` uses the turn schema with `memory` last, a string or null, for both
 turns and rewrites. `schemaOf` and `residentInstructionsOf` in `src/live.ts` give both requests the same
 schema and fixed instructions; `known` puts memory before perceived lines in both. `readTurn` in `src/live.ts`
 reads a turn as its action, drops any memory written in it and counts that turn in `Outcome.dropped`, even if

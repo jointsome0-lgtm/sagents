@@ -641,8 +641,8 @@ test('one schema drops a memory on a turn and retries a null rewrite without app
     assert.equal(after.system, before.system);
     assert.equal(JSON.stringify(after.schema), JSON.stringify(before.schema));
     const schema = after.schema as { required: string[]; properties: { memory: { type: string[] } } };
-    assert.equal(schema.required[0], 'memory');
-    assert.equal(Object.keys(schema.properties)[0], 'memory');
+    assert.equal(schema.required.at(-1), 'memory');
+    assert.equal(Object.keys(schema.properties).at(-1), 'memory');
     assert.deepEqual(schema.properties.memory.type, ['string', 'null']);
     assert.deepEqual(sent[rewrite + 1].request, after);
     assert.ok(after.messages[0].content.startsWith(before.messages[0].content.split('\nNow ')[0]));

@@ -81,9 +81,9 @@ const ordered = (list: string[]) => [...new Set(list)].sort((a, b) => {
 });
 const text = { type: ['string', 'null'] };
 // Writing the note first lets it lead the action choice.
-const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: [...(world.oneSchema ? ['memory'] : []), 'note', 'action', 'text', 'to', 'place', 'seconds', 'until', 'gesture', 'says'],
-  properties: { ...(world.oneSchema ? { memory: text } : {}), note: text, action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: { ...text, enum: [...world.places.map(place => place.id), ...(world.vehicles ?? []).map(place => place.id), null] },
-    seconds: { type: ['integer', 'null'] }, until: text, gesture: text, says: text } });
+const schemaOf = (world: World) => ({ type: 'object', additionalProperties: false, required: ['note', 'action', 'text', 'to', 'place', 'seconds', 'until', 'gesture', 'says', ...(world.oneSchema ? ['memory'] : [])],
+  properties: { note: text, action: { type: 'string', enum: ['say', ...(world.remote === null ? [] : ['call']), 'go', 'do', 'wait', 'sleep'] }, text, to: text, place: { ...text, enum: [...world.places.map(place => place.id), ...(world.vehicles ?? []).map(place => place.id), null] },
+    seconds: { type: ['integer', 'null'] }, until: text, gesture: text, says: text, ...(world.oneSchema ? { memory: text } : {}) } });
 const MEMORY_SCHEMA = { type: 'object', additionalProperties: false, required: ['memory'], properties: { memory: { type: 'string' } } };
 
 // Replay reads the stored action without the response-only memory field.
