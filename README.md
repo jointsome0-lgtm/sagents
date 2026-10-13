@@ -63,11 +63,13 @@ stories, is to come.
 
 ## What works today
 
-sagents needs Node 24.9 or newer and nothing else. It has no dependencies, and Node runs its TypeScript as it is.
-It is run from a checkout of this repository: it is not on npm, and `"private": true` in `package.json` guards against
-publishing it there by mistake. `npm link`, run once in the checkout, makes `sagents` a command of this computer: a
-link to `src/cli.ts`, so the command is always the checkout as it stands. Without it `node src/cli.ts` takes the same
-arguments, and `sagents help` lists them. `sagents --help` and `sagents -h` give the same text.
+sagents needs Node 24.9 or newer and nothing else. It has no dependencies. From npm, `npm install -g sagents` makes
+`sagents` a command of this computer: the same command line as JavaScript with the types erased, with the example
+worlds in the package's `examples` folder. In a checkout of this repository Node runs the TypeScript as it is:
+`node src/cli.ts` takes the same arguments, and `npm link`, run once there, makes `sagents` a link to `src/cli.ts`,
+so the command is always the checkout as it stands. `"private": true` in the checkout's `package.json` guards against
+publishing the checkout itself by mistake: the package is the folder that `npm run pack` builds from a commit.
+`sagents help` lists the arguments. `sagents --help` and `sagents -h` give the same text.
 
 Every `live` request carries a strict `json_schema` `response_format`. A server refusing that field ends the run
 at its first request; plain-text answers cannot be used. [The two server checks](docs/measured.md#servers-with-no-schema)
