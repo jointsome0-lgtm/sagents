@@ -90,7 +90,7 @@ copy of that world mended of a contradiction, and in none of 35 on a copy whose 
 last it filled it in none of 219 turns of five plays, and all 10 of its memory rewrites were read. The accepted engine
 then played through the same router two walks of 60 requests, a folding copy of 50 and three starts that the router
 cut short: it filled it in 1 of 131 turns, which was read as its action with the memory dropped, and all 9 of its
-memory rewrites were read. On a rented card, a variant of that model (`gemma-4-31b-heretic-nvfp4`) under vLLM behind
+memory rewrites were read. On a rented card, a quantized variant of that model under vLLM behind
 a gateway played the mended walk three times each way, the two in turn: with the field first it filled it in 66 of
 139 turns (9 of 42, 27 of 47 and 30 of 50 by play), with it last in none of 136. With it last it filled it in 1 of
 97 turns of three plays of the folding copy and in 26 of 1,573 turns of two plays of 1,200 requests with six
