@@ -39,7 +39,7 @@ function standIn(script: { [id: string]: (string | Error)[] }) {
     (sent[id] ??= []).push(structuredClone(request));
     const answer = script[id]?.shift() ?? (id === 'world' ? came() : act('wait', { seconds: 600 }));
     if (answer instanceof Error) throw answer;
-    return { text: answer, usage: { inputTokens: 100, cachedInputTokens: 40, outputTokens: 10, reasoningTokens: 0 } };
+    return { text: answer, usage: { inputTokens: 100, cachedInputTokens: 40, writtenInputTokens: null, outputTokens: 10, reasoningTokens: 0 } };
   };
   return { sent, respond };
 }

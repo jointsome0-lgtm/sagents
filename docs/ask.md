@@ -19,11 +19,16 @@ of tokens is never lost unsaved, and a call whose limit passed meanwhile ends wi
 | `cache` | Optional name of your own for whoever the request is one of, 64 characters at most of letters, digits, `-` and `_`, so that a service that keeps the beginnings of requests it has read brings the requests under one name to the same place. It holds nothing of the text. See each connection for how it is sent; a request with none is sent with none. |
 
 ```json
-{"status":"done","text":"Hi.","usage":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0}}
+{"status":"done","text":"Hi.","usage":{"inputTokens":0,"cachedInputTokens":0,"writtenInputTokens":null,"outputTokens":0,"reasoningTokens":0}}
 {"status":"failed","reason":"invalid_request","httpStatus":400,"providerCode":"subscription_sharing_unsupported_capability","param":"reasoning.effort"}
 ```
 
-The numbers and the failure above only show the shape. An answer is whole or it is a failure: one that the model's own
+The numbers and the failure above only show the shape. `usage` gives input, cached input, written input, output
+and reasoning tokens, null for a count the service did not report. On a server, `writtenInputTokens` comes from
+`usage.prompt_tokens_details.cache_write_tokens`; cached and written tokens are already inside `inputTokens`.
+The ChatGPT plan reports no written count.
+
+An answer is whole or it is a failure: one that the model's own
 limit cut short comes back as `output_limit`, without the text written by then. This holds for what a call returns,
 and `ask` and `live` take nothing else. A program that calls `src/chatgpt.ts` itself and gives it `onText` is handed
 the text as the stream brings it, before the answer is known to be whole or to come from the model asked for, so a

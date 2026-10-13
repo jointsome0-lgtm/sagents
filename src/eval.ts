@@ -47,7 +47,7 @@ type Found = { kind: string; at: number[]; quote: string; says: string };
 type Answer = { notes: string; drop: number[]; found: Found[]; tool: Tool; from: number | null; to: number | null; who: string | null; summary: string | null };
 export type Finding = Found & { n: number; clocks: string[] };
 type Refused = 'quote' | 'record' | 'duplicate' | 'full';
-type Usage = { n: number; tool: Tool | null; from: number | null; to: number | null; who: string | null; kept: number; words: number; ms: number; input: number | null; cached: number | null; output: number | null; reasoning: number | null; error?: string };
+type Usage = { n: number; tool: Tool | null; from: number | null; to: number | null; who: string | null; kept: number; words: number; ms: number; input: number | null; cached: number | null; written: number | null; output: number | null; reasoning: number | null; error?: string };
 export type EvalReport = { status: 'done' | 'failed'; reason?: string; httpStatus?: number; providerCode?: string; param?: string; model: string; world?: 'matches' | 'unverified'; records: number; shown: number;
   findings: Finding[]; dropped: (Finding & { call: number })[]; unkept: (Found & { call: number; why: Refused })[]; refused: { [reason in Refused]: number }; notes: string; summary: string; calls: number; invalid: number; usage: Usage[] };
 export type Eval = { entries: Iterable<StoredEntry>; world: unknown; questions: Questions; respond: Respond; model: string; name?: string;
@@ -283,7 +283,7 @@ export async function runEval({ entries, world, questions: given, respond, model
     const last = report.calls + 1 === most;
     const messages = [{ ...runHead, content: runHead.content + (carried ? `\n\n${carried}` : '')
       + (most === 1 ? '\nThis is the last request. Use report; the schema allows only report.' : '') }, ...pairs.flatMap(pair => [pair.answer, pair.tool])];
-    const row: Usage = { n: ++report.calls, tool: null, from: null, to: null, who: null, kept: 0, words: 0, ms: 0, input: null, cached: null, output: null, reasoning: null };
+    const row: Usage = { n: ++report.calls, tool: null, from: null, to: null, who: null, kept: 0, words: 0, ms: 0, input: null, cached: null, written: null, output: null, reasoning: null };
     report.usage.push(row);
     const began = performance.now();
     let text = '';
@@ -291,7 +291,7 @@ export async function runEval({ entries, world, questions: given, respond, model
     try {
       const answer = await respond({ model, system, messages, schema: schemaOf(questions, last), cache: owned });
       text = answer.text;
-      Object.assign(row, { input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null,
+      Object.assign(row, { input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null, written: answer.usage?.writtenInputTokens ?? null,
         output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });
     } catch (error) {
       if (!(error instanceof ModelError)) throw error;

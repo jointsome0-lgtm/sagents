@@ -9,11 +9,27 @@ export class NumbersError extends Error {}
 type Fields = { readonly [field: string]: unknown };
 type Value = number | null;
 export type Numbers = { name: string; rows: Map<string, Value> };
+type Price = { input: number; cached: number; written: number; output: number };
+export type Prices = Map<string, Price>;
 const KINDS: Kind[] = ['say', 'call', 'go', 'do', 'wait', 'sleep'];
 const object = (value: unknown): value is Fields => value !== null && typeof value === 'object' && !Array.isArray(value);
 const amount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
-const unreadable = (error: unknown) => error instanceof Error && 'code' in error && ['ENOENT', 'ENOTDIR', 'EISDIR', 'EACCES', 'EPERM', 'ELOOP'].includes(error.code as string);
+const MAX_PRICE = 1_000_000;
+const unreadable = (error: unknown) => error instanceof Error && 'code' in error && ['ENOENT', 'ENOTDIR', 'EISDIR', 'EACCES', 'EPERM', 'ELOOP', 'ENAMETOOLONG'].includes(error.code as string);
 const share = (part: Value, whole: Value) => part === null || whole === null || whole === 0 ? null : Math.round(100 * part / whole);
+
+// Prices change and belong to the caller, so they come from a file rather than the code.
+export function readPrices(path: string): Prices {
+  const refused = () => new NumbersError(`${JSON.stringify(path)}: A price file must be a JSON object keyed by model name, each with exactly input, cached, written and output prices in dollars per million tokens, each from 0 to ${MAX_PRICE}.`);
+  let value: unknown;
+  try { value = JSON.parse(readFileSync(path, 'utf8')); } catch (error) {
+    if (!(error instanceof SyntaxError) && !unreadable(error)) throw error;
+    throw refused();
+  }
+  if (!object(value) || !Object.values(value).every(price => object(price) && Object.keys(price).length === 4
+    && ['input', 'cached', 'written', 'output'].every(field => amount(price[field]) && price[field] <= MAX_PRICE))) throw refused();
+  return new Map(Object.entries(value) as [string, Price][]);
+}
 
 // The reader's byte position distinguishes an empty file from a missing one and a whole line from one still being written.
 function rowsOf(path: string): Fields[] | null {
@@ -31,7 +47,7 @@ function rowsOf(path: string): Fields[] | null {
   }
 }
 
-export function numbersOf(dir: string): Numbers {
+export function numbersOf(dir: string, prices?: Prices): Numbers {
   let world: unknown, files: string[];
   try { files = readdirSync(dir); world = JSON.parse(readFileSync(join(dir, 'world.json'), 'utf8')); } catch (error) {
     if (!(error instanceof SyntaxError) && !unreadable(error)) throw error;
@@ -129,12 +145,31 @@ export function numbersOf(dir: string): Numbers {
   put('input tokens', input);
   put('cached input tokens', cached);
   put('cached input tokens (%)', share(cached, input));
+  put('input tokens written to a cache', sum(usage, 'written'));
   put('output tokens', sum(usage, 'output'));
   put('mean input tokens', input === null || requests === null || requests === 0 ? null : Math.round(input / requests));
   const commonest = kinds.map(kind => ({ kind, count: usage.filter(row => row.kind === kind).length })).sort((a, b) => b.count - a.count).slice(0, 2);
   for (const { kind, count } of commonest) {
     const total = sum(usage.filter(row => row.kind === kind), 'input');
     put(`mean input tokens: ${kind}`, total === null ? null : Math.round(total / count));
+  }
+  if (prices !== undefined) {
+    // Tokens are summed by model before a price is applied: equal counts give equal dollars however the rows divide them.
+    const sums = new Map<string, number[]>();
+    let outside = 0, known = usageKnown;
+    for (const row of usage) {
+      const { input, output, model } = row, cached = row.cached ?? 0, written = row.written ?? 0;
+      if (row.error != null || input == null || output == null) { outside += 1; continue; }
+      if (typeof model !== 'string' || !prices.has(model) || !amount(input) || !amount(output) || !amount(cached) || !amount(written) || cached + written > input) { known = false; continue; }
+      const sum = sums.get(model) ?? [0, 0, 0, 0];
+      sums.set(model, [sum[0] + input - cached - written, sum[1] + cached, sum[2] + written, sum[3] + output]);
+    }
+    const dollars = [...sums].sort(([a], [b]) => a < b ? -1 : 1).reduce((total, [model, [plain, cached, written, output]]) => {
+      const price = prices.get(model)!;
+      return total + (plain * price.input + cached * price.cached + written * price.written + output * price.output) / 1_000_000;
+    }, 0);
+    put('dollars', known && Number.isFinite(dollars) ? Number(dollars.toFixed(4)) : null);
+    put('requests outside the dollars', usageKnown ? outside : null);
   }
   for (const [label, field] of [['answers that could not be used', 'invalid'], ['answers of the world refused by the rules', 'refused']]) {
     if (summaries.some(row => amount(row[field]))) put(label, summariesKnown && summaries.every(row => amount(row[field])) ? summaries.reduce((total, row) => total + (row[field] as number), 0) : null);
@@ -156,7 +191,7 @@ export function numbersTable(runs: Numbers[]): string {
   const names = numberRows(runs), labelWidth = Math.max(0, ...names.map(name => name.length));
   const value = (run: Numbers, name: string) => {
     const n = run.rows.get(name);
-    return n == null ? '-' : name.startsWith('story minutes') ? n.toFixed(1) : String(n);
+    return n == null ? '-' : name === 'dollars' ? n.toFixed(4) : name.startsWith('story minutes') ? n.toFixed(1) : String(n);
   };
   const widths = runs.map(run => Math.max(run.name.length, ...names.map(name => value(run, name).length)));
   return [[''.padEnd(labelWidth), ...runs.map((run, n) => run.name.padStart(widths[n]))].join('  '),

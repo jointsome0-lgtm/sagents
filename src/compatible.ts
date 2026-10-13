@@ -250,7 +250,7 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
         }
         const ended = stopped();
         if (ended) throw ended;
-        // prompt_tokens includes cached tokens; completion_tokens includes reasoning.
+        // prompt_tokens includes cached and written tokens; completion_tokens includes reasoning.
         const usage = isObject(answer.usage) ? answer.usage : {};
         const input = isObject(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
         const output = isObject(usage.completion_tokens_details) ? usage.completion_tokens_details : {};
@@ -258,7 +258,7 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
         // A router may send two requests for one model to different providers.
         const endpoint = typeof answer.provider !== 'string' ? {} : { endpoint: ENDPOINT.test(answer.provider) ? answer.provider : OTHER_ENDPOINT };
         return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
-          cachedInputTokens: count(input.cached_tokens), outputTokens, reasoningTokens: count(output.reasoning_tokens) }, ...endpoint };
+          cachedInputTokens: count(input.cached_tokens), writtenInputTokens: count(input.cache_write_tokens), outputTokens, reasoningTokens: count(output.reasoning_tokens) }, ...endpoint };
       } catch (error) {
         if (error instanceof ModelError && sent) error.stage = response ? 'stream' : 'connect';
         throw error;

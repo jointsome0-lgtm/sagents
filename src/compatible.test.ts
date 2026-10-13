@@ -15,7 +15,7 @@ const SECRETS = [KEY, STORY, WORDS];
 const leaks = (value: unknown) => SECRETS.filter(secret => JSON.stringify(value, Object.getOwnPropertyNames(value ?? {})).includes(secret) || String(value).includes(secret));
 const json = (status: number, body: object) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const answer = (content: string, finish = 'stop') => json(200, { choices: [{ index: 0, finish_reason: finish, message: { role: 'assistant', content } }],
-  usage: { prompt_tokens: 120, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 100 }, completion_tokens_details: { reasoning_tokens: 0 } } });
+  usage: { prompt_tokens: 120, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 100, cache_write_tokens: 10 }, completion_tokens_details: { reasoning_tokens: 0 } } });
 // What a server may put into a refusal: the key it was given and the request it read.
 const refusal = (status: number, error: object = {}) => json(status, { error: { message: `${WORDS}: ${KEY} ${STORY}`, ...error } });
 const env = { SAGENTS_API_URL: 'https://openrouter.ai/api/v1/', SAGENTS_API_KEY: KEY, SAGENTS_API_MAX_TOKENS: '512',
@@ -37,7 +37,7 @@ test('an api: model goes to the server the address names, with what the caller g
   const parts: string[] = [];
   // The caller's name for the player is in this request and no setting names a field for it, so it is not sent.
   const result = await respond({ ...request, model, cache: 'player-1' }, { onText: (part: string) => { parts.push(part); } });
-  assert.deepEqual(result, { text: '{"ok":true}', usage: { inputTokens: 120, cachedInputTokens: 100, outputTokens: 30, reasoningTokens: 0 } });
+  assert.deepEqual(result, { text: '{"ok":true}', usage: { inputTokens: 120, cachedInputTokens: 100, writtenInputTokens: 10, outputTokens: 30, reasoningTokens: 0 } });
   assert.deepEqual(parts, ['{"ok":true}']);
   // A router's name for the endpoint that answered is kept when it is a short plain name, any other string is one
   // fixed word, and what is no string is nothing: no word of the server's goes further by this field.
@@ -218,7 +218,7 @@ test('a stream is an answer only when it came whole: its text and usage, and a f
   const { respond } = createCompatible({ env: streaming, fetch: async (url: string, init: RequestInit) => { calls.push({ url, init }); return stream(whole)(); } });
   const parts: string[] = [];
   assert.deepEqual(await respond(request, { onText: (part: string) => { parts.push(part); } }),
-    { text: '{"ok":true}  \u2014', usage: { inputTokens: 120, cachedInputTokens: 100, outputTokens: 30, reasoningTokens: null } });
+    { text: '{"ok":true}  \u2014', usage: { inputTokens: 120, cachedInputTokens: 100, writtenInputTokens: null, outputTokens: 30, reasoningTokens: null } });
   assert.deepEqual(parts, ['{"ok":', 'true}  \u2014']);
   const multiline = createCompatible({ env: streaming, fetch: async () => stream('data: {"choices":\r\n: a comment\r\nevent: message\r\ndata: [{"delta":{"content":"ok"},"finish_reason":"stop"}]}\r\n\r\ndata: [DONE]\n')() });
   assert.equal((await multiline.respond(request)).text, 'ok');

@@ -42,7 +42,7 @@ export function keepRun(dir: string, world: string, environment?: string, untake
       const began = performance.now();
       try {
         const answer = await respond(request);
-        Object.assign(row, { ms: Math.round(performance.now() - began), input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null,
+        Object.assign(row, { ms: Math.round(performance.now() - began), input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null, written: answer.usage?.writtenInputTokens ?? null,
           output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });
         if (answer.tries === 2) row.tries = 2;
         return answer;

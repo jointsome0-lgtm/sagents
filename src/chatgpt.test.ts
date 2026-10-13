@@ -41,7 +41,7 @@ test('a request holds only what the caller gave, and the answer comes with its u
   const result = await chatgpt.respond(request, { onText: (delta: string) => { deltas.push(delta); } });
   assert.equal(result.text, '{"ok":true}');
   assert.equal(deltas.join(''), '{"ok":true}');
-  assert.deepEqual(result.usage, { inputTokens: 120, cachedInputTokens: 100, outputTokens: 30, reasoningTokens: 20 });
+  assert.deepEqual(result.usage, { inputTokens: 120, cachedInputTokens: 100, writtenInputTokens: null, outputTokens: 30, reasoningTokens: 20 });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://api.openai.com/v1/responses');
   assert.equal((calls[0].init.headers as Record<string, string>).authorization, 'Bearer ACCESS-OLD');

@@ -60,7 +60,7 @@ export type Message = { role: 'user' | 'assistant'; content: string };
 export type Request = { model: string; system?: string; messages: Message[]; schema?: object; cache?: string };
 // Cache names enter headers and must fit the service's key limit.
 export const CACHE = /^[A-Za-z0-9_-]{1,64}$/;
-export type Usage = { inputTokens: number | null; cachedInputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null };
+export type Usage = { inputTokens: number | null; cachedInputTokens: number | null; writtenInputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null };
 export type Result = { text: string; usage: Usage | null; endpoint?: string; tries?: 2 };
 export const ENDPOINT = /^[A-Za-z0-9 ./_-]{1,40}$/, OTHER_ENDPOINT = 'other';
 // onText may receive pieces before a later failure; only the return value is a complete answer.
@@ -424,7 +424,7 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
           const usage = completed.response?.usage;
           const inputTokens = count(usage?.input_tokens), outputTokens = count(usage?.output_tokens);
           return { text, usage: inputTokens === null && outputTokens === null ? null : { inputTokens,
-            cachedInputTokens: count(usage?.input_tokens_details?.cached_tokens), outputTokens,
+            cachedInputTokens: count(usage?.input_tokens_details?.cached_tokens), writtenInputTokens: null, outputTokens,
             reasoningTokens: count(usage?.output_tokens_details?.reasoning_tokens) }, ...(tries ? { tries } : {}) };
         }, current, until);
       } catch (error) {

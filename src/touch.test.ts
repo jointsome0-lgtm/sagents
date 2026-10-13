@@ -29,7 +29,7 @@ function standIn(script: { [id: string]: string[] }) {
   const respond = async (request: Request) => {
     const id = /\nYou are \w+ \((\w+)\)\.\n/.exec(request.system ?? '')?.[1] ?? 'world';
     (sent[id] ??= []).push(structuredClone(request));
-    return { text: script[id]?.shift() ?? (id === 'world' ? came() : wait), usage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 } };
+    return { text: script[id]?.shift() ?? (id === 'world' ? came() : wait), usage: { inputTokens: 100, cachedInputTokens: 0, writtenInputTokens: null, outputTokens: 10, reasoningTokens: 0 } };
   };
   return { sent, respond };
 }

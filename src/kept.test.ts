@@ -21,7 +21,7 @@ import { openState, readState } from './state.ts';
 
 const NOTE = 'NOTE-OF-THE-STAND-IN';
 const answer = { choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({ note: NOTE, action: 'wait', text: null, to: null, place: null, seconds: 600, until: null }) } }],
-  usage: { prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 40 } } };
+  usage: { prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 40, cache_write_tokens: 20 } } };
 const preload = `data:text/javascript,${encodeURIComponent(`globalThis.fetch = async () => new Response(${JSON.stringify(JSON.stringify(answer))}, { status: 200 });`)}`;
 const example = (name: string) => join(import.meta.dirname, `../examples/${name}.json`);
 
@@ -42,8 +42,8 @@ test('live --run keeps each start as a stretch of one world that the lab reads, 
   // A row for every request, with the counted fields and nothing else: no text of a request or of an answer.
   assert.equal(rows('usage-part1.jsonl').length, 3);
   for (const row of rows('usage-part1.jsonl')) {
-    assert.deepEqual(Object.keys(row), ['n', 'at', 'kind', 'who', 'model', 'ms', 'input', 'cached', 'output', 'reasoning']);
-    assert.deepEqual([row.kind, typeof row.who, row.model, row.input, row.cached, row.output], ['turn', 'string', 'api:stand-in', 100, 40, 10]);
+    assert.deepEqual(Object.keys(row), ['n', 'at', 'kind', 'who', 'model', 'ms', 'input', 'cached', 'written', 'output', 'reasoning']);
+    assert.deepEqual([row.kind, typeof row.who, row.model, row.input, row.cached, row.written, row.output], ['turn', 'string', 'api:stand-in', 100, 40, 20, 10]);
   }
   assert.ok(!one['usage-part1.jsonl'].includes(NOTE));
   // The events are those the command printed, each a line as the engine gave it.

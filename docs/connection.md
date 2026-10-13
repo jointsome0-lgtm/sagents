@@ -71,6 +71,10 @@ What sagents sends and to whom:
   store requests, so real stories go only to a model you run yourself.
 - A failure is a code, with the HTTP status and the server's own error code and field name when they are plain
   identifiers. sagents never prints the server's error text, the key or the request.
+- Usage gives input, cached input, written input, output and reasoning tokens, null for a count not reported.
+  Input is `usage.prompt_tokens`, including cached and written tokens; the two counts come from
+  `usage.prompt_tokens_details.cached_tokens` and `usage.prompt_tokens_details.cache_write_tokens`.
+  Output is `usage.completion_tokens`, including `usage.completion_tokens_details.reasoning_tokens`.
 - An answer cut by `max_tokens` is `output_limit`, without the text. An `@<effort>` after the id means nothing here
   and is refused; the server's own switch goes into `SAGENTS_API_EXTRA`.
 - HTTP 402 is `budget_exceeded`: sagents stops and tries nothing else.
@@ -101,6 +105,8 @@ What sagents keeps and what it sends:
 - Every request has `store: false`. sagents writes no log of requests or answers.
 - A failure is a code, with the HTTP status and OpenAI's own error code and field name when there were any. sagents
   never prints OpenAI's error text, which can quote the request.
+- Usage gives input, cached input, output and reasoning tokens when reported, and null for written input tokens:
+  the plan tells sagents no count of tokens written to a cache.
 - When the plan's limit, or the share of it given to sagents, is used up, sagents stops with `budget_exceeded` and tries
   nothing else.
 - Several sagents processes may run at once. They take turns to renew the tokens through a lock next to the account

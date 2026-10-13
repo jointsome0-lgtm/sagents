@@ -38,7 +38,7 @@ const respond = async (request: Request) => {
     mark.largest = Math.max(mark.largest, size);
     if (count === Math.floor(mark.until)) mark.rssMB = Math.round(process.memoryUsage().rss / 1e6);
   }
-  const usage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+  const usage = { inputTokens: 0, cachedInputTokens: 0, writtenInputTokens: null, outputTokens: 0, reasoningTokens: 0 };
   if ('result' in (request.schema as { properties: object }).properties) {
     results += 1;
     return { text: JSON.stringify({ search: false, finds: [], moves: [], sets: [], poses: [], wakes: [], feels: [], beyond: null, result: speech }), usage };

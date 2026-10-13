@@ -336,7 +336,7 @@ What another account or server does differently was not known.
 ## Numbers of kept runs
 
 ```sh
-sagents numbers <dir>... [--json]
+sagents numbers <dir>... [--json] [--prices <file>]
 ```
 
 `numbers` reads directories kept by `live --run` and prints one table, a column under each directory's name.
@@ -361,12 +361,35 @@ The rows are:
 - Deeds cut short, only when result events carry `planned`; these have `worked` below `planned`.
 - Places residents were in, including their starting places and door crossings, and how many the world has,
   including vehicles. Setting out alone does not count the destination as visited.
-- Input tokens, cached input tokens and their share of input as a whole percent, output tokens, and mean input
-  tokens per request as a whole number, all and for each run's two commonest kinds. A tie keeps the first
-  appearance's order.
+- Input tokens, cached input tokens and their share of input as a whole percent, `input tokens written to a
+  cache`, output tokens, and mean input tokens per request as a whole number, all and for each run's two commonest
+  kinds. A tie keeps the first appearance's order.
+- With `--prices`, `dollars` to four decimals and `requests outside the dollars`, after the token rows.
 - Answers that could not be used, memory rewrites lost, and answers of the world refused by the rules, when
   the files hold them. Null text in a memory event counts a lost rewrite. The other two need `invalid` and
   `refused` in one total row without `kind` in each stretch's usage file; `live --run` does not write those totals.
+
+`--prices` names a JSON object whose keys are model names exactly as the usage rows keep them in `model`.
+Each value has exactly four prices in dollars for a million tokens, each from 0 to 1000000:
+
+```json
+{"alpha":{"input":2,"cached":1,"written":4,"output":8},"beta":{"input":4,"cached":2,"written":8,"output":16}}
+```
+
+These names and prices are invented. An unreadable file, invalid JSON or any other shape is refused as a whole:
+one line on standard error names the file and the required shape, nothing is printed on standard output, and
+the command ends with a code that is not 0. Prices belong to whoever runs the engine and are never built in.
+
+A request counts in `dollars` when its row has no `error` and reports both input and output tokens.
+Its dollars are `((input - cached - written) * input price + cached * cached price + written * written price
++ output * output price) / 1000000`. A cached or written count not reported counts as zero for this sum.
+Every other request, including a failure or an answer without a count, adds nothing and counts in
+`requests outside the dollars`; its spending is not guessed. Tokens are summed by model before a price is
+applied, so equal counts give equal dollars however the rows divide them. `dollars` is unknown when a counted
+request's model is absent from the file, when one of its counts is not a count (a negative number, a text) or
+when cached plus written exceeds input. Missing or damaged usage files and gaps
+in the stretches leave both money rows unknown, as they do requests and token totals. An absent model does
+not fail the command: the other rows and runs are still printed. Without `--prices` neither money row appears.
 
 Nothing is estimated: `-` means a missing number. A gap in the numbered stretches leaves their totals unknown.
 Missing, unreadable, unfinished or damaged event files leave
@@ -376,7 +399,9 @@ With deed ends, results pair by `ofDeed` when it names a start in the joined eve
 has at most one deed going. Starts still going at the end are left out of the same counts and shares. Missing
 counted result fields leave the deed counts and actions that led somewhere unknown. Missing or damaged usage
 files leave requests and tokens unknown. A token total or mean is missing when any request in it has no count, including a failed
-request; a zero denominator leaves a rate or share missing. A mean for a kind outside a run's two commonest is
+request. Runs kept before written counts were added have no `written` field and show `-` in
+`input tokens written to a cache`, with their other counts unchanged. A zero denominator leaves a rate or share
+missing. A mean for a kind outside a run's two commonest is
 missing in that column. A run with only its state file has no event or request counts here. To give those numbers
 without opening SQLite it would need the kept event and usage files too. These numbers compare what a change of
 wording or a rule did before a transcript is read; they cannot judge a scene, and a quiet good scene counts as
