@@ -29,7 +29,7 @@ export const MAX_TRACES = 8;
 // Requests list traces in one sentence, so a trace must not end with a stop.
 export const traceOf = (text: string) => wordsOf(text).join(' ').replace(/[.;]+$/, '');
 export type World = { title: string; about: string; facts: string | null; clock: string; wordsPerMinute: number; remote: string | null; touch: boolean; marks: boolean; ways?: true; portions?: true; prices?: true; deedEnds?: true; hunger?: true; stableFirst?: true; fixedSchema?: true; oneSchema?: true;
-  legMinutes?: number; vehicles?: Place[]; travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
+  language?: string; spoken?: string[]; legMinutes?: number; vehicles?: Place[]; travelMinutes: number; walkMetresPerMinute: number; shortWords: number; longWords: number; sleep: Sleep; weather: Weather | null; places: Place[]; characters: Character[] };
 
 export type Kind = 'say' | 'call' | 'go' | 'do' | 'wait' | 'sleep';
 // fromDeed links even a refused way to its result; it must not add a memory line.
@@ -46,6 +46,8 @@ export type Person = { id: string; place: string | null; heading: string | null;
 
 const ID = /^[A-Za-z][\w-]{0,39}$/;
 const factsOf = (value: unknown, field: string) => boundedOf(value, field, MAX_FACTS);
+const languageOf = (value: unknown, field: string): string => typeof value === 'string' && value.length <= 40 && /^[A-Z][a-z]+(?: [A-Z][a-z]+){0,2}(?![\s\S])/.test(value) ? value
+  : refuse(field, 'must name a language in English, in one to three words of the letters A to Z, each with a capital first and small letters after it, with one space between words and at most 40 characters');
 const rateOf = (value: unknown, field: string, absent: number) => {
   const rate = amountOf(value, field, absent);
   durationOf(Math.max(2, Math.ceil(MAX_WORDS / rate * 60)), field);
@@ -79,6 +81,15 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
   if (value.ways !== undefined && typeof value.ways !== 'boolean') return refuse('ways', 'must be true or false');
   if (value.stableFirst !== undefined && typeof value.stableFirst !== 'boolean') return refuse('stableFirst', 'must be true or false');
   if (value.oneSchema !== undefined && value.oneSchema !== true) return refuse('oneSchema', 'must be true or absent');
+  const language = value.language === undefined ? undefined : languageOf(value.language, 'language');
+  let spoken: string[] | undefined;
+  if (value.spoken !== undefined) {
+    if (language === undefined) return refuse('spoken', 'needs `language`');
+    if (!Array.isArray(value.spoken) || value.spoken.length < 1 || value.spoken.length > 4) return refuse('spoken', 'must be a list of one to four language names');
+    spoken = value.spoken.map((name, index) => languageOf(name, `spoken[${index}]`));
+    if (new Set(spoken).size !== spoken.length) return refuse('spoken', 'must name each language only once');
+    if (spoken.length === 1 && spoken[0] === language) return refuse('spoken', 'must not name only the language the play is written in');
+  }
   if (value.marks !== undefined && typeof value.marks !== 'boolean') return refuse('marks', 'must be true or false');
   if (value.legMinutes !== undefined && !(typeof value.legMinutes === 'number' && Number.isInteger(value.legMinutes) && value.legMinutes >= 1 && value.legMinutes <= 60)) return refuse('legMinutes', 'must be a whole number from 1 to 60');
   if (value.deedEnds === true && value.legMinutes !== undefined) return refuse('deedEnds', 'cannot be set together with `legMinutes`');
@@ -215,6 +226,7 @@ export function readCore(value: unknown): Omit<World, 'sleep' | 'weather' | 'hun
   }
   const core = { title: textOf(value.title, 'title'), about: textOf(value.about, 'about'), facts: factsOf(value.facts, 'facts'), clock: value.clock,
     wordsPerMinute, remote: typeof value.remote === 'string' ? value.remote : null, touch: value.touch === true, marks: value.marks === true,
+    ...(language === undefined ? {} : { language }), ...(spoken === undefined ? {} : { spoken }),
     ...(value.prices === true ? { prices: true as const } : {}), ...(value.deedEnds === true ? { deedEnds: true as const } : {}), ...(value.portions === true ? { portions: true as const } : {}), ...(value.ways === true ? { ways: true as const } : {}), ...(value.stableFirst === true ? { stableFirst: true as const } : {}), ...(value.fixedSchema === true ? { fixedSchema: true as const } : {}), ...(value.oneSchema === true ? { oneSchema: true as const } : {}), travelMinutes,
     walkMetresPerMinute, shortWords: countOf(value.shortWords, 'shortWords', 2000),
     ...(value.legMinutes === undefined ? {} : { legMinutes: value.legMinutes as number }), longWords, places, characters, ...(value.vehicles === undefined ? {} : { vehicles }) };

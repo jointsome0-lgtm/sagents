@@ -104,7 +104,7 @@ The world answers deeds and speaks for named people whom nobody plays. The rules
 `examples/night-station.json` is one evening; `examples/night-pass.json` is an evening, a night and a morning,
 where memory after the night matters; `examples/seaside-cafe.json` is a café with a crowd and a waitress in a
 mapped town. They are synthetic and in English, translated from Russian. The instructions are in English. Residents and memory rewrites use the sheet's language; world results
-and figure replies use the world's description's language. [The example checks](docs/measured.md#translated-examples) cover
+and figure replies use the world's description's language; with `language`, all four are told to use that language. [The example checks](docs/measured.md#translated-examples) cover
 these translations; every other measurement here used the Russian texts.
 
 - [The world file](docs/world-file.md): What fields and settings does a world use?

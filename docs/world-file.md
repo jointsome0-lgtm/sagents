@@ -15,7 +15,8 @@ The check covers settings and derived durations, not seconds accumulated over a 
 
 A word limit also limits characters to ten per word, so a text without spaces cannot evade it.
 Optional bounded texts accept absence or null; an empty or overlong text is refused, rather than cut.
-The texts are in the world's language. The public descriptions should name only what does not move.
+The file's texts are in `language` when it is named, and otherwise in the world's language.
+The public descriptions should name only what does not move.
 Private `facts` belong to the world model alone. They never reach residents and do not change during a run.
 `boundedOf`, `sizeOf` and `durationOf` in `src/reading.ts` hold these checks.
 
@@ -54,6 +55,8 @@ beginning with a letter, unique across those four lists. It cannot be `eaten`, `
 | `hunger` | Only true or absent, default off. | Turns on hunger and thirst together. The world must contain a thing with `food` above zero and a thing with `drink: true`, anywhere in its lists. It causes no fainting, illness or death. |
 | `stableFirst` | Boolean, default false. | Moves a resident's memory and closed blocks of recent lines to the instructions. |
 | `oneSchema` | Only true or absent, default off. | Uses one response schema for resident turns and memory rewrites. |
+| `language` | Absent for no change; a language name in English, one to three words of the letters A to Z, each with a capital first and small letters after it, one space between words, at most 40 characters. | Tells residents, memory rewrites, world results and figure replies which language the play is written in. The name goes into their instructions as it is written. The file's own texts must be written in that language: the engine translates nothing. |
+| `spoken` | Absent for none; one to four distinct names in the same form as `language`. Needs `language`; cannot list only that language. | Tells residents, the world and figures what languages people speak, and that what people say and think is written in `language` all the same. It changes no rule: everyone still understands everyone, and who speaks which language is for the sheets to say. |
 | `environment` | Name or null, absent for none; 1 to 40 lower-case letters, digits and `-`, first a letter or digit. | `"environment": "<name>"` reads `environments/<name>.json`. The command's choice wins over this name. |
 | `dayStart` | `HH:MM`, default `07:00`; null uses the default. | The daily start from which the first sleep debt is counted. |
 | `tiredHours` | Number above zero, default 16; rounded-up seconds must fit the duration bound. | When tiredness is named to the character and others nearby. |

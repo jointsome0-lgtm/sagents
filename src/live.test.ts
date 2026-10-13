@@ -2,6 +2,7 @@
 // These are here because a mistake in what a character is sent shows it another's secret, a mistake in the clock or
 // in the stopping spends the plan on calls nobody asked for, and a mistake around sleep loses what a character knew.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -61,6 +62,60 @@ Means of remote contact: telephone.
 
 You are Boris (boris).
 SHEET-BORIS`;
+
+test('a play names its written and spoken languages without changing requests of worlds that name neither', async () => {
+  const file = { title: 'A room', about: 'An invented room.', clock: '09:00', touch: true, marks: true,
+    places: [{ id: 'room', name: 'Room', about: 'A quiet room.', figures: [{ id: 'guide', name: 'Guide' }] }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'room', sheet: 'She keeps her promises to her friends.', traces: [] }] };
+  const play = async (settings: { language?: string; spoken?: string[] }) => {
+    const given = readWorld({ ...file, ...settings }), player = standIn({
+      anna: [act('do', { text: 'looks at the door', seconds: 1 }), act('say', { text: 'Hello.', to: 'guide' }),
+        act('sleep', { seconds: 1 }), JSON.stringify({ memory: 'She greeted the guide.' })],
+      world: [came({ result: 'The door is closed.', touches: [], lingers: [], traces: [], wipes: [] }), JSON.stringify({ reply: 'Hello.', moves: [] })] });
+    let kind = '';
+    const sent: { kind: string; request: Request }[] = [];
+    const outcome = await runLive({ world: given, journal: memoryStore(), model: 'stand-in', calls: 6, minutes: 10,
+      onAsk: next => { kind = next; }, respond: async request => {
+        sent.push({ kind, request: structuredClone(request) });
+        return player.respond(request);
+      } });
+    assert.deepEqual([outcome.invalid, outcome.lost, outcome.rewrites], [0, 0, 1]);
+    assert.deepEqual(sent.map(item => item.kind), ['turn', 'world', 'turn', 'reply', 'turn', 'memory']);
+    assert.ok(sent.every(({ request }) => (request.system?.length ?? 0) + request.messages.reduce((sum, message) => sum + message.content.length, 0) <= requestLimit(given)));
+    return sent;
+  };
+  const before = await play({});
+  // These digests keep the complete requests from before language settings were added, including schemas and line order.
+  assert.deepEqual(before.map(({ request }) => createHash('sha256').update(JSON.stringify(request)).digest('hex')), [
+    '5722db74467621deca00f5ba72d7a14281a449069ff5140a4691813f6be64c3e',
+    '676cebf12e1ebf265befb3c4435b2bb83eccca9ef472425acedf03965effe2bc',
+    '1a19938bd7ce11f8355b556c8ba3a4d62744f05139ee1c277a3378e3ad395dd5',
+    '2ab0234f52b9a819b182220a9817f744fae72ee528ea98621f47f9815f9a739e',
+    'fee608454fa29eb93d1e0f4333c6c2c94d29f2381541c2a86213efa6ae4aa1ea',
+    '8de5a893a5d4ed8bc50570bb94f0eeb53c936ba007c9f7782fe29da2990e2769']);
+  const resident = 'Write `note`, `text`, `gesture`, `says` and your memory in the language of your sheet.';
+  for (const [spoken, names] of [[undefined, ''], [['Italian'], 'Italian'], [['Italian', 'German'], 'Italian and German'],
+    [['Italian', 'German', 'French'], 'Italian, German and French'], [['Italian', 'German', 'French', 'Spanish'], 'Italian, German, French and Spanish']] as const) {
+    const sent = await play({ language: 'English', ...(spoken ? { spoken: [...spoken] } : {}) });
+    const ending = spoken
+      ? `In this world people speak ${names}. This story is written in English all the same, as a translated book is, and what people say and think is written in English too: write \`note\`, \`text\`, \`gesture\`, \`says\` and your memory in English, always, and leave names as they are given.`
+      : 'Write `note`, `text`, `gesture`, `says` and your memory in English, always: this story is written in English from start to end, whatever language its people speak or think in.';
+    const addition = ` In this world people speak ${names}, and this story is written in English all the same, as a translated book is: what people say and think is written in English too.`;
+    for (const [index, { kind, request }] of sent.entries()) {
+      const expected = structuredClone(before[index].request);
+      if (kind === 'world' || kind === 'reply') {
+        expected.system = expected.system!.replaceAll("in the language of the world's description", 'in English');
+        if (spoken) expected.system = expected.system.replace('\n\n', `${addition}\n\n`);
+      } else {
+        expected.system = expected.system!.replace(resident, ending);
+        if (kind === 'memory') expected.messages[0].content = expected.messages[0].content.replace('in the language of your sheet', 'in English');
+      }
+      assert.deepEqual(request, expected);
+      assert.doesNotMatch(JSON.stringify(request), /the language of your sheet|the language of the world's description/);
+      if (!spoken) assert.doesNotMatch(JSON.stringify(request), /In this world people speak/);
+    }
+  }
+});
 
 test('figure hours take format 49 before other settings and refuse an older mark', () => {
   const directory = mkdtempSync(join(tmpdir(), 'sagents-figure-hours-'));

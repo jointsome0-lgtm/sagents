@@ -101,6 +101,7 @@ would ignore settings and lose their state.
 
 | Condition | Format |
 | --- | --- |
+| `language` | `50` |
 | Any figure has `hours` | `49` |
 | `prices` | `47` |
 | `portions` | `46` |

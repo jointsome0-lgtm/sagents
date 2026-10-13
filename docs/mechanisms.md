@@ -410,6 +410,8 @@ times in figures, past tense without current location, and no deed result withou
 ### Guarding a rewrite
 
 `readMemory` and `sameScript` in `src/memory.ts` guard a rewrite without judging its truth.
+With or without `language`, the guard compares scripts with the resident's sheet, so a change between two
+languages of one script still passes it.
 It ends before the first `}`, trims spaces before it and marks a cut; nothing before it is unusable.
 [The ending check](measured.md#memory-endings) saw continuations inside the string and noise.
 An unreadable rewrite gets one retry; after two the old memory stays but folded lines are lost, counted as `lost`.
