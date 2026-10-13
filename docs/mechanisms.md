@@ -430,3 +430,27 @@ thousands of steps with answers of every kind, checking laws from the journal al
 `npm run bench` uses an immediate stand-in in a synthetic town and prints step costs and request sizes;
 `node src/bench.ts 1000 100 50` means 1000 characters, 100 places and 50 calls each.
 
+## What the live world lacks
+
+- There is no author above the characters; the world answers deeds and does nothing of its own accord.
+- Counts are checked, but whether a deed should move a thing is the model's reading. Words can say a jacket was
+  hung up while lists keep it on its owner. No check compares prose and moves; immutable facts do not adapt.
+- Earlier-deed lines are history, not current location. A carrier leaving or a figure moving a thing writes no
+  deed line; old prose can still name it. The lists are the truth, and the world is told so.
+- Speech never passes a door, however loud. Calling through it needs a deed, and an answer another deed.
+  Every neighbour hears the same `beyond`, the doer is not told who heard it, and hearing is the model's judgement.
+- Doors have no open, shut or bolted state. Description is all the world knows, every `go` passes, and sound does
+  not depend on doors. There is no shop or manufacture, or taking, giving and eating without the world. Prices serve only a figure's
+  answer: deeds do not pay, a resident who sells has no payment rule, and nothing in a vehicle or on a person is priced.
+- Walking is at one pace for everyone, whatever terrain or tiredness. Without `legMinutes` it cannot be interrupted
+  and perceives nothing. Walkers receive no later weather notices between turns. Carried things go along regardless of size.
+  A resident names a thing in words, and the world must find its label.
+- A handed-over, lost or stopped watch still tells its original owner time; a removed place clock stays there.
+  Seconds are exact for all; an early-woken sleeper is not told by how much. Tiredness is one count, changes no
+  ability before its limit, and a traveller falls asleep only on its turn after arrival.
+- Figures have no private memory, hear no resident-to-resident speech, and share only local figure dialogue
+  history plus their facts. A crowd cannot answer. Only a deed or addressed figure speech asks the world;
+  claims in speech or notes are unchecked.
+- Nothing checks invented facts in a memory summary. The character cannot retrieve what it forgot from the
+  journal. Waiting calls have no count limit; repeated rewrites fold the oldest before the next turn if needed.
+- The journal cannot branch. A checkpoint fork needs a copy of its prefix. The project's checks ask stand-ins alone.

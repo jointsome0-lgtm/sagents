@@ -1,7 +1,29 @@
 # The lab
 
-The command line of `sagents lab`, the folders it reads and the page's language are in
-[README](../README.md#the-lab). This page says the rest.
+The command line of `sagents lab` is in [README](../README.md#the-lab). This page says the rest.
+
+## The folders, the address and its key
+
+`lab` shows in a browser the experiments that lie under the directories it is given: under those that `SAGENTS_LAB`
+names, separated as in `PATH`, when it is given none, and under the current directory when that is not set either.
+It asks no model and writes nothing into those directories. It prints its address, which is on this computer only,
+and asks the system opener to open it in the default browser unless `--no-open` is given. The usual address is `http://127.0.0.1:4747/`;
+when that port is taken and no port was asked for, it takes a free one and says so. `--port` asks for a whole number
+from 0 to 65535; 0 lets the system choose. Ctrl+C stops it.
+
+`lab/open.ts` writes the one temporary file that takes the browser there with the key after `#`.
+The browser gets the data key after `#` in the first address, keeps it in its origin's storage and removes it from
+the address. When the system opener exits successfully, the printed address has no key. With `--no-open` or when
+that command cannot start or exits unsuccessfully, it prints the first address with the key; open it once in the browser you read in.
+
+## The page's language
+
+The page is in English or in Russian: in the language that `--lang` names, or `SAGENTS_LAB_LANG` when the flag is
+not given, or else the language it remembers, and with none in Russian for a browser set to Russian and in English
+for any other. Any other flag or environment value is refused. The chosen language goes in the first address as
+`?language=ru`; the page remembers it and removes it from the address. Its RU or EN button changes that choice.
+
+## The experiments and the page
 
 A directory is looked into six levels deep. Names that begin with a dot and `node_modules` are passed over, a link is
 followed only where it stays inside the directory given, and a `*.sqlite` is never opened: only its name is looked at.
@@ -66,7 +88,7 @@ Absent query names mean the ordinary state:
 | `/view/…` | `chapter` | The chapter at the top of the story. |
 | `/view/…` | `step` | Seconds per row in a comparison. |
 | `/view/…` | `compare`, `compare-stretch` | The experiment beside this one and its stretch; a named stretch on either side reads by itself. |
-| any | `language` | Override the remembered language for any address; see [README](../README.md#the-lab). |
+| any | `language` | Override the remembered language for any address; see [the page's language](#the-pages-language). |
 
 An address naming an experiment the lab cannot find says so and links to the list. A browser without the data key
 or with a key from an earlier start says how to get it. An open page reconnects its streams whenever its key changes,

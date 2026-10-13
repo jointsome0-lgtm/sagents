@@ -8,6 +8,27 @@ or through a ChatGPT plan, runs a first prototype of the live mode, and has a ju
 For the live world, [what comes next](#what-comes-next-for-the-live-world) is listed below. This page keeps what works
 and what is planned apart.
 
+## A first run
+
+sagents needs Node 24.9 or newer.
+
+With a server that speaks the OpenAI chat completions protocol, vLLM or llama.cpp on a card or OpenRouter, an example
+world is played from a clone like this:
+
+```sh
+git clone https://github.com/jointsome0-lgtm/sagents.git && cd sagents
+export SAGENTS_API_URL=http://127.0.0.1:8000/v1       # the versioned root of your server
+read -rs SAGENTS_API_KEY && export SAGENTS_API_KEY    # when the server asks for a key: typed, not shown, not in the history
+node src/cli.ts live examples/seaside-cafe.json --model api:google/gemma-4-31b-it --calls 12
+```
+
+After `api:` stands the id that your server knows the model by. `live` has that model play the two residents of
+`examples/seaside-cafe.json`, a café by the sea with a waitress whom nobody plays, and stops after 12 requests. It
+prints each event as it happens, one line with the story's clock, the place, who and what, with the resident's
+private note under it, and then the totals.
+
+[The first command was played for release 0.1.0](docs/measured.md#release-010-first-command).
+
 ## Two modes
 
 Eval reads the journal of a finished live world with `log`, `show`, `diff` and `report`. `checkout` and `act` are not
@@ -47,23 +68,6 @@ It is run from a checkout of this repository: it is not on npm, and `"private": 
 publishing it there by mistake. `npm link`, run once in the checkout, makes `sagents` a command of this computer: a
 link to `src/cli.ts`, so the command is always the checkout as it stands. Without it `node src/cli.ts` takes the same
 arguments, and `sagents help` lists them. `sagents --help` and `sagents -h` give the same text.
-
-With a server that speaks the OpenAI chat completions protocol, vLLM or llama.cpp on a card or OpenRouter, an example
-world is played from a clone like this:
-
-```sh
-git clone https://github.com/jointsome0-lgtm/sagents.git && cd sagents
-export SAGENTS_API_URL=http://127.0.0.1:8000/v1       # the versioned root of your server
-read -rs SAGENTS_API_KEY && export SAGENTS_API_KEY    # when the server asks for a key: typed, not shown, not in the history
-node src/cli.ts live examples/seaside-cafe.json --model api:google/gemma-4-31b-it --calls 12
-```
-
-After `api:` stands the id that your server knows the model by. `live` has that model play the two residents of
-`examples/seaside-cafe.json`, a café by the sea with a waitress whom nobody plays, and stops after 12 requests. It
-prints each event as it happens, one line with the story's clock, the place, who and what, with the resident's
-private note under it, and then the totals.
-
-[The first command was played for release 0.1.0](docs/measured.md#release-010-first-command).
 
 Every `live` request carries a strict `json_schema` `response_format`. A server refusing that field ends the run
 at its first request; plain-text answers cannot be used. [The two server checks](docs/measured.md#servers-with-no-schema)
@@ -110,28 +114,8 @@ these translations; every other measurement here used the Russian texts.
 
 #### What it lacks
 
-- There is no author above the characters; the world answers deeds and does nothing of its own accord.
-- Counts are checked, but whether a deed should move a thing is the model's reading. Words can say a jacket was
-  hung up while lists keep it on its owner. No check compares prose and moves; immutable facts do not adapt.
-- Earlier-deed lines are history, not current location. A carrier leaving or a figure moving a thing writes no
-  deed line; old prose can still name it. The lists are the truth, and the world is told so.
-- Speech never passes a door, however loud. Calling through it needs a deed, and an answer another deed.
-  Every neighbour hears the same `beyond`, the doer is not told who heard it, and hearing is the model's judgement.
-- Doors have no open, shut or bolted state. Description is all the world knows, every `go` passes, and sound does
-  not depend on doors. There is no shop or manufacture, or taking, giving and eating without the world. Prices serve only a figure's
-  answer: deeds do not pay, a resident who sells has no payment rule, and nothing in a vehicle or on a person is priced.
-- Walking is at one pace for everyone, whatever terrain or tiredness. Without `legMinutes` it cannot be interrupted
-  and perceives nothing. Walkers receive no later weather notices between turns. Carried things go along regardless of size.
-  A resident names a thing in words, and the world must find its label.
-- A handed-over, lost or stopped watch still tells its original owner time; a removed place clock stays there.
-  Seconds are exact for all; an early-woken sleeper is not told by how much. Tiredness is one count, changes no
-  ability before its limit, and a traveller falls asleep only on its turn after arrival.
-- Figures have no private memory, hear no resident-to-resident speech, and share only local figure dialogue
-  history plus their facts. A crowd cannot answer. Only a deed or addressed figure speech asks the world;
-  claims in speech or notes are unchecked.
-- Nothing checks invented facts in a memory summary. The character cannot retrieve what it forgot from the
-  journal. Waiting calls have no count limit; repeated rewrites fold the oldest before the next turn if needed.
-- The journal cannot branch. A checkpoint fork needs a copy of its prefix. The project's checks ask stand-ins alone.
+The live world has no author above the characters, and
+[what the live world lacks](docs/mechanisms.md#what-the-live-world-lacks) lists the rest.
 
 #### What comes next for the live world
 
@@ -183,24 +167,10 @@ export SAGENTS_LAB=~/runs:~/more-runs    # the folders `sagents lab` reads when 
 export SAGENTS_LAB_LANG=ru               # the page's language when `--lang` is not given
 ```
 
-`lab` shows in a browser the experiments that lie under the directories it is given: under those that `SAGENTS_LAB`
-names, separated as in `PATH`, when it is given none, and under the current directory when that is not set either.
-It asks no model and writes nothing into those directories. It prints its address, which is on this computer only,
-and asks the system opener to open it in the default browser unless `--no-open` is given. The usual address is `http://127.0.0.1:4747/`;
-when that port is taken and no port was asked for, it takes a free one and says so. `--port` asks for a whole number
-from 0 to 65535; 0 lets the system choose. Ctrl+C stops it.
-
-The browser gets the data key after `#` in the first address, keeps it in its origin's storage and removes it from
-the address. When the system opener exits successfully, the printed address has no key. With `--no-open` or when
-that command cannot start or exits unsuccessfully, it prints the first address with the key; open it once in the browser you read in.
-
-The page is in English or in Russian: in the language that `--lang` names, or `SAGENTS_LAB_LANG` when the flag is
-not given, or else the language it remembers, and with none in Russian for a browser set to Russian and in English
-for any other. Any other flag or environment value is refused. The chosen language goes in the first address as
-`?language=ru`; the page remembers it and removes it from the address. Its RU or EN button changes that choice.
-
-[docs/lab.md](docs/lab.md) says the rest: which files make an experiment, what the page shows, the map, and what
-of a world file may leave the lab.
+`lab` shows in a browser the experiments that lie under the directories it is given, asks no model and writes
+nothing into those directories. [docs/lab.md](docs/lab.md) says the rest: the folders it reads and its address,
+the key in that address, the page's language, which files make an experiment, what the page shows, the map, and
+what of a world file may leave the lab.
 
 ## The model connection
 
@@ -215,24 +185,9 @@ npm run size                    # token counts and the core's comment share
 npm run pointers                # check the README and docs after a rename
 ```
 
-`npm run size` counts tokens (`o200k_base`) of three things: the core of the live mode without model and disk
-(`src/world.ts`, `time.ts`, `action.ts`, `answer.ts`, `things.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`, `reading.ts`, `touch.ts`, `marks.ts`), `src/live.ts`, and
-all tracked text except `LICENSE` and `package-lock.json`. It reads the working tree, or the Git index with
-`npm run size -- --index`. The core is meant to stay small enough to read whole, and its count falls into one of four bands,
-around the owner's mark of 70,000 tokens, which is there to steer by: up to 56,000 tokens, four fifths of the mark,
-the number is printed and nothing else; from there to 70,000 a
-note says that the core is nearing its size; from there to 84,000, six fifths of the mark, a warning says that it is over, and that a change
-which adds to the core says what it takes out or why the size should rise; above 84,000 a strong warning says that
-the core no longer reads whole and should be split or cut before more is added. The script ends well in every band:
-it forbids nothing. One more line gives the comment tokens, total tokens and whole-percent comment share of the
-core and `src/live.ts`, with a bound of 10 percent for the core. A comment is a whole line whose first characters
-after indentation are `//`; its token count is the file's count less the count without those lines, summed across
-the core's files. Above the comment bound a note asks for a look at comments that retell the code, while keeping
-reasons; it forbids nothing. Tests are counted against nothing. The list of core files, the three size bounds and
-the comment bound are at the top of `scripts/size.py`. The count needs the Python package `tiktoken`,
-which is no dependency of this project: name a Python that has it in `SAGENTS_SIZE_PYTHON`.
-Without `tiktoken` the script says how to get it, counts nothing and ends well. `SAGENTS_SIZE_AGAIN` is its
-internal guard against entering that Python twice, not a user setting. It is not part of `npm test`. A change that grows the core says by how many tokens.
+`npm run size` counts tokens of the core of the live mode, of `src/live.ts` and of all tracked text, and the comment
+share of the core. [docs/development.md](docs/development.md#npm-run-size) says what it counts, its bands and what it
+needs.
 
 ## License
 
