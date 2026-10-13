@@ -66,8 +66,9 @@ service's words (`failed (provider_failed 502 bad_gateway)`; `httpStatus`, `prov
 `provider_failed` without a status means the service could not be reached. A failed run exits with code 1.
 
 The totals count story minutes, calls, `invalid`, `overlong` cuts, `declined`, memory `rewrites` and `lost`,
-memories `dropped` from turns, requests sent `again` after a connection failure, world answers `refused`, deeds and
-speeches left `void`, input tokens, `cachedInputTokens` and output tokens.
+memories `dropped` from turns, requests sent `again` after a connection failure, world answers `refused`, world
+answers taken `unmoved` (without moves that twice moved nothing), deeds and speeches left `void`, input tokens,
+`cachedInputTokens` and output tokens.
 `Outcome` in `src/live.ts` also counts each untaken resident turn, world answer and figure reply by cause in
 `causes.turn`, `causes.world` and `causes.reply`, with only causes that occurred. A turn's cause is the word of
 `REFUSALS` in `src/action.ts` that its `act` record holds; a final service decline with no record also counts as
@@ -75,6 +76,8 @@ speeches left `void`, input tokens, `cachedInputTokens` and output tokens.
 `not taken: turn json 5, here 1; world to 4, sink 5; reply what 2` when any occurred, with kinds in that order
 and causes in the order of `UNTAKEN_CAUSES` in `src/live.ts`. When any request was sent again, text also adds
 `sent again after a connection that failed before any response: 3`; JSON totals hold the count in `again`.
+In the same way text adds `answers of the world taken without moves that moved nothing: 2` and JSON holds
+`unmoved`.
 They sum only reported usage: `unreported` counts answers without usage and requests that failed with a `ModelError`,
 rather than calling their spending zero; an absent cached count adds nothing. `kinds` divides requests and tokens into turns, rewrites and world answers,
 including figure replies and retries. Text prints one line for each kind. `models` also divides calls, unusable

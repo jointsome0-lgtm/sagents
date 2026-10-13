@@ -158,7 +158,14 @@ The id `tasted` is reserved with `eaten` and `burned` only with the setting.
 Moves all to their current holders refuse it because prose could claim a move that did not happen; beside an
 actual move they are passed over. A refusal changes nothing and is not journalled. The world gets the same
 request once more with a sentence naming the entry and cause in its instructions' words. After the second,
-nothing comes of the deed or speech; totals count `refused` and `void`. `runLive` in `src/live.ts` passes each
+nothing comes of the deed or speech; totals count `refused` and `void`. One second answer is not lost: when the
+world's answer to a deed was refused because all its moves named where the things already were and its second
+answer again lists only such moves, that answer is taken without them and with whatever else it holds, if the rest
+passes the rules, and the totals count it as `unmoved`. Such an answer is taken to say where things already are,
+and losing the deed to it made a resident repeat the deed; its prose is not compared with the lists, so a result
+that tells of a move the lists did not make is kept as told. A figure's reply keeps the refusal, since a figure
+hands things over.
+`runLive` in `src/live.ts` passes each
 untaken attempt to `Live.onUntaken` for [the kept file](live.md#files-and-continuation). The closed list `UNTAKEN_CAUSES`
 in `src/live.ts` is `cut`, `declined`, `unread`, the rule codes of `CODES` in `src/things.ts` and `TRACE_CODES` in
 `src/answer.ts`, then the words of `REFUSALS` not already in the list, each once; no untaken answer enters the journal.

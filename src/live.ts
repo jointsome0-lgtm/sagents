@@ -522,7 +522,7 @@ export type Spent = Pick<Tally, 'calls' | 'inputTokens' | 'cachedInputTokens' | 
 // Token totals cover only reported usage; unreported keeps a partial sum from appearing whole.
 // Router endpoints are accounting data and must not affect replay.
 export type Outcome = Tally & { status: 'done' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string;
-  seconds: number; again: number; rewrites: number; lost: number; dropped: number; refused: number; void: number; causes: { [kind in 'turn' | 'world' | 'reply']: Partial<{ [cause in Cause]: number }> };
+  seconds: number; again: number; rewrites: number; lost: number; dropped: number; refused: number; unmoved: number; void: number; causes: { [kind in 'turn' | 'world' | 'reply']: Partial<{ [cause in Cause]: number }> };
   models: { [name: string]: Tally }; kinds: { [kind in Asked]: Spent }; endpoints: { [name: string]: { [endpoint: string]: number } } };
 const MAX_ENDPOINTS = 16;
 
@@ -538,7 +538,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   const stands = state.deed?.at ?? Math.min(vehicleDue(world, state)?.at ?? first.freeAt, broughtFor(first)?.at ?? first.freeAt);
   const horizon = stands + Math.round(minutes * 60);
   const schema = schemaOf(given), shared = sharedOf(given);
-  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, again: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, dropped: 0, refused: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+  const outcome: Outcome = { status: 'done', reason: 'horizon', seconds: 0, again: 0, calls: 0, invalid: 0, overlong: 0, declined: 0, unreported: 0, rewrites: 0, lost: 0, dropped: 0, refused: 0, unmoved: 0, void: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
     models: {}, kinds: { turn: spent(), memory: spent(), world: spent() }, endpoints: {}, causes: { turn: {}, world: {}, reply: {} } };
   const everyone = { respond, model, name: name ?? model };
   const playerOf = (id: string) => { const player = Object.hasOwn(cast, id) ? cast[id] : everyone; return { ...player, name: player.name ?? player.model }; };
@@ -637,7 +637,7 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
   };
   // journal.ts accepts only answers the rules have taken.
   const answered = async <Came extends Partial<Answer> & { moves: Answer['moves'] }>(deed: Event, system: string, schema: object, content: string, read: (answer: string) => Came | null, allowed?: Allowed) => {
-    let came: Came | null = null, again = '';
+    let came: Came | null = null, again = '', stays = false;
     const kind = system === figureSystem ? 'reply' : 'world';
     for (let attempt = 0; attempt < 2 && !came; attempt += 1) {
       const declined = outcome.declined;
@@ -649,7 +649,16 @@ export async function runLive({ world, respond, model, name, cast = {}, worldPla
       // The same words would be declined again, so the world is not asked twice: nothing comes of the deed.
       if (answer === DECLINED) { await untaken(kind, 'declined', null, null); break; }
       came = answer === CUT ? null : read(answer);
-      const refused = came && refusal(world, state.people, state.things, deed, came, state.traces);
+      let refused = came && refusal(world, state.people, state.things, deed, came, state.traces);
+      // Told once that nothing moved, a world that again lists only such entries is saying where things are: the
+      // deed is not lost to that, and the rest of the answer stands or falls without them. A figure hands things
+      // over, so its reply keeps the refusal.
+      if (came && refused?.code === 'same' && stays && kind === 'world') {
+        came = { ...came, moves: [] };
+        refused = refusal(world, state.people, state.things, deed, came, state.traces);
+        if (!refused) outcome.unmoved += 1;
+      }
+      stays = refused?.code === 'same';
       if (!came) unusable(judge);
       if (refused) {
         outcome.refused += 1;

@@ -301,7 +301,7 @@ else if (command === 'numbers') {
         const tokens = (tally: { inputTokens: number; cachedInputTokens: number; outputTokens: number }) => `${tally.inputTokens} input tokens, ${tally.cachedInputTokens} of them cached, ${tally.outputTokens} output tokens`;
         const failure = { ...(totals.httpStatus ? { httpStatus: totals.httpStatus } : {}), ...(totals.providerCode ? { providerCode: totals.providerCode } : {}), ...(totals.param ? { param: totals.param } : {}) };
         console.log(json ? JSON.stringify({ status: totals.status, reason: totals.reason, ...failure, minutes: played, calls: totals.calls, invalid: totals.invalid, overlong: totals.overlong, declined: totals.declined,
-          rewrites: totals.rewrites, lost: totals.lost, dropped: totals.dropped, again: totals.again, refused: totals.refused, void: totals.void, causes: totals.causes, unreported: totals.unreported, inputTokens: totals.inputTokens, cachedInputTokens: totals.cachedInputTokens, outputTokens: totals.outputTokens, models: totals.models, kinds: totals.kinds, endpoints: totals.endpoints })
+          rewrites: totals.rewrites, lost: totals.lost, dropped: totals.dropped, again: totals.again, refused: totals.refused, unmoved: totals.unmoved, void: totals.void, causes: totals.causes, unreported: totals.unreported, inputTokens: totals.inputTokens, cachedInputTokens: totals.cachedInputTokens, outputTokens: totals.outputTokens, models: totals.models, kinds: totals.kinds, endpoints: totals.endpoints })
           : `${totals.status} (${[totals.reason, ...Object.values(failure)].join(' ')}): ${played} story minutes, ${totals.calls} calls, ${totals.invalid} invalid, ${totals.overlong} of them cut at the output limit, ${totals.declined} of them declined by the service, ${totals.rewrites} memory rewrites, ${
             totals.lost} lost, ${totals.refused} answers of the world refused, ${totals.void} deeds left with nothing, ${tokens(totals)}${unreported(totals.unreported)}`);
         if (!json) {
@@ -312,6 +312,7 @@ else if (command === 'numbers') {
           if (causes.length) console.log(`not taken: ${causes.join('; ')}`);
           if (totals.dropped) console.log(`memory dropped in ${totals.dropped} ${totals.dropped === 1 ? 'turn' : 'turns'}`);
           if (totals.again) console.log(`sent again after a connection that failed before any response: ${totals.again}`);
+          if (totals.unmoved) console.log(`answers of the world taken without moves that moved nothing: ${totals.unmoved}`);
         }
         const models = Object.entries(totals.models);
         const answeredBy = (name: string) => Object.hasOwn(totals.endpoints, name) ? `, answered by ${Object.entries(totals.endpoints[name]).map(([endpoint, count]) => `${endpoint} ${count}`).join(', ')}` : '';
