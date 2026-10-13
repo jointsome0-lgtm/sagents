@@ -40,7 +40,7 @@ sagents lab [<dir>...] [--port <n>] [--lang <en|ru>] [--no-open]
                                the first address uses ?language=en or ?language=ru, which the page remembers and removes
 sagents help                   this text
 
-Without the command installed, \`node src/cli.ts\` takes the same arguments.
+Without the command installed, \`node src/cli${import.meta.url.slice(-3)}\` takes the same arguments.
 
 A request: {"model": "<id>", "<id>@<effort>" or "api:<id>", "system": "...", "messages": [{"role": "user", "content": "..."}], "schema": {...}, "cache": "<name>"}
 An answer: {"status": "done", "text": "...", "usage": {...}}, with "endpoint" when a router named who answered, or {"status": "failed", "reason": "<code>"}

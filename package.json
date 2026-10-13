@@ -20,6 +20,7 @@
     "check": "tsc -p tsconfig.json",
     "bench": "node src/bench.ts",
     "pointers": "node scripts/pointers.mjs",
+    "pack": "node scripts/pack.mjs",
     "size": "python3 scripts/size.py"
   },
   "devDependencies": {
