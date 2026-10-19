@@ -266,7 +266,7 @@ test('a priced sale and an unpaid refusal survive a kept stop with the same list
       assert.deepEqual(state.results, expected.results);
       assert.deepEqual(state.said, expected.said);
       assert.deepEqual(split.sent, full.sent);
-      assert.match(split.sent.world[2].messages[0].content, /the one who spoke carries less money than the price/);
+      assert.match(split.sent.world[2].messages[0].content, /after the moves of this answer, the one who spoke carries less money than is still owed for what it hands over/);
       assert.equal(entries.flatMap(entry => entry.event.moved ?? []).filter(move => move.price).length, 1);
     } finally { journal.close(); }
   } finally { rmSync(directory, { recursive: true }); }
