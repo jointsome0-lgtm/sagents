@@ -101,9 +101,9 @@ would ignore settings and lose their state.
 
 | Condition | Format |
 | --- | --- |
+| `prices` | `57` |
 | `language` | `50` |
 | Any figure has `hours` | `49` |
-| `prices` | `47` |
 | `portions` | `46` |
 | `deedEnds` | `45` |
 | `legMinutes` | `44` |

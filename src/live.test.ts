@@ -253,7 +253,7 @@ test('a priced sale and an unpaid refusal survive a kept stop with the same list
       assert.match(linesOf(world, entries[1].event).at(-1)!, / \(price\)$/);
     } finally { journal.close(); }
     const meta = new DatabaseSync(path, { readOnly: true });
-    try { assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '47'); } finally { meta.close(); }
+    try { assert.equal(meta.prepare("SELECT value FROM meta WHERE key = 'format'").get()!.value, '57'); } finally { meta.close(); }
     journal = openState(path, source);
     try {
       const outcome = await runLive({ world, journal, respond: split.respond, model: 'stand-in', calls: 4, minutes: 100, pause: true });

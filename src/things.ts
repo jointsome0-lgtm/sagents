@@ -127,6 +127,7 @@ export function settle(things: Things, place: string, present: string[], names: 
   const said = (slots: Map<string, Slot>, key: string) => { const slot = slots.get(key); return !slot ? names.get(key)! : slot.root === place ? slot.top.name : names.get(slot.root)!; };
   const money = (held: Thing[], name: string) => all(held).reduce((sum, thing) => sum + (thing.money && thing.name === name ? thing.n! : 0), 0);
   const owed = new Map<string, number>(), till = payer !== undefined && lists.has(payer) ? all(lists.get(place)!).find(thing => thing.till) : undefined;
+  const receipt = new Map<string, number>();
   let first: Move | undefined;
   const move = (entry: Move, payment = false): Refused | null => {
     const slots = index(), slot = slots.get(entry.what);
@@ -146,6 +147,14 @@ export function settle(things: Things, place: string, present: string[], names: 
     if (target && (into ? into.level : 0) + (whole ? height(thing) : 1) > MAX_DEPTH) return { code: 'inside', entry };
     if (sink && (thing.money || (entry.to === 'eaten' || tasted ? thing.food === null : !thing.burns || ![...slots.values()].some(other => lit(other.thing) && !other.top.hidden)))) {
       return { code: 'sink', entry };
+    }
+    if (till && !payment) {
+      const contents = all(till.holds!);
+      const direction = slot.root === payer && into && (into.thing === till || contents.includes(into.thing)) ? 1
+        : contents.includes(thing) && (entry.to === payer || into?.root === payer) ? -1 : 0;
+      if (direction) for (const carried of all([thing])) {
+        if (carried.money) receipt.set(carried.name, (receipt.get(carried.name) ?? 0) + direction * (carried === thing ? entry.n : carried.n!));
+      }
     }
     const out = said(slots, slot.key), where = sink ? '' : said(slots, entry.to);
     let as: string | null = null;
@@ -187,9 +196,9 @@ export function settle(things: Things, place: string, present: string[], names: 
     if (refused) return refused;
   }
   if (till && first) {
-    const held = lists.get(payer!)!, had = things.people.get(payer!)!;
+    const held = lists.get(payer!)!;
     for (const [name, n] of owed) {
-      const after = money(held, name), due = n - (money(had, name) - after);
+      const after = money(held, name), due = n - (receipt.get(name) ?? 0);
       if (due <= 0) continue;
       if (due > after) return { code: 'price', entry: first };
       let left = due;

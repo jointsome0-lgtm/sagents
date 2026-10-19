@@ -172,9 +172,10 @@ in `src/live.ts` is `cut`, `declined`, `unread`, the rule codes of `CODES` in `s
 
 With `prices`, `settle` also refuses a figure's answer with `price` when the one who spoke cannot pay,
 using its first sale as the refused entry. After moves and before sets, it sums each money name's prices,
-subtracts what the answer already took from that person's money, and moves the balance into the till.
-Money received in the answer increases the balance due. It takes directly carried money first, then contents,
-then their contents, in list order, as `pay` does. These are ordinary postings, marked `price` only for the
+subtracts the money its moves carried from that person's possessions into the till, less what they carried back.
+Possessions include contents at any depth; money given to or received from anyone else counts neither way.
+It moves a positive balance into the till from the money held after the moves, taking directly carried money first,
+then contents, then their contents, in list order, as `pay` does. These are ordinary postings, marked `price` only for the
 printed line's ` (price)`; replay derives them again. A deed pays nothing and keeps a thing's price.
 
 Only stock creates things; only eating, burning and fares remove them. With `portions`, tasting the last third
