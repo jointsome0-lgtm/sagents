@@ -4,7 +4,7 @@
 // from the commit that is checked out and not from the working files: the commit's files are written out of git's
 // store into a folder of their own, and the compiler and the copies read that folder. So a change that is not
 // committed, a file that git does not track and a link cannot reach the package, whatever git's status says.
-//   npm run pack   (`npm run pack && npm publish pack` publishes, which is the owner's to run)
+//   npm run pack   (`npm run pack && npm publish ./pack` publishes, which is the owner's to run)
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

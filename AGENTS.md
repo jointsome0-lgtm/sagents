@@ -27,9 +27,10 @@ The npm package is the folder `pack/`, which `npm run pack` builds (`scripts/pac
 `node_modules`, so the package holds JavaScript, and its own manifest has no `"private"`. It is built from the
 commit that is checked out and not from the working files: what is not committed does not reach the package, and a
 build that fails removes `pack/` or says not to publish it.
-The owner publishes it with `npm run pack && npm publish pack`, so that the folder is never an older build. An
-assistant never runs `npm publish` or `npm login`. The root manifest keeps `"private": true`, so that a publish of
-the checkout itself is refused.
+The owner publishes it with `npm run pack && npm publish ./pack`, so that the folder is never an older build; the
+`./` is needed, since npm reads a bare `pack` as the package of that name on the registry. An assistant never runs
+`npm publish` or `npm login`. The root manifest keeps `"private": true`, so that a publish of the checkout itself is
+refused.
 
 ## What this is
 
