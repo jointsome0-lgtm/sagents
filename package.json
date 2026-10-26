@@ -1,6 +1,6 @@
 {
   "name": "sagents",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Story agents: models that live in an interactive story or evaluate one.",
   "private": true,
   "type": "module",
