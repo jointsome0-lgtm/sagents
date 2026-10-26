@@ -27,10 +27,10 @@ const isCandidate = (row: unknown): row is Candidate => isObject(row) && isId(ro
   && (row.valid === true ? Number.isFinite(row.score) && isObject(row.features) && Object.values(row.features).every(Number.isFinite) && typeof row.cell === 'string' && /^\d+(,\d+)*$/.test(row.cell)
     : row.valid === false && row.score === null && row.features === null && row.cell === null)
   && (row.same === null || isId(row.same)) && Array.isArray(row.discoveries) && row.discoveries.every(isText) && (row.call === null || isId(row.call))
-  && absentOr(row.step, step => step === null || isId(step)) && absentOr(row.others, others => Array.isArray(others) && others.every(isId))
+  && absentOr(row.step, step => step === null || isId(step)) && absentOr(row.model, isText) && absentOr(row.others, others => Array.isArray(others) && others.every(isId))
   && absentOr(row.turn, turn => turn === 'family' || turn === 'cell') && absentOr(row.name, isText) && absentOr(row.idea, isText);
 const isUsage = (row: unknown): row is Sent | UsageRow => isObject(row) && isId(row.n) && isText(row.at) && (row.kind === 'ideate' || row.kind === 'iterate')
-  && (row.family === null || isText(row.family)) && ('ms' in row ? isCount(row.ms) && ['input', 'cached', 'written', 'output', 'reasoning'].every(field => row[field] === null || isCount(row[field]))
+  && (row.family === null || isText(row.family)) && absentOr(row.model, isText) && ('ms' in row ? isCount(row.ms) && ['input', 'cached', 'written', 'output', 'reasoning'].every(field => row[field] === null || isCount(row[field]))
     && absentOr(row.error, isText) && absentOr(row.tries, tries => tries === 2) : row.sent === true);
 
 export function readEvolveRun(dir: string): EvolveRun {
@@ -160,8 +160,9 @@ export function evolveMap(run: EvolveRun): string {
   for (const tick of xTicks) parts.push(`<text class="tick" x="${xOf(tick)}" y="16" text-anchor="middle">${tick}</text>`);
   const strip = 34;
   parts.push(`<text class="head" x="${LEFT - 8}" y="${strip + 4}" text-anchor="end">Requests</text>`);
+  const askedOf = new Map(run.usage.filter(row => row.model !== undefined).map(row => [row.n, row.model!]));
   for (const n of requests) {
-    const end = endOf.get(n), x = xOf(n), what = ideations.has(n) ? 'ideation' : 'a step';
+    const end = endOf.get(n), x = xOf(n), by = askedOf.get(n), what = `${ideations.has(n) ? 'ideation' : 'a step'}${by === undefined ? '' : ` by ${esc(by)}`}`;
     const said = (words: string, mark: string) => marks.push(`<g><title>request ${n}, ${what}: ${words}</title>${mark}<circle class="hit" cx="${x}" cy="${strip}" r="8"/></g>`);
     if (end?.error && end.error !== 'cancelled') said(`failed, ${esc(end.error)}`, `<path class="fail" d="M${x - 4} ${strip - 4}l8 8m0-8l-8 8"/>`);
     else if (!end) said('no end was kept, so it was under way when the run was killed', `<circle class="open" cx="${x}" cy="${strip}" r="3.5"/>`);
@@ -204,7 +205,7 @@ export function evolveMap(run: EvolveRun): string {
       const [x, yy] = at.get(c.id)!, from = c.parent === null ? undefined : at.get(c.parent);
       if (from) edges.push(`<path class="edge" d="M${from[0]} ${from[1]}L${x} ${yy}"/>`);
       const shape = (r: number, kind: string) => c.kind === 'seed' || c.kind === 'idea' ? `<rect class="${kind}" x="${x - r}" y="${yy - r}" width="${2 * r}" height="${2 * r}" rx="1"/>` : `<circle class="${kind}" cx="${x}" cy="${yy}" r="${r}"/>`;
-      const said = `#${c.id}, ${KIND[c.kind] ?? c.kind}, ${c.family}${c.parent === null ? '' : ` from #${c.parent}`}, request ${c.call ?? 0}${stepOf(c) === null ? '' : `, step ${stepOf(c)}`}\n${c.valid ? `score ${fmt(c.score!)}, cell ${c.cell}` : 'not valid'}${c.same === null ? '' : `\nthe same file as #${c.same}`}`
+      const said = `#${c.id}, ${KIND[c.kind] ?? c.kind}, ${c.family}${c.parent === null ? '' : ` from #${c.parent}`}, request ${c.call ?? 0}${stepOf(c) === null ? '' : `, step ${stepOf(c)}`}${c.model ? `, by ${c.model}` : ''}\n${c.valid ? `score ${fmt(c.score!)}, cell ${c.cell}` : 'not valid'}${c.same === null ? '' : `\nthe same file as #${c.same}`}`
         + `${othersOf(c).length ? `\nshown beside its parent: ${othersOf(c).map(id => `#${id}`).join(', ')}` : ''}`;
       marks.push(`<a href="#c${c.id}"><title>${esc(said)}</title>${shape(6.5, 'ring')}${shape(4.5, `${c.valid ? 'dot' : 'gone'}${c.kind === 'try' ? ' hollow' : ''}`)}<circle class="hit" cx="${x}" cy="${yy}" r="12"/></a>`);
       if (top && c.id === top.id) labels.push(`<text class="value" x="${x + 9}" y="${yy + 4}">${fmt(c.score!)}</text>`);
@@ -271,6 +272,27 @@ export function evolveMap(run: EvolveRun): string {
   });
   const ideate = used(null);
   if (ideate.length) familyRows.push(`<tr><td colspan="8">Ideation</td><td class="n">${ideate.length}</td><td class="n">${tokens(ideate, 'input')}</td><td class="n">${tokens(ideate, 'output')}</td></tr>`);
+  // The models, when the rows name them, over every start of the run: a gain is a file of a step that improved its
+  // family's best, in the order the files were kept, and the time is the median of the requests a model answered.
+  const lows = new Map<string, number>(), gains = new Set<number>();
+  for (const c of valid) {
+    const low = lows.get(c.family);
+    if (low !== undefined && c.score! >= low) continue;
+    lows.set(c.family, c.score!);
+    if (low !== undefined && c.kind !== 'idea') gains.add(c.id);
+  }
+  const modelNames = [...new Set([...run.usage.map(row => row.model), ...candidates.map(c => c.model)].filter(model => model !== undefined))];
+  const modelRows = modelNames.map(model => {
+    const done = ends.filter(row => row.model === model), mine = candidates.filter(c => c.model === model), times = done.filter(row => !row.error).map(row => row.ms).sort((a, b) => a - b);
+    const failed = done.filter(row => row.error && !['cancelled', 'output_limit', 'declined'].includes(row.error)).length;
+    const nothing = done.filter(row => row.error === 'output_limit' || row.error === 'declined' || (!row.error && !produced.has(row.n))).length;
+    const middle = Math.floor(times.length / 2), median = !times.length ? null : times.length % 2 ? times[middle] : (times[middle - 1] + times[middle]) / 2;
+    const input = done.reduce((t, row) => t + (row.input ?? 0), 0), cached = done.reduce((t, row) => t + (row.cached ?? 0), 0);
+    return `<tr><td>${esc(model)}</td><td class="n">${whole(new Set(run.usage.filter(row => row.model === model).map(row => row.n)).size)}</td><td class="n">${whole(failed)}</td><td class="n">${whole(nothing)}</td>`
+      + `<td class="n">${whole(mine.length)}</td><td class="n">${whole(mine.filter(c => c.valid).length)}</td><td class="n">${whole(mine.filter(c => gains.has(c.id)).length)}</td>`
+      + `<td class="n">${median === null ? '' : `${fmt(median / 1000)} s`}</td><td class="n">${whole(input)}</td><td class="n">${input ? `${Math.round(cached / input * 100)}%` : ''}</td><td class="n">${tokens(done, 'output')}</td></tr>`;
+  });
+  const unnamed = run.usage.some(row => row.model === undefined);
   const errors = Object.entries(ends.reduce<{ [code: string]: number }>((count, row) => { if (row.error) count[row.error] = (count[row.error] ?? 0) + 1; return count; }, {}));
   const minutes = Math.round(ends.reduce((t, row) => t + row.ms, 0) / 60_000);
 
@@ -288,7 +310,7 @@ export function evolveMap(run: EvolveRun): string {
     const shown = shownIn.get(c.id)?.size ?? 0;
     const roles = [bests.get(c.family)?.id === c.id ? 'family best' : '', eliteIds.has(c.id) ? 'elite' : '', shown ? `shown in ${whole(shown)} ${shown === 1 ? 'step' : 'steps'}` : ''].filter(Boolean).join(', ');
     return `<details id="c${c.id}"><summary>#${c.id} ${esc(KIND[c.kind] ?? c.kind)}, ${esc(c.family)}${parent ? ` from <a href="#c${parent.id}">#${parent.id}</a>` : ''}: ${c.valid ? `score ${fmt(c.score!)}, cell ${esc(String(c.cell))}` : 'not valid'}`
-      + `<span class="muted">, request ${c.call ?? 0}${stepOf(c) === null ? '' : `, step ${stepOf(c)}`}, ${whole(c.chars)} characters${c.same === null ? '' : `, the same file as #${c.same}`}${roles ? `, ${roles}` : ''}</span></summary>${words}`
+      + `<span class="muted">, request ${c.call ?? 0}${stepOf(c) === null ? '' : `, step ${stepOf(c)}`}${c.model ? `, by ${esc(c.model)}` : ''}, ${whole(c.chars)} characters${c.same === null ? '' : `, the same file as #${c.same}`}${roles ? `, ${roles}` : ''}</span></summary>${words}`
       + `${beside.length ? `<p class="muted">Shown beside its parent: ${beside.join(', ')}</p>` : ''}`
       + `${c.feedback ? `<p class="muted">Feedback</p><pre>${esc(c.feedback)}</pre>` : ''}${c.discoveries?.length ? `<ul>${c.discoveries.map(line => `<li>${esc(line)}</li>`).join('')}</ul>` : ''}`
       + `${text === null ? `<p class="muted">files/${esc(c.sha)}.txt is missing or was cut short by a kill.</p>` : ''}${change}${all}</details>`;
@@ -310,6 +332,7 @@ ${task ? `<details><summary>The task</summary><pre>${esc(task.spec)}</pre>${task
 <div class="legend">${legend}</div>${candidates.length ? search : '<p>No file has been evaluated yet.</p>'}
 <h2 id="cells">The cells</h2>${elites.size ? `<p class="muted">The elite of every cell, the lowest score among its valid files.</p>${grid ? `<div class="legend"><span>higher score</span>${ramp}<span>lower, better</span></div>${grid}<details><summary>The cells as a table</summary>${cellTable}</details>` : cellTable}` : '<p>No cell has a valid file yet.</p>'}
 <h2 id="families">The families</h2><table><thead><tr><th>Family</th><th>Name</th><th>Idea</th><th class="n">From request</th><th class="n">Files</th><th class="n">Valid</th><th class="n">Best</th><th class="n">Cells</th><th class="n">Requests</th><th class="n">Tokens in</th><th class="n">Tokens out</th></tr></thead><tbody>${familyRows.join('')}</tbody></table>
+${modelRows.length ? `<h2 id="models">The models</h2><table><thead><tr><th>Model</th><th class="n">Requests</th><th class="n">Failed</th><th class="n">Nothing to use</th><th class="n">Files</th><th class="n">Valid</th><th class="n">Gains</th><th class="n">Median time</th><th class="n">Tokens in</th><th class="n">Cached</th><th class="n">Tokens out</th></tr></thead><tbody>${modelRows.join('')}</tbody></table>${unnamed ? '<p class="muted">Requests kept before the rows named their model are not in this table.</p>' : ''}` : ''}
 <h2 id="discoveries">The discoveries</h2>${found.length ? `<ol class="found">${found.join('')}</ol>` : '<p>None yet.</p>'}
 <h2 id="files">The files</h2>${files.join('\n')}
 </body></html>

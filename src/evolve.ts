@@ -14,22 +14,29 @@ export type Task = { spec: string; file: string | null; evaluate: string[]; time
 export type Evaluation = { valid: boolean; score: number | null; features: { [feature: string]: number } | null; feedback: string };
 export type Kind = 'seed' | 'idea' | 'try' | 'submit';
 // `step` is shared by the files of one step and by the first files of one ideation; rows kept before steps were
-// numbered have none. `others` are the files a step showed beside its parent, and `turn` whether that parent was its
-// family's best or a cell's elite, on its tries and submits. `name` and `idea` are the model's words for a family, on
-// the row of its first file only.
+// numbered have none. `model` is the name of the model that wrote the file, with its effort, on the rows of a step
+// and of an ideation; rows kept before models were named have none. `others` are the files a step showed beside its
+// parent, and `turn` whether that parent was its family's best or a cell's elite, on its tries and submits. `name` and
+// `idea` are the model's words for a family, on the row of its first file only.
 export type Candidate = Evaluation & { id: number; at: string; kind: Kind; family: string; parent: number | null; sha: string; chars: number; cell: string | null;
-  same: number | null; discoveries: string[]; call: number | null; step?: number | null; others?: number[]; turn?: 'family' | 'cell'; name?: string; idea?: string };
+  same: number | null; discoveries: string[]; call: number | null; step?: number | null; model?: string; others?: number[]; turn?: 'family' | 'cell'; name?: string; idea?: string };
 // A request has a row when it is sent and another when it ends; one that a kill cut short has only the first.
-export type Sent = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; sent: true };
-export type UsageRow = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; ms: number; input: number | null; cached: number | null; written: number | null;
-  output: number | null; reasoning: number | null; error?: string; tries?: 2 };
+export type Sent = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; model?: string; sent: true };
+export type UsageRow = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; model?: string; ms: number; input: number | null; cached: number | null;
+  written: number | null; output: number | null; reasoning: number | null; error?: string; tries?: 2 };
 // What a run keeps: `put` must leave the text where `evaluate` finds it by its sha.
 export type Store = { candidates: Candidate[]; calls: number; put: (sha: string, text: string) => void; text: (sha: string) => string;
   add: (candidate: Candidate) => void; usage: (row: Sent | UsageRow) => void };
-export type Evolve = { task: Task; store: Store; respond: Respond; model: string; evaluate: (sha: string, signal: AbortSignal) => Promise<Evaluation>;
+// `models` take the steps in turn, step 1 the first, so that a model named twice has two shares and a second start,
+// whose steps go on after the kept ones, keeps the split; `respond` gets the name as the request's model.
+export type Evolve = { task: Task; store: Store; respond: Respond; models: string[]; evaluate: (sha: string, signal: AbortSignal) => Promise<Evaluation>;
   calls: number; parallel?: number; tries?: number; timeoutMs?: number; cache: string; seed?: string; signal?: AbortSignal; onCandidate?: (candidate: Candidate) => void };
+// What one model did in this start: its gains are the files of its steps that improved their family's best, and `ms`
+// the median time of a request it answered.
+export type ModelCounts = { requests: number; failures: number; invalid: number; files: number; valid: number; gains: number; input: number; cached: number; written: number;
+  output: number; reasoning: number; ms: number | null };
 export type EvolveReport = { status: 'done' | 'stopped' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string; calls: number; invalid: number; failures: number;
-  candidates: number; added: number; valid: number; cells: number; families: number; best: { id: number; family: string; score: number } | null };
+  candidates: number; added: number; valid: number; cells: number; families: number; best: { id: number; family: string; score: number } | null; models: { [model: string]: ModelCounts } };
 
 // The plan connection ends an answer past 100,000 characters, and a file comes inside JSON: what one answer may
 // carry is kept well under that.
@@ -115,15 +122,21 @@ const STEP_FAILURES = ['timeout', 'provider_failed', 'model_unavailable', 'incom
 // `budget_exceeded` outranks any other end, a failure a stop, and a stop the end of the calls, whatever came first.
 const rank = (reason: string) => reason === 'calls' ? 0 : reason === 'stopped' ? 1 : reason === 'budget_exceeded' ? 3 : 2;
 
-export async function runEvolve({ task, store, respond, model, evaluate, calls: most, parallel = 1, tries = 2, timeoutMs, cache, seed, signal: outer, onCandidate }: Evolve): Promise<EvolveReport> {
+export async function runEvolve({ task, store, respond, models, evaluate, calls: most, parallel = 1, tries = 2, timeoutMs, cache, seed, signal: outer, onCandidate }: Evolve): Promise<EvolveReport> {
   if (!whole(most, 1) || !whole(parallel, 1) || parallel > 16 || !whole(tries, 0) || tries > 10) throw new EvolveError('The calls and parallel limits must be whole numbers above zero, parallel at most 16, and tries a whole number from 0 to 10.');
+  if (!Array.isArray(models) || !models.length || !models.every(model => typeof model === 'string' && model)) throw new EvolveError('A run needs at least one model.');
   const all = store.candidates, system = instructionsOf(task), ideas = ideasOf(task);
-  const owned = createHash('sha256').update(JSON.stringify([cache, 'evolve'])).digest('hex').slice(0, 32);
+  // Each model has a cache key of its own, from its name without the effort, so that its requests keep its cache and
+  // do not crowd another model's key; one model at two efforts shares one key.
+  const keys = new Map(models.map(model => [model, createHash('sha256').update(JSON.stringify([cache, 'evolve', model.split('@')[0]])).digest('hex').slice(0, 32)]));
+  const modelOf = (step: number) => models[(step - 1) % models.length];
+  const counts = new Map(models.map(model => [model, { requests: 0, failures: 0, invalid: 0, files: 0, valid: 0, gains: 0, input: 0, cached: 0, written: 0, output: 0, reasoning: 0 }]));
+  const times = new Map(models.map(model => [model, [] as number[]]));
   // A failure that ends the run cuts the requests under way, whatever ended the run before it, so that none of them
   // is sent again after it; evaluations end only with a stop.
   const halt = new AbortController(), stopped = outer ?? new AbortController().signal;
   const requests = outer ? AbortSignal.any([outer, halt.signal]) : halt.signal;
-  const report: EvolveReport = { status: 'done', reason: 'calls', calls: 0, invalid: 0, failures: 0, candidates: 0, added: 0, valid: 0, cells: 0, families: 0, best: null };
+  const report: EvolveReport = { status: 'done', reason: 'calls', calls: 0, invalid: 0, failures: 0, candidates: 0, added: 0, valid: 0, cells: 0, families: 0, best: null, models: {} };
   let ended: string | null = null, nextId = all.reduce((most, candidate) => Math.max(most, candidate.id), 0) + 1;
   // A second start goes on with the counts of the kept steps, as the loop made them, so that a run stopped and
   // started again still turns to ideation after `stale` steps with no gain, and gives the families and the cells
@@ -202,7 +215,7 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     }
     return work;
   };
-  const record = async (text: string, row: Pick<Candidate, 'kind' | 'family' | 'parent' | 'call' | 'step'>, found: string[], more: Pick<Candidate, 'others' | 'turn' | 'name' | 'idea'> = {}) => {
+  const record = async (text: string, row: Pick<Candidate, 'kind' | 'family' | 'parent' | 'call' | 'step'>, found: string[], more: Pick<Candidate, 'model' | 'others' | 'turn' | 'name' | 'idea'> = {}) => {
     const sha = createHash('sha256').update(text).digest('hex'), earlier = all.find(candidate => candidate.sha === sha);
     const evaluation = earlier ? { valid: earlier.valid, score: earlier.score, features: earlier.features, feedback: earlier.feedback } : await evaluationOf(sha, text);
     if (!evaluation || stopped.aborted) return null;
@@ -213,23 +226,27 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     all.push(candidate);
     store.add(candidate);
     report.added += 1;
+    const mine = more.model === undefined ? null : counts.get(more.model)!;
+    if (mine) { mine.files += 1; if (candidate.valid) mine.valid += 1; if (gain && row.kind !== 'idea') mine.gains += 1; }
     onCandidate?.(candidate);
     return { candidate, gain };
   };
 
   // An answer that gives nothing to use, a cut one and a declined one among them, counts toward the end at UNUSABLE in a row.
-  const unused = () => { report.invalid += 1; if (++unusable >= UNUSABLE) end('invalid'); };
+  const unused = (model: string) => { report.invalid += 1; counts.get(model)!.invalid += 1; if (++unusable >= UNUSABLE) end('invalid'); };
   // The answer's text, or null when this request gave nothing to use; a failure that ends the run ends it here.
-  const ask = async (kind: UsageRow['kind'], family: string | null, n: number, messages: Message[], schema: object): Promise<string | null> => {
-    const at = new Date().toISOString();
-    store.usage({ n, at, kind, family, sent: true });
-    const row: UsageRow = { n, at, kind, family, ms: 0, input: null, cached: null, written: null, output: null, reasoning: null };
+  const ask = async (model: string, kind: UsageRow['kind'], family: string | null, n: number, messages: Message[], schema: object): Promise<string | null> => {
+    const at = new Date().toISOString(), mine = counts.get(model)!;
+    store.usage({ n, at, kind, family, model, sent: true });
+    const row: UsageRow = { n, at, kind, family, model, ms: 0, input: null, cached: null, written: null, output: null, reasoning: null };
+    mine.requests += 1;
     const began = performance.now();
     try {
-      const answer = await respond({ model, system, messages, schema, cache: owned }, { signal: requests, timeoutMs });
+      const answer = await respond({ model, system, messages, schema, cache: keys.get(model) }, { signal: requests, timeoutMs });
       failing = 0;
       Object.assign(row, { input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null, written: answer.usage?.writtenInputTokens ?? null,
         output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });
+      for (const field of ['input', 'cached', 'written', 'output', 'reasoning'] as const) mine[field] += row[field] ?? 0;
       if (answer.tries === 2) row.tries = 2;
       return answer.text;
     } catch (error) {
@@ -239,12 +256,14 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
       if (requests.aborted && (!(error instanceof ModelError) || error.code === 'cancelled')) { row.error = 'cancelled'; return null; }
       if (!(error instanceof ModelError)) throw error;
       row.error = error.code;
-      if (['output_limit', 'declined'].includes(error.code)) { failing = 0; unused(); return null; }
+      if (['output_limit', 'declined'].includes(error.code)) { failing = 0; unused(model); return null; }
       report.failures += 1;
+      mine.failures += 1;
       if (!STEP_FAILURES.includes(error.code) || ++failing >= FAILURES) end(error.code, error);
       return null;
     } finally {
       row.ms = Math.round(performance.now() - began);
+      if (row.error === undefined) times.get(model)!.push(row.ms);
       store.usage(row);
     }
   };
@@ -252,7 +271,7 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
   const ideate = async () => {
     const n = take();
     if (n === null) return;
-    const step = nextStep++, known = families(), taken = new Set(known);
+    const step = nextStep++, model = modelOf(step), known = families(), taken = new Set(known);
     let k = 1;
     const fresh = () => { while (taken.has(`f${k}`)) k += 1; taken.add(`f${k}`); return `f${k}`; };
     const content = [`Begin up to ${ideas} ${ideas === 1 ? 'family' : 'families'} of solutions. Each is a different approach, not a variant of another: give it a short \`name\`, its \`idea\` in one line, and its first \`file\`, which should be valid even if its score is poor. Each file has at most ${task.size} characters, and all of them together at most ${ideas * task.size}.`,
@@ -260,15 +279,15 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
         const idea = all.find(candidate => candidate.family === family && candidate.idea !== undefined)?.idea;
         return `- ${named(family)}${idea ? `: ${idea}` : ''}`;
       }).join('\n')}` : 'No family exists yet.', told()].join('\n\n');
-    const text = await ask('ideate', null, n, [{ role: 'user', content }], IDEATE_SCHEMA);
+    const text = await ask(model, 'ideate', null, n, [{ role: 'user', content }], IDEATE_SCHEMA);
     const answer = text === null ? null : readIdeated(text);
-    if (text !== null && !answer) unused();
+    if (text !== null && !answer) unused(model);
     let started = false;
     if (answer) {
       unusable = 0;
       // Every first file is settled before this returns, so that none is written after a failure has ended the run.
       const settled = await Promise.allSettled(answer.families.slice(0, ideas).map((family, index) => record(family.file, { kind: 'idea', family: fresh(), parent: null, call: n, step },
-        index ? [] : answer.discoveries, { name: clip(family.name.trim().replace(/\s+/g, ' '), NAME) || 'unnamed', idea: clip(family.idea.trim(), IDEA) })));
+        index ? [] : answer.discoveries, { model, name: clip(family.name.trim().replace(/\s+/g, ' '), NAME) || 'unnamed', idea: clip(family.idea.trim(), IDEA) })));
       const failure = settled.find(result => result.status === 'rejected');
       if (failure) throw failure.reason;
       started = settled.some(result => result.status === 'fulfilled' && result.value?.candidate.valid);
@@ -285,7 +304,7 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
   // Whether the step improved its family's best, or null when it kept no file: only a step that kept a file and
   // improved nothing counts toward `stale`.
   const iterate = async (nth: number): Promise<boolean | null> => {
-    const step = nextStep++, tops = active(), cells = elites();
+    const step = nextStep++, model = modelOf(step), tops = active(), cells = elites();
     // Every EXPLORE-th step takes an elite of the archive, so that a cell no family leads still gets worked on;
     // the families take their turns among the other steps.
     const turn = nth % EXPLORE === EXPLORE - 1 && cells.length > 1 ? 'cell' : 'family';
@@ -300,13 +319,13 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     for (let t = 0; ; t += 1) {
       const n = take();
       if (n === null) return gained;
-      const last = t >= tries, text = await ask('iterate', parent.family, n, messages, iterateSchema(last));
+      const last = t >= tries, text = await ask(model, 'iterate', parent.family, n, messages, iterateSchema(last));
       const answer = text === null ? null : readIterated(text, last);
-      if (text !== null && !answer) unused();
+      if (text !== null && !answer) unused(model);
       if (!answer || text === null) return gained;
       unusable = 0;
       const kept = await record(answer.file, { kind: answer.tool, family: parent.family, parent: parent.id, call: n, step }, answer.discoveries,
-        { others: others.map(candidate => candidate.id), turn });
+        { model, others: others.map(candidate => candidate.id), turn });
       if (!kept) return gained;
       // A gain counts at once, so that steps that end meanwhile do not bring ideation early.
       if (kept.gain) { gained = true; sinceGain = 0; } else gained ??= false;
@@ -338,7 +357,11 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
   report.reason = ended ?? 'calls';
   report.status = report.reason === 'calls' ? 'done' : report.reason === 'stopped' ? 'stopped' : 'failed';
   const top = active().sort(byScore)[0];
+  const median = (list: number[]) => {
+    const sorted = [...list].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
+    return !sorted.length ? null : sorted.length % 2 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
+  };
   Object.assign(report, { candidates: all.length, valid: all.filter(candidate => candidate.valid).length, cells: elites().length, families: families().length,
-    best: top ? { id: top.id, family: top.family, score: top.score! } : null });
+    best: top ? { id: top.id, family: top.family, score: top.score! } : null, models: Object.fromEntries([...counts].map(([model, mine]) => [model, { ...mine, ms: median(times.get(model)!) }])) });
   return report;
 }

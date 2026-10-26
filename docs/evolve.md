@@ -9,7 +9,7 @@ gives. `runEvolve` in `src/evolve.ts` holds the loop and the archive with no dis
 `runEvaluator` in `src/evolve-kept.ts` keep the directory and run the evaluator.
 
 ```sh
-sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>] [--timeout <s>]
+sagents evolve <dir> --task <task.json> --model <id> [--model <id>...] --calls <n> [--parallel <k>] [--tries <t>] [--timeout <s>]
 ```
 
 `--calls` has no default: it is the most calls this start makes, tries included; a call is one request, which the
@@ -18,11 +18,19 @@ many steps at once, and at most that many evaluations. `--tries` (0 to 10, defau
 the evaluator on a draft before it submits. `--timeout` (1 to 3600 seconds, default 180) limits each request; a
 request past it is a `timeout`, which ends its step, and its tokens are spent with no answer, so a model that
 thinks for minutes needs more, and ideation, whose answer carries several files, more still. A line for every file
-evaluated goes to stderr, with its number, kind,
-family, parent and score or `not valid`; the summary is one JSON line on stdout. Ctrl+C stops the run: requests under
+evaluated goes to stderr, with its number, kind, family, parent, the model when there are several, and score or
+`not valid`; the summary is one JSON line on stdout. Ctrl+C stops the run: requests under
 way are cut, evaluators are killed, and a file whose evaluation was cut short stays in `files/` with no row.
 `evolve` runs on Linux and macOS, since an evaluator is stopped with its process group, which Windows does not have;
 `evolve-map` runs anywhere.
+
+`--model` names a model as the `model` of an [`ask`](ask.md) request does: one of the plan's, alone or with its
+effort, as `gpt-6.1-sol@high`, or `api:<id>`. Named more than once, the models take the steps in turn, in the order
+given: step 1 goes to the first, step 2 to the second, and after the last to the first again, each step whole, its
+tries and its submit or the one request of an ideation. So `--model gpt-6.1-sol@high --model gpt-6.1-terra@high`
+alternates the two, and a model named twice has two shares. The steps are numbered on across starts, so a second
+start keeps the split, and other names change it from there. Each name has its own connection, as each character of
+`live --cast` has. A failure that ends the run, `budget_exceeded` among them, ends it whichever model met it.
 
 ## What the file can do
 
@@ -86,16 +94,21 @@ stay as they are for the whole run, since nothing compares them between starts.
   evaluations under way finish and are kept; a failure that ends the run cuts the requests under way, whatever ended
   the run before it, so that none is sent again after it.
 
-In the summary `calls`, `added`, `invalid` and `failures` count this start, and `candidates`, `valid`, `cells`,
-`families` and `best` the whole archive, with what earlier starts kept.
+In the summary `calls`, `added`, `invalid`, `failures` and `models` count this start, and `candidates`, `valid`,
+`cells`, `families` and `best` the whole archive, with what earlier starts kept. `models` gives for every name its
+`requests`, `failures`, `invalid` answers, `files`, `valid` files and `gains`, the files of its steps that improved
+their family's best; its `input`, `cached`, `written`, `output` and `reasoning` tokens; and `ms`, the median time of
+a request it answered, null when it answered none.
 
 The plan's connection sends a request once more when the connection fails before any response, as it does for
 every command ([One request](ask.md)); the request's row then has `tries: 2`, and it is still one call. A server
 that took the first send may count both, so the requests a start sends can pass `--calls` by the rows with
 `tries: 2`.
 
-All requests of a run share the instructions and the spec as their system text, and one cache name kept in
-`run.json`, so that the service can keep that part cached.
+All requests of a run share the instructions and the spec as their system text, which names no model, and each
+model has a cache key of its own, made from the cache name kept in `run.json` and the model's name without its
+effort, so that the service can keep that part cached for every model and the requests of one do not crowd the key
+of another; one model at two efforts shares its key.
 
 ## The directory
 
@@ -110,13 +123,14 @@ match its name.
 - `candidates.jsonl`, a row per file evaluated: `id`, `at`, `kind` (`seed`, `idea`, `try` or `submit`), `family`,
   `parent`, `sha`, `chars`, `valid`, `score`, `features`, `feedback`, `cell`, `same`, `discoveries`, `call` and
   `step`, the number of the step that brought the file, shared by the tries and the submit of one step and by the
-  first files of one ideation, null for the seed; on a try or a submit `others`, the ids of the other files its
-  request showed beside the parent, and `turn`, `family` when the parent was its family's best and `cell` when it
-  was a cell's elite; and the model's `name` and `idea` on the first row of a family;
-- `usage.jsonl`, two rows per request: `n`, `at`, `kind` (`ideate` or `iterate`) and `family` with `sent: true`
-  before it is sent, and the same with `ms`, the input, cached, written, output and reasoning tokens, `error` with a
-  code when it failed and `tries: 2` when it was sent twice, when it ends. A request with only its first row was
-  under way when the run was killed. No row holds text of a request or an answer;
+  first files of one ideation, null for the seed; `model`, the name that wrote the file, on every row but the
+  seed's; on a try or a submit `others`, the ids of the other files its request showed beside the parent, and
+  `turn`, `family` when the parent was its family's best and `cell` when it was a cell's elite; and the model's
+  `name` and `idea` on the first row of a family;
+- `usage.jsonl`, two rows per request: `n`, `at`, `kind` (`ideate` or `iterate`), `family` and `model` with
+  `sent: true` before it is sent, and the same with `ms`, the input, cached, written, output and reasoning tokens,
+  `error` with a code when it failed and `tries: 2` when it was sent twice, when it ends. A request with only its
+  first row was under way when the run was killed. No row holds text of a request or an answer;
 - `lock.sqlite`, whose lock the run holds while it runs; the system lets it go when the process ends.
 
 A family is named by a number, `f1`, `f2` and so on, or `seed`, in the usage rows and on stderr; its name, the
@@ -147,9 +161,11 @@ script, so it opens offline in any browser, in light or dark. It shows:
   better at the top, with a line from its parent; the families with no valid file share the last lane;
 - the cells and their elites, as a grid for one or two features and as a table past that;
 - the families with their requests and tokens, and the discoveries;
-- every file with its step, its feedback, the files shown beside its parent and its change against its parent, how
-  many steps were shown the file itself, and the whole text of a file with no parent, of each family's best and of
-  each elite.
+- the models, when the rows name them, with what each was asked, answered and kept, the median time of an answer and
+  the share of its input that was cached;
+- every file with its step and model, its feedback, the files shown beside its parent and its change against its
+  parent, how many steps were shown the file itself, and the whole text of a file with no parent, of each family's
+  best and of each elite.
 
 A mark opens its file. A line the run is still writing is left out, and so is a row whose fields are not of their
 kinds, as one edited by hand, and the text of a file of `files/` that a kill cut short. The page holds the

@@ -158,15 +158,15 @@ quotes are compared and findings taken back, the limits and the report.
 `runEvolve` in `src/evolve.ts` holds the loop and the archive; `keepEvolve` in `src/evolve-kept.ts` keeps its directory.
 
 ```sh
-sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>] [--timeout <s>]
+sagents evolve <dir> --task <task.json> --model <id> [--model <id>...] --calls <n> [--parallel <k>] [--tries <t>] [--timeout <s>]
 sagents evolve-map <dir> > map.html
 ```
 
-`evolve` lets a model improve one text file against an evaluator command that the task file names, in fresh
-requests, and keeps every file it evaluated with an archive of the best valid file of each cell of the evaluator's
-numbers. Nothing in it knows what the file is: a program, a world file or any other text. `evolve-map` draws a run,
-its families, its cells and every file against its parent, as one page that loads nothing. `evolve` runs on Linux
-and macOS, where an evaluator is stopped with its process group.
+`evolve` lets a model, or several in turn, improve one text file against an evaluator command that the task file
+names, in fresh requests, and keeps every file it evaluated with an archive of the best valid file of each cell of
+the evaluator's numbers. Nothing in it knows what the file is: a program, a world file or any other text.
+`evolve-map` draws a run, its families, its cells, its models and every file against its parent, as one page that
+loads nothing. `evolve` runs on Linux and macOS, where an evaluator is stopped with its process group.
 
 - [An evolutionary search](docs/evolve.md): What is in the task file, what does a step send, what is kept, and what
   does the map show?
