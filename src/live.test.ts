@@ -20,6 +20,7 @@ import { readMemory, sameScript } from './memory.ts';
 import { travelSeconds } from './time.ts';
 import { hunger } from './hunger.ts';
 import { openState } from './state.ts';
+import type { Thing } from './things.ts';
 
 // Sixty words a minute: one word is one second. Both rooms have a clock, so everyone reads the exact time.
 const world = readWorld({ title: 'Two rooms', about: 'A house with two rooms.', clock: '09:00', wordsPerMinute: 60, remote: 'telephone', travelMinutes: 1,
@@ -221,7 +222,7 @@ test('portions keep lists, fed counts, memories and requests through a stopped r
   }
 });
 
-test('a priced sale and an unpaid refusal survive a kept stop with the same lists, memories, history and next request', async () => {
+test('a priced sale and an unpaid refusal survive a kept stop with the same lists, memories, history and next request, and a sale is paid once whatever else its reply moves', async () => {
   const file = { title: 'Counter', about: 'An invented counter.', clock: '09:00', prices: true, deedEnds: true,
     stableFirst: true, fixedSchema: true, oneSchema: true,
     places: [{ id: 'counter', name: 'Counter', about: 'A counter.', clock: true,
@@ -270,6 +271,24 @@ test('a priced sale and an unpaid refusal survive a kept stop with the same list
       assert.equal(entries.flatMap(entry => entry.event.moved ?? []).filter(move => move.price).length, 1);
     } finally { journal.close(); }
   } finally { rmSync(directory, { recursive: true }); }
+  // Coins that the buyer hands to another do not pay for a sale, and coins that another hands the buyer in the same
+  // reply are not charged again: the rule before 0.4.2 got both wrong, the one giving the thing away and the other taking
+  // its price twice. In the shop t1 is the till, t2 the book, t3 Anna's coins and t4 Boris's.
+  const shop = readWorld({ title: 'Shop', about: 'An invented shop.', clock: '09:00', prices: true,
+    places: [{ id: 'shop', name: 'Shop', about: 'An invented counter.', figures: [{ id: 'seller', name: 'Seller' }],
+      things: [{ name: 'till', fixed: true, till: true, holds: [] }, { name: 'book', price: { name: 'coin', n: 4 } }] }],
+    characters: [{ id: 'anna', name: 'Anna', place: 'shop', sheet: 'SHEET-ANNA', carries: [{ name: 'coin', money: true, n: 4 }] },
+      { id: 'boris', name: 'Boris', place: 'shop', sheet: 'SHEET-BORIS', carries: [{ name: 'coin', money: true, n: 4 }] }] });
+  const money = (held: Thing[]) => held.reduce((sum, thing) => sum + (thing.money ? thing.n! : 0), 0);
+  for (const [moves, refused, anna, boris, till] of [[[{ what: 't3', n: 4, to: 'boris' }], 1, 4, 4, 0],
+    [[{ what: 't3', n: 4, to: 't1' }, { what: 't4', n: 4, to: 'anna' }], 0, 4, 0, 4]] as const) {
+    const journal = memoryStore(), player = standIn({ anna: [act('say', { text: 'A book.', to: 'seller' })],
+      world: [JSON.stringify({ reply: 'Here.', moves: [{ what: 't2', n: 1, to: 'anna' }, ...moves] })] });
+    const outcome = await runLive({ world: shop, journal, respond: player.respond, model: 'stand-in', calls: 2, minutes: 100, pause: true });
+    const { people, places } = replay(shop, [...journal.entries()]).things;
+    assert.deepEqual([outcome.refused, money(people.get('anna')!), money(people.get('boris')!),
+      money(places.get('shop')!.find(thing => thing.till)!.holds!), people.get('anna')!.some(thing => thing.name === 'book')], [refused, anna, boris, till, !refused]);
+  }
 });
 
 test('optional hunger leaves old journals alone and keeps fed counts through a stopped run', async () => {
