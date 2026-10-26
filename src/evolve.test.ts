@@ -23,7 +23,7 @@ test('evolve sends no request past --calls, none after budget_exceeded or a stop
   let sent = 0;
   const run = (respond: (request: Request, controls?: Controls) => Promise<{ text: string; usage: null }>, more: { calls?: number; parallel?: number; signal?: AbortSignal; seed?: string } = {}) => {
     const texts = new Map<string, string>();
-    const store: Store = { candidates: [], calls: 0, put: (sha, text) => { texts.set(sha, text); }, text: sha => texts.get(sha)!, add: () => {}, usage: () => {} };
+    const store: Store = { candidates: [], calls: 0, sent: [], put: (sha, text) => { texts.set(sha, text); }, text: sha => texts.get(sha)!, add: () => {}, usage: () => {} };
     sent = 0;
     return runEvolve({ task, store, models: ['stand-in'], cache: 'c', seed: 'okxxxxxx', calls: 50, respond, ...more,
       evaluate: async sha => ({ valid: true, score: texts.get(sha)!.length, features: { len: texts.get(sha)!.length }, feedback: '' }) });

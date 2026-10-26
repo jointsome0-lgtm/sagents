@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { EvolveError, clip, readEvaluation } from './evolve.ts';
-import type { Candidate, Evaluation, Store, Task } from './evolve.ts';
+import type { Candidate, Evaluation, Sent, Store, Task } from './evolve.ts';
 import { isObject } from './reading.ts';
 
 const OUT = 65_536, ERR = 2000, BUSY = 5;
@@ -72,6 +72,7 @@ export function keepEvolve(dir: string, taskText: string, base: string) {
     const path = (sha: string) => join(files, `${sha}.txt`);
     const store: Store = {
       candidates: found.rows.filter(row => isObject(row) && Number.isSafeInteger(row.id)) as Candidate[], calls,
+      sent: used.rows.filter(row => isObject(row) && row.sent === true) as Sent[],
       put: (sha, text) => {
         let held: Buffer | null = null;
         try { held = readFileSync(path(sha)); } catch (error) { if (!failed(error, 'ENOENT')) throw error; }

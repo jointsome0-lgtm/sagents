@@ -28,10 +28,11 @@ const isCandidate = (row: unknown): row is Candidate => isObject(row) && isId(ro
     : row.valid === false && row.score === null && row.features === null && row.cell === null)
   && (row.same === null || isId(row.same)) && Array.isArray(row.discoveries) && row.discoveries.every(isText) && (row.call === null || isId(row.call))
   && absentOr(row.step, step => step === null || isId(step)) && absentOr(row.model, isText) && absentOr(row.others, others => Array.isArray(others) && others.every(isId))
-  && absentOr(row.turn, turn => turn === 'family' || turn === 'cell') && absentOr(row.name, isText) && absentOr(row.idea, isText);
+  && absentOr(row.name, isText) && absentOr(row.idea, isText);
 const isUsage = (row: unknown): row is Sent | UsageRow => isObject(row) && isId(row.n) && isText(row.at) && (row.kind === 'ideate' || row.kind === 'iterate')
-  && (row.family === null || isText(row.family)) && absentOr(row.model, isText) && ('ms' in row ? isCount(row.ms) && ['input', 'cached', 'written', 'output', 'reasoning'].every(field => row[field] === null || isCount(row[field]))
-    && absentOr(row.error, isText) && absentOr(row.tries, tries => tries === 2) : row.sent === true);
+  && (row.family === null || isText(row.family)) && absentOr(row.model, isText) && absentOr(row.step, isId) && absentOr(row.turn, turn => turn === 'family' || turn === 'cell')
+  && ('ms' in row ? isCount(row.ms) && ['input', 'cached', 'written', 'output', 'reasoning'].every(field => row[field] === null || isCount(row[field]))
+    && absentOr(row.error, isText) && absentOr(row.tries, tries => tries === 2) && absentOr(row.unusable, unusable => unusable === true) : row.sent === true);
 
 export function readEvolveRun(dir: string): EvolveRun {
   const path = resolve(dir);
@@ -42,8 +43,9 @@ export function readEvolveRun(dir: string): EvolveRun {
   const rows = (text: string | null) => (text ?? '').split('\n').flatMap(line => {
     try { return [JSON.parse(line) as unknown]; } catch (error) { if (error instanceof SyntaxError) return []; throw error; }
   });
+  // A run whose requests have kept no file yet has no candidates.jsonl, but it has its run.json from its start.
   const found = read('candidates.jsonl');
-  if (found === null) throw new EvolveError('The directory has no candidates.jsonl: it is not the directory of an evolve run.');
+  if (found === null && read('run.json') === null) throw new EvolveError('The directory has no candidates.jsonl and no run.json: it is not the directory of an evolve run.');
   let task: Task | null = null;
   try { task = readTask(JSON.parse(read('task.json') ?? 'null')); } catch (error) { if (!(error instanceof EvolveError || error instanceof SyntaxError)) throw error; }
   return { path, task, candidates: rows(found).filter(isCandidate), usage: rows(read('usage.jsonl')).filter(isUsage),
@@ -166,7 +168,8 @@ export function evolveMap(run: EvolveRun): string {
     const said = (words: string, mark: string) => marks.push(`<g><title>request ${n}, ${what}: ${words}</title>${mark}<circle class="hit" cx="${x}" cy="${strip}" r="8"/></g>`);
     if (end?.error && end.error !== 'cancelled') said(`failed, ${esc(end.error)}`, `<path class="fail" d="M${x - 4} ${strip - 4}l8 8m0-8l-8 8"/>`);
     else if (!end) said('no end was kept, so it was under way when the run was killed', `<circle class="open" cx="${x}" cy="${strip}" r="3.5"/>`);
-    else if (end.error === 'cancelled' || !produced.has(n)) said(end.error === 'cancelled' ? 'cut short by the end of the run' : 'the answer gave nothing to use', `<path class="nothing" d="M${x} ${strip - 5}v10"/>`);
+    else if (end.error === 'cancelled' || !produced.has(n)) said(end.error === 'cancelled' ? 'cut short by the end of the run' : end.unusable ? 'the answer gave nothing to use' : 'its answer kept no file',
+      `<path class="nothing" d="M${x} ${strip - 5}v10"/>`);
     else if (ideations.has(n)) {
       const begunHere = candidates.filter(c => c.call === n).length;
       said(`${begunHere} ${begunHere === 1 ? 'family' : 'families'} begun`, `<path class="idea" d="M${x} ${strip - 5}l5 5-5 5-5-5z"/>`);
@@ -272,8 +275,9 @@ export function evolveMap(run: EvolveRun): string {
   });
   const ideate = used(null);
   if (ideate.length) familyRows.push(`<tr><td colspan="8">Ideation</td><td class="n">${ideate.length}</td><td class="n">${tokens(ideate, 'input')}</td><td class="n">${tokens(ideate, 'output')}</td></tr>`);
-  // The models, when the rows name them, over every start of the run: a gain is a file of a step that improved its
-  // family's best, in the order the files were kept, and the time is the median of the requests a model answered.
+  // The models, when the rows name them, over every start of the run, counted as the summary counts one start: a gain
+  // is a file of a step that improved its family's best, in the order the files were kept, an answer with nothing to
+  // use one cut, declined or told so in its row, and the time the median of the requests a model answered.
   const lows = new Map<string, number>(), gains = new Set<number>();
   for (const c of valid) {
     const low = lows.get(c.family);
@@ -285,8 +289,8 @@ export function evolveMap(run: EvolveRun): string {
   const modelRows = modelNames.map(model => {
     const done = ends.filter(row => row.model === model), mine = candidates.filter(c => c.model === model), times = done.filter(row => !row.error).map(row => row.ms).sort((a, b) => a - b);
     const failed = done.filter(row => row.error && !['cancelled', 'output_limit', 'declined'].includes(row.error)).length;
-    const nothing = done.filter(row => row.error === 'output_limit' || row.error === 'declined' || (!row.error && !produced.has(row.n))).length;
-    const middle = Math.floor(times.length / 2), median = !times.length ? null : times.length % 2 ? times[middle] : (times[middle - 1] + times[middle]) / 2;
+    const nothing = done.filter(row => row.error === 'output_limit' || row.error === 'declined' || row.unusable).length;
+    const middle = Math.floor(times.length / 2), median = !times.length ? null : times.length % 2 ? times[middle] : Math.round((times[middle - 1] + times[middle]) / 2);
     const input = done.reduce((t, row) => t + (row.input ?? 0), 0), cached = done.reduce((t, row) => t + (row.cached ?? 0), 0);
     return `<tr><td>${esc(model)}</td><td class="n">${whole(new Set(run.usage.filter(row => row.model === model).map(row => row.n)).size)}</td><td class="n">${whole(failed)}</td><td class="n">${whole(nothing)}</td>`
       + `<td class="n">${whole(mine.length)}</td><td class="n">${whole(mine.filter(c => c.valid).length)}</td><td class="n">${whole(mine.filter(c => gains.has(c.id)).length)}</td>`
@@ -318,7 +322,7 @@ export function evolveMap(run: EvolveRun): string {
 
   const legend = [['<rect class="dot" x="3" y="3" width="9" height="9" rx="1"/>', 'first file of a family'], ['<circle class="dot" cx="7.5" cy="7.5" r="4.5"/>', 'submitted'],
     ['<circle class="dot hollow" cx="7.5" cy="7.5" r="4.5"/>', 'try'], ['<circle class="gone" cx="7.5" cy="7.5" r="4.5"/>', 'not valid'], ['<path class="ideation" d="M7.5 0V15"/><path class="idea" d="M7.5 3l4.5 4.5-4.5 4.5-4.5-4.5z"/>', 'ideation'],
-    ['<path class="fail" d="M3.5 3.5l8 8m0-8l-8 8"/>', 'failed request'], ['<path class="nothing" d="M7.5 2v11"/>', 'answer with nothing to use'], ['<path class="line" d="M0 7.5H15"/>', 'best so far']]
+    ['<path class="fail" d="M3.5 3.5l8 8m0-8l-8 8"/>', 'failed request'], ['<path class="nothing" d="M7.5 2v11"/>', 'nothing kept'], ['<path class="line" d="M0 7.5H15"/>', 'best so far']]
     .map(([swatch, words]) => `<span><svg viewBox="0 0 15 15" width="15" height="15" aria-hidden="true">${swatch}</svg>${words}</span>`).join('');
   const ramp = Array.from({ length: LEVELS }, (_, i) => `<svg viewBox="0 0 18 14" width="18" height="14" aria-hidden="true"><rect class="level${i + 1}" width="18" height="14" rx="2"/></svg>`).join('');
   const stat = (value: string, words: string) => `<div class="stat"><b>${value}</b><span>${words}</span></div>`;

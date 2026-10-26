@@ -101,8 +101,17 @@ function failure(httpStatus: number | undefined, error: unknown) {
     status, code, named.param);
 }
 
-// onText may see pieces before the stream is known to be complete.
-async function streamOf(body: Response['body'], onText: (delta: string) => unknown, stopped: () => ModelError | null): Promise<unknown> {
+// The failure that a whole answer tells, by its status, at its top or in its one choice, as the checks after it name it.
+function toldBy(response: Response, answer: unknown): ModelError | null {
+  if (!response.ok) return failure(response.status, isObject(answer) ? answer.error : undefined);
+  if (!isObject(answer)) return null;
+  if (answer.error) return failure(undefined, answer.error);
+  const choice: unknown = Array.isArray(answer.choices) && answer.choices.length === 1 ? answer.choices[0] : undefined;
+  return isObject(choice) && choice.error ? failure(undefined, choice.error) : null;
+}
+
+// onText may see pieces before the stream is known to be complete; `told` keeps a failure as soon as it is read.
+async function streamOf(body: Response['body'], onText: (delta: string) => unknown, stopped: () => ModelError | null, told: (error: ModelError) => ModelError): Promise<unknown> {
   if (!body) throw new ModelError('invalid_stream');
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let bytes = 0, text = '', finish: unknown, usage: unknown, provider: unknown;
@@ -150,7 +159,7 @@ async function streamOf(body: Response['body'], onText: (delta: string) => unkno
         throw error;
       }
       if (!isObject(chunk)) throw new ModelError('invalid_stream');
-      if (chunk.error) throw failure(undefined, chunk.error);
+      if (chunk.error) throw told(failure(undefined, chunk.error));
       if (isObject(chunk.usage)) usage = chunk.usage;
       if (typeof chunk.provider === 'string') provider = chunk.provider;
       // The usage-only chunk has no choice.
@@ -159,7 +168,7 @@ async function streamOf(body: Response['body'], onText: (delta: string) => unkno
       const choice: unknown = choices[0];
       if (!choices.length) continue;
       if (!isObject(choice)) throw new ModelError('invalid_stream');
-      if (choice.error) throw failure(undefined, choice.error);
+      if (choice.error) throw told(failure(undefined, choice.error));
       const delta = isObject(choice.delta) ? choice.delta : {};
       if ((Array.isArray(delta.tool_calls) && delta.tool_calls.length) || delta.function_call) throw new ModelError('unexpected_tools');
       if (typeof delta.refusal === 'string' && delta.refusal.trim()) throw new ModelError('declined');
@@ -192,6 +201,10 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
       const current = signal ? AbortSignal.any([signal, timer]) : timer;
       const stopped = () => signal?.aborted ? new ModelError('cancelled') : timer.aborted || performance.now() >= until ? new ModelError('timeout') : null;
+      // A used up balance that the server has told is kept as it is read, so that a stop or a timeout that comes while
+      // the answer is read or let go cannot hide it, and a stop given for some reason of the caller is not taken for one.
+      let spent: ModelError | undefined;
+      const told = (error: ModelError) => { if (error.code === 'budget_exceeded') spent = error; return error; };
       if (signal?.aborted) throw new ModelError('cancelled');
       let response: Response | undefined, answer: unknown, streamed = false, sent = false;
       try {
@@ -204,20 +217,25 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
             // A broken body must not hide an exhausted balance, nor a deadline that passes as it comes.
             if (response.status === 402) {
               if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
-              throw failure(402, undefined);
+              throw told(failure(402, undefined));
             }
             return response;
           }, current, until);
           // A server may return JSON even when a stream was requested.
           streamed = stream && response.ok && !response.headers.get('content-type')?.includes('application/json');
-          answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until), stopped), current, until)
-            : await untilStopped(() => jsonOf(response!).catch(error => {
+          answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until), stopped, told), current, until)
+            : await untilStopped(() => jsonOf(response!).then(value => {
+              const refused = toldBy(response!, value);
+              if (refused) told(refused);
+              return value;
+            }, error => {
               if (response!.ok || !(error instanceof Error)) throw error;
               return null;
             }), current, until);
         } catch (error) {
           // A used up balance outranks a stop or a timeout that came with it, so that nothing is sent after it.
-          const reason = error instanceof ModelError && error.code === 'budget_exceeded' ? null : stopped();
+          if (spent) throw spent;
+          const reason = stopped();
           if (reason) throw reason;
           if (error instanceof TypeError) {
             const failure = new ModelError('provider_failed', response?.status);
@@ -227,14 +245,14 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
           }
           throw error;
         }
+        if (spent) throw spent;
         const reason = stopped();
         if (reason) throw reason;
-        if (!response.ok) throw failure(response.status, isObject(answer) ? answer.error : undefined);
+        const refused = toldBy(response, answer);
+        if (refused) throw refused;
         if (!isObject(answer)) throw new ModelError('invalid_response');
-        if (answer.error) throw failure(undefined, answer.error);
         const choice: unknown = Array.isArray(answer.choices) && answer.choices.length === 1 ? answer.choices[0] : undefined;
         if (!isObject(choice)) throw new ModelError('invalid_response');
-        if (choice.error) throw failure(undefined, choice.error);
         const message = isObject(choice.message) ? choice.message : {};
         // No tools were sent, so a tool call cannot be an answer.
         if (choice.finish_reason === 'tool_calls' || (Array.isArray(message.tool_calls) && message.tool_calls.length)) throw new ModelError('unexpected_tools');

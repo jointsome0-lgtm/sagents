@@ -16,16 +16,18 @@ export type Kind = 'seed' | 'idea' | 'try' | 'submit';
 // `step` is shared by the files of one step and by the first files of one ideation; rows kept before steps were
 // numbered have none. `model` is the name of the model that wrote the file, with its effort, on the rows of a step
 // and of an ideation; rows kept before models were named have none. `others` are the files a step showed beside its
-// parent, and `turn` whether that parent was its family's best or a cell's elite, on its tries and submits. `name` and
-// `idea` are the model's words for a family, on the row of its first file only.
+// parent, on its tries and submits. `name` and `idea` are the model's words for a family, on the row of its first
+// file only.
 export type Candidate = Evaluation & { id: number; at: string; kind: Kind; family: string; parent: number | null; sha: string; chars: number; cell: string | null;
-  same: number | null; discoveries: string[]; call: number | null; step?: number | null; model?: string; others?: number[]; turn?: 'family' | 'cell'; name?: string; idea?: string };
-// A request has a row when it is sent and another when it ends; one that a kill cut short has only the first.
-export type Sent = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; model?: string; sent: true };
-export type UsageRow = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; model?: string; ms: number; input: number | null; cached: number | null;
-  written: number | null; output: number | null; reasoning: number | null; error?: string; tries?: 2 };
-// What a run keeps: `put` must leave the text where `evaluate` finds it by its sha.
-export type Store = { candidates: Candidate[]; calls: number; put: (sha: string, text: string) => void; text: (sha: string) => string;
+  same: number | null; discoveries: string[]; call: number | null; step?: number | null; model?: string; others?: number[]; name?: string; idea?: string };
+// A request has a row when it is sent and another when it ends; one that a kill cut short has only the first. Both
+// name its `step` and, on a step's requests, its `turn`: whether the parent was its family's best or a cell's elite.
+export type Sent = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; model?: string; step?: number; turn?: 'family' | 'cell'; sent: true };
+export type UsageRow = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; model?: string; step?: number; turn?: 'family' | 'cell'; ms: number;
+  input: number | null; cached: number | null; written: number | null; output: number | null; reasoning: number | null; error?: string; tries?: 2; unusable?: true };
+// What a run keeps: `put` must leave the text where `evaluate` finds it by its sha, and `sent` holds the kept rows of
+// the requests sent, by which a second start goes on with the steps.
+export type Store = { candidates: Candidate[]; calls: number; sent: Sent[]; put: (sha: string, text: string) => void; text: (sha: string) => string;
   add: (candidate: Candidate) => void; usage: (row: Sent | UsageRow) => void };
 // `models` take the steps in turn, step 1 the first, so that a model named twice has two shares and a second start,
 // whose steps go on after the kept ones, keeps the split; `respond` gets the name as the request's model.
@@ -106,9 +108,10 @@ function readIterated(text: string, last: boolean): Iterated | null {
     || !(last ? ['submit'] : ['try', 'submit']).includes(value.tool as string)) return null;
   return value as Iterated;
 }
+// An ideation's answer, or null when it is not of the schema or begins no family, which gives nothing to use.
 function readIdeated(text: string): Ideated | null {
   const value = parsed(text);
-  if (!value || !exact(value, IDEATE_FIELDS) || typeof value.notes !== 'string' || !lines(value.discoveries) || !Array.isArray(value.families)
+  if (!value || !exact(value, IDEATE_FIELDS) || typeof value.notes !== 'string' || !lines(value.discoveries) || !Array.isArray(value.families) || !value.families.length
     || !value.families.every(item => isObject(item) && exact(item, ['name', 'idea', 'file']) && typeof item.name === 'string' && typeof item.idea === 'string' && typeof item.file === 'string')) return null;
   return value as Ideated;
 }
@@ -138,25 +141,30 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
   const requests = outer ? AbortSignal.any([outer, halt.signal]) : halt.signal;
   const report: EvolveReport = { status: 'done', reason: 'calls', calls: 0, invalid: 0, failures: 0, candidates: 0, added: 0, valid: 0, cells: 0, families: 0, best: null, models: {} };
   let ended: string | null = null, nextId = all.reduce((most, candidate) => Math.max(most, candidate.id), 0) + 1;
-  // A second start goes on with the counts of the kept steps, as the loop made them, so that a run stopped and
-  // started again still turns to ideation after `stale` steps with no gain, and gives the families and the cells
-  // their turns in order. The files are taken in the order they were kept and counted as the loop counts them: a
-  // gain at its file, a step at its last file and an ideation at its last first file.
+  // A second start goes on with the counts of the kept steps, as the loop makes them, so that a run stopped and
+  // started again still turns to ideation after `stale` steps with no gain and gives the families, the cells and the
+  // models their turns in order. The steps that sent a request are taken from the rows of their requests, whether or
+  // not they kept a file: their numbers go on after the highest, and their turns are counted.
+  const asked = new Map<number, Sent>();
+  for (const row of store.sent) if (whole(row.step, 1) && !asked.has(row.step!)) asked.set(row.step!, row);
+  let turns = 0, cursor = 0, explored = 0;
+  for (const row of asked.values()) if (row.kind === 'iterate') { turns += 1; if (row.turn === 'cell') explored += 1; else cursor += 1; }
+  // A step that kept a file and improved nothing counts toward `stale` at the place of its last file in the order the
+  // files were kept, unless a gain or the last first file of an ideation comes after that place. The loop counts so as
+  // its steps end and a second start so from the kept files, so the two agree however the steps ended.
+  let since = -1, idle: number[] = [];
+  const reset = (place: number) => { since = Math.max(since, place); idle = idle.filter(last => last > since); };
   const lows = new Map<string, number>(), lastOf = new Map<number, number>(), gained = new Set<number>();
   all.forEach((candidate, i) => { if (whole(candidate.step, 1)) lastOf.set(candidate.step!, i); });
-  let turns = 0, cursor = 0, explored = 0, sinceGain = 0;
   all.forEach((candidate, i) => {
     const low = lows.get(candidate.family), gain = candidate.valid && (low === undefined || candidate.score! < low), step = candidate.step!, last = lastOf.get(step) === i;
     if (gain) lows.set(candidate.family, candidate.score!);
     if (!lastOf.has(step)) return;
-    if (candidate.kind === 'idea') { if (last) sinceGain = 0; return; }
-    if (gain) { gained.add(step); sinceGain = 0; }
-    if (!last) return;
-    turns += 1;
-    if (candidate.turn === 'cell') explored += 1; else cursor += 1;
-    if (!gained.has(step)) sinceGain += 1;
+    if (candidate.kind === 'idea') { if (last) reset(i); return; }
+    if (gain) { gained.add(step); reset(i); }
+    if (last && !gained.has(step)) idle.push(i);
   });
-  let nextStep = [...lastOf.keys()].reduce((most, step) => Math.max(most, step), 0) + 1, unusable = 0, failing = 0, emptyIdeas = 0;
+  let nextStep = [...lastOf.keys(), ...asked.keys()].reduce((most, step) => Math.max(most, step), 0) + 1, unusable = 0, failing = 0, emptyIdeas = 0;
   // Rows edited by hand may number so high that the next numbers would not be exact; nothing is sent then.
   const room = most * FAMILIES + parallel;
   if (![store.calls, nextId, nextStep].every(next => Number.isSafeInteger(next + room))) throw new EvolveError('The kept rows number their requests, files or steps too high to go on.');
@@ -215,7 +223,7 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
     }
     return work;
   };
-  const record = async (text: string, row: Pick<Candidate, 'kind' | 'family' | 'parent' | 'call' | 'step'>, found: string[], more: Pick<Candidate, 'model' | 'others' | 'turn' | 'name' | 'idea'> = {}) => {
+  const record = async (text: string, row: Pick<Candidate, 'kind' | 'family' | 'parent' | 'call' | 'step'>, found: string[], more: Pick<Candidate, 'model' | 'others' | 'name' | 'idea'> = {}) => {
     const sha = createHash('sha256').update(text).digest('hex'), earlier = all.find(candidate => candidate.sha === sha);
     const evaluation = earlier ? { valid: earlier.valid, score: earlier.score, features: earlier.features, feedback: earlier.feedback } : await evaluationOf(sha, text);
     if (!evaluation || stopped.aborted) return null;
@@ -224,21 +232,24 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
       cell: evaluation.valid ? cellOf(evaluation.features!, task) : null, same: (earlier ?? all.find(other => other.sha === sha))?.id ?? null,
       discoveries: found.slice(0, 3).map(line => clip(line.trim(), DISCOVERY)).filter(Boolean), call: row.call, step: row.step, ...more };
     all.push(candidate);
+    const place = all.length - 1;
     store.add(candidate);
     report.added += 1;
     const mine = more.model === undefined ? null : counts.get(more.model)!;
     if (mine) { mine.files += 1; if (candidate.valid) mine.valid += 1; if (gain && row.kind !== 'idea') mine.gains += 1; }
     onCandidate?.(candidate);
-    return { candidate, gain };
+    return { candidate, gain, place };
   };
 
   // An answer that gives nothing to use, a cut one and a declined one among them, counts toward the end at UNUSABLE in a row.
   const unused = (model: string) => { report.invalid += 1; counts.get(model)!.invalid += 1; if (++unusable >= UNUSABLE) end('invalid'); };
-  // The answer's text, or null when this request gave nothing to use; a failure that ends the run ends it here.
-  const ask = async (model: string, kind: UsageRow['kind'], family: string | null, n: number, messages: Message[], schema: object): Promise<string | null> => {
-    const at = new Date().toISOString(), mine = counts.get(model)!;
-    store.usage({ n, at, kind, family, model, sent: true });
-    const row: UsageRow = { n, at, kind, family, model, ms: 0, input: null, cached: null, written: null, output: null, reasoning: null };
+  // The answer's text, read, or null when this request gave nothing to use; a failure that ends the run ends it here.
+  // An answer that gives nothing to use is told in its row, as a cut or a declined one is by its code.
+  const ask = async <T>(head: Pick<Sent, 'kind' | 'family' | 'turn'> & { model: string; step: number }, n: number, messages: Message[], schema: object,
+    read: (text: string) => T | null): Promise<{ text: string; answer: T } | null> => {
+    const at = new Date().toISOString(), model = head.model, mine = counts.get(model)!;
+    store.usage({ n, at, ...head, sent: true });
+    const row: UsageRow = { n, at, ...head, ms: 0, input: null, cached: null, written: null, output: null, reasoning: null };
     mine.requests += 1;
     const began = performance.now();
     try {
@@ -248,7 +259,9 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
         output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });
       for (const field of ['input', 'cached', 'written', 'output', 'reasoning'] as const) mine[field] += row[field] ?? 0;
       if (answer.tries === 2) row.tries = 2;
-      return answer.text;
+      const usable = read(answer.text);
+      if (usable === null) { row.unusable = true; unused(model); return null; }
+      return { text: answer.text, answer: usable };
     } catch (error) {
       if (error instanceof ModelError && error.tries === 2) row.tries = 2;
       // Cut short by the run's own end: that end is already decided. A failure that came back as the run ended still
@@ -279,9 +292,7 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
         const idea = all.find(candidate => candidate.family === family && candidate.idea !== undefined)?.idea;
         return `- ${named(family)}${idea ? `: ${idea}` : ''}`;
       }).join('\n')}` : 'No family exists yet.', told()].join('\n\n');
-    const text = await ask(model, 'ideate', null, n, [{ role: 'user', content }], IDEATE_SCHEMA);
-    const answer = text === null ? null : readIdeated(text);
-    if (text !== null && !answer) unused(model);
+    const answer = (await ask({ kind: 'ideate', family: null, model, step }, n, [{ role: 'user', content }], IDEATE_SCHEMA, readIdeated))?.answer;
     let started = false;
     if (answer) {
       unusable = 0;
@@ -290,9 +301,10 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
         index ? [] : answer.discoveries, { model, name: clip(family.name.trim().replace(/\s+/g, ' '), NAME) || 'unnamed', idea: clip(family.idea.trim(), IDEA) })));
       const failure = settled.find(result => result.status === 'rejected');
       if (failure) throw failure.reason;
-      started = settled.some(result => result.status === 'fulfilled' && result.value?.candidate.valid);
+      const kept = settled.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : []);
+      started = kept.some(({ candidate }) => candidate.valid);
       // The steps with no gain count from the last first file kept, as a second start counts them.
-      sinceGain = 0;
+      if (kept.length) reset(Math.max(...kept.map(({ place }) => place)));
     }
     // An ideation that gave nothing, by a failure or an answer that cannot be used, is asked again rather than put off
     // by `stale` more steps; every ideation that begins no valid family counts toward the end at IDEAS, so that
@@ -301,10 +313,11 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
     else if (ended === null && ++emptyIdeas >= IDEAS && !active().length) end('no_valid_start');
   };
 
-  // Whether the step improved its family's best, or null when it kept no file: only a step that kept a file and
-  // improved nothing counts toward `stale`.
-  const iterate = async (nth: number): Promise<boolean | null> => {
-    const step = nextStep++, model = modelOf(step), tops = active(), cells = elites();
+  // A step takes its number, its model and its turn with its first request, so that one that sends none takes none.
+  const iterate = async () => {
+    let n = take();
+    if (n === null) return;
+    const step = nextStep++, model = modelOf(step), nth = turns++, tops = active(), cells = elites();
     // Every EXPLORE-th step takes an elite of the archive, so that a cell no family leads still gets worked on;
     // the families take their turns among the other steps.
     const turn = nth % EXPLORE === EXPLORE - 1 && cells.length > 1 ? 'cell' : 'family';
@@ -315,24 +328,26 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
     const messages: Message[] = [{ role: 'user', content: [`The parent, to improve: ${shown(parent)}`, parent.feedback ? `Its feedback:\n${parent.feedback}` : 'The evaluator gave no feedback on it.',
       others.length ? `Other files of the archive, to borrow from:\n\n${others.map(shown).join('\n\n')}` : 'There are no other files in the archive yet.', told(),
       tries ? `You have ${tries} ${tries === 1 ? 'try' : 'tries'}: with \`try\` the evaluator runs your file and you see what it says; with \`submit\` your file is evaluated and kept, and this work ends.` : 'Use `submit`: your file is evaluated and kept, and this work ends.'].join('\n\n') }];
-    let gained: boolean | null = null;
-    for (let t = 0; ; t += 1) {
-      const n = take();
-      if (n === null) return gained;
-      const last = t >= tries, text = await ask(model, 'iterate', parent.family, n, messages, iterateSchema(last));
-      const answer = text === null ? null : readIterated(text, last);
-      if (text !== null && !answer) unused(model);
-      if (!answer || text === null) return gained;
-      unusable = 0;
-      const kept = await record(answer.file, { kind: answer.tool, family: parent.family, parent: parent.id, call: n, step }, answer.discoveries,
-        { model, others: others.map(candidate => candidate.id), turn });
-      if (!kept) return gained;
-      // A gain counts at once, so that steps that end meanwhile do not bring ideation early.
-      if (kept.gain) { gained = true; sinceGain = 0; } else gained ??= false;
-      if (answer.tool === 'submit') return gained;
-      const left = tries - t - 1;
-      messages.push({ role: 'assistant', content: text }, { role: 'user', content: `The evaluator on your file: ${verdict(kept.candidate)}\n\n${left ? `${left} ${left === 1 ? 'try' : 'tries'} left.` : 'No tries are left: your next answer must use `submit`, and the schema allows only that.'}` });
-    }
+    // The step counts toward `stale` as it ends, at the place of its last kept file, when it kept one and improved
+    // nothing, and no gain or ideation came after that place.
+    let gained = false, latest = -1;
+    try {
+      for (let t = 0; n !== null; t += 1, n = take()) {
+        const last = t >= tries, got = await ask({ kind: 'iterate', family: parent.family, model, step, turn }, n, messages, iterateSchema(last), text => readIterated(text, last));
+        if (!got) return;
+        const { text, answer } = got;
+        unusable = 0;
+        const kept = await record(answer.file, { kind: answer.tool, family: parent.family, parent: parent.id, call: n, step }, answer.discoveries,
+          { model, others: others.map(candidate => candidate.id) });
+        if (!kept) return;
+        latest = kept.place;
+        // A gain counts at once, so that steps that end meanwhile do not bring ideation early.
+        if (kept.gain) { gained = true; reset(kept.place); }
+        if (answer.tool === 'submit') return;
+        const left = tries - t - 1;
+        messages.push({ role: 'assistant', content: text }, { role: 'user', content: `The evaluator on your file: ${verdict(kept.candidate)}\n\n${left ? `${left} ${left === 1 ? 'try' : 'tries'} left.` : 'No tries are left: your next answer must use `submit`, and the schema allows only that.'}` });
+      }
+    } finally { if (!gained && latest > since) idle.push(latest); }
   };
 
   const stop = () => end('stopped');
@@ -345,8 +360,8 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
       try {
         while (ended === null) {
           if (ideating) { await ideating; continue; }
-          if (!active().length || sinceGain >= task.stale) { ideating = ideate().finally(() => { ideating = null; }); await ideating; continue; }
-          if (await iterate(turns++) === false) sinceGain += 1;
+          if (!active().length || idle.length >= task.stale) { ideating = ideate().finally(() => { ideating = null; }); await ideating; continue; }
+          await iterate();
         }
       } catch (error) { crash ??= { error }; end('unexpected'); }
     };

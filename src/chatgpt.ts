@@ -330,6 +330,10 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       // A failure to save rotated tokens must not be hidden by a caller timeout.
       const token = await accessToken().catch(error => { throw error instanceof ModelError ? error : new ModelError('internal_error'); });
       let status: number | undefined, tries: 2 | undefined;
+      // A used up limit that the service has told is kept as it is read, so that a stop or a timeout that comes while
+      // the stream is let go cannot hide it, and a stop given for some reason of the caller is not taken for one.
+      let spent: ModelError | undefined;
+      const told = (error: ModelError) => { if (error.code === 'budget_exceeded') spent = error; return error; };
       try {
         return await untilStopped(async () => {
           current.throwIfAborted();
@@ -350,11 +354,11 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
           status = response.status;
           if (response.status === 402) {
             if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
-            throw failure(undefined, 402);
+            throw told(failure(undefined, 402));
           }
           if (!response.ok) {
             const refusal = await jsonOf(response).catch(() => null);
-            throw failure(errorCodeOf(refusal), response.status, paramOf(refusal));
+            throw told(failure(errorCodeOf(refusal), response.status, paramOf(refusal)));
           }
           // The plan route may omit the stream's content type.
           const type = response.headers.get('content-type');
@@ -380,11 +384,11 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
               throw error;
             }
             if (!isObject(event)) throw new ModelError('invalid_stream');
-            if (event.type === 'error') throw failure(event.code ?? event.error?.code, undefined, event.param ?? event.error?.param);
+            if (event.type === 'error') throw told(failure(event.code ?? event.error?.code, undefined, event.param ?? event.error?.param));
             // A service must not silently substitute a different model.
             const answering = isObject(event.response) ? event.response.model : undefined;
             if (typeof answering === 'string' && answering && answering !== sent.model) throw new ModelError('wrong_model');
-            if (event.type === 'response.failed') throw failure(event.response?.error?.code, undefined, event.response?.error?.param);
+            if (event.type === 'response.failed') throw told(failure(event.response?.error?.code, undefined, event.response?.error?.param));
             if (event.type === 'response.refusal.delta' || event.type === 'response.refusal.done') throw Object.assign(new ModelError('declined'), { refusal: 'event' as const });
             const stopped = event.response?.incomplete_details?.reason;
             if (event.type === 'response.incomplete') throw Object.assign(new ModelError(stopped === 'max_output_tokens' ? 'output_limit' : stopped === 'content_filter' ? 'declined' : 'incomplete_stream'),
@@ -429,8 +433,8 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
         }, current, until);
       } catch (error) {
         // A used up limit outranks a stop or a timeout that came with it, so that nothing is sent after it.
-        const failed = error instanceof ModelError && error.code === 'budget_exceeded' ? error : signal?.aborted ? new ModelError('cancelled')
-          : timer.aborted || performance.now() >= until ? new ModelError('timeout') : error instanceof ModelError ? error : new ModelError('provider_failed');
+        const failed = spent ?? (signal?.aborted ? new ModelError('cancelled')
+          : timer.aborted || performance.now() >= until ? new ModelError('timeout') : error instanceof ModelError ? error : new ModelError('provider_failed'));
         failed.stage = status === undefined ? 'connect' : 'stream';
         if (tries) failed.tries = tries;
         throw failed;
