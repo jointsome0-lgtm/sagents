@@ -253,14 +253,16 @@ test('failures of the API become codes, a used up limit is budget_exceeded, and 
   }
   // A used up limit that comes back as the deadline passes is still budget_exceeded, so that nothing is sent after it,
   // and one that the stream tells goes to onSpent and is budget_exceeded at once, however long the stream takes to be
-  // let go, so that the steps under way beside it send nothing more meanwhile.
+  // let go, so that the steps under way beside it send nothing more meanwhile; a failure of onSpent, which is not
+  // waited for, does not end the process.
   const late = createChatgpt({ path, fetch: async () => { const end = performance.now() + 30; while (performance.now() < end); return new Response(null, { status: 402 }); } });
   assert.equal((await late.respond(request, { timeoutMs: 10 }).catch((thrown: unknown) => thrown) as { code?: string }).code, 'budget_exceeded');
   const told = createChatgpt({ path, fetch: async () => new Response(new ReadableStream({
     start(controller) { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'error', code: 'subscription_sharing_usage_limit_exceeded' })}\n\n`)); },
     cancel: () => new Promise(() => {}) }), { status: 200 }) });
   const asked = performance.now(), heard: string[] = [];
-  assert.equal((await told.respond(request, { timeoutMs: 2000, onSpent: error => heard.push(error.code) }).catch((thrown: unknown) => thrown) as { code?: string }).code, 'budget_exceeded');
+  const onSpent = async (error: { code: string }) => { heard.push(error.code); throw new Error('the caller\'s own failure'); };
+  assert.equal((await told.respond(request, { timeoutMs: 2000, onSpent }).catch((thrown: unknown) => thrown) as { code?: string }).code, 'budget_exceeded');
   assert.ok(performance.now() - asked < 1000);
   assert.deepEqual(heard, ['budget_exceeded']);
   // The service says which model answers. Another one than was asked for is a failure, before any of its text is

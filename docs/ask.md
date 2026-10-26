@@ -36,7 +36,8 @@ call that ends in a failure, `wrong_model` included, may have handed over a part
 `src/compatible.ts` with `SAGENTS_API_STREAM`; without it an `api:` server's text is handed over once, whole and checked.
 Given `onSpent`, either connection calls it with the `budget_exceeded` failure as soon as it reads that the plan's limit
 or the key's balance is used up, before the call itself ends, so that a program with other calls under way can stop
-them before they send anything more; `evolve` does so.
+them before they send anything more; `evolve` does so. It is not waited for, so what stops the other calls has to
+happen in it at once; a promise it returns is let go, and its failure with it.
 `createChatgpt` in `src/chatgpt.ts` sends once more after two seconds only when the connection rejects before a response,
 within the same time limit and unless cancelled or timed out; a failure after any response is never sent again.
 

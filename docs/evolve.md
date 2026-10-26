@@ -58,8 +58,9 @@ the file is a program, let the evaluator run it in a sandbox with no network and
 
 The evaluator prints, as the last line of its output, one JSON object: `valid`, true or false; when valid, `score`, a
 finite number, lower is better, and `features`, a number for every feature of `cells`; and `feedback`, a short text
-with errors, counterexamples and what the score is made of, cut at 4,000 characters. A non-zero exit, a signal or
-a timeout makes the file not valid, with the end of stderr as the feedback. The evaluator's process group is killed
+with errors, counterexamples and what the score is made of, cut at 4,000 characters. A non-zero exit or a signal
+makes the file not valid, with the end of stderr as the feedback, and a timeout makes it not valid with the timeout
+as the feedback. The evaluator's process group is killed
 when it ends, so what it left running ends too; a process that starts a session of its own escapes that, and so
 does the group when sagents itself is killed with SIGKILL. A file is evaluated once, even when it comes twice at
 the same time: a later copy takes the earlier verdict and names it in `same`. The evaluator's code and data must
@@ -168,8 +169,8 @@ script, so it opens offline in any browser, in light or dark. It shows:
 - the families with their requests and tokens, and the discoveries;
 - the models, when the rows name them, counted as the summary counts one start: their requests, failures, answers
   with nothing to use, files, valid files and gains, the median time of an answer, their input tokens with the share
-  that was cached and those written to the cache, and their output tokens with those of reasoning, a count that no
-  row has left blank;
+  that was cached and those written to the cache, and their output tokens with those of reasoning; the written and
+  the reasoning tokens are left blank where no row of the model has them, and the summary gives 0 there;
 - every file with its step and model, its feedback, the files shown beside its parent and its change against its
   parent, how many steps were shown the file itself, and the whole text of a file with no parent, of each family's
   best and of each elite.

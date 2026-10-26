@@ -128,14 +128,16 @@ test('a used up balance is budget_exceeded, nothing is sent again, and a failure
   }
   // A used up balance that comes back as the deadline passes is still budget_exceeded, so that nothing is sent after it,
   // and one that a stream tells goes to onSpent and is budget_exceeded at once, however long the stream takes to be
-  // let go, so that the steps under way beside it send nothing more meanwhile.
+  // let go, so that the steps under way beside it send nothing more meanwhile; a failure of onSpent, which is not
+  // waited for, does not end the process.
   const late = createCompatible({ env, fetch: async () => { const end = performance.now() + 30; while (performance.now() < end); return refusal(402, { code: 402 }); } });
   assert.equal((await late.respond(request, { timeoutMs: 10 }).catch((thrown: unknown) => thrown) as Thrown).code, 'budget_exceeded');
   const told = createCompatible({ env: { ...env, SAGENTS_API_STREAM: '1' }, fetch: async () => new Response(new ReadableStream({
     start(controller) { controller.enqueue(new TextEncoder().encode('data: {"error":{"code":402}}\n\n')); },
     cancel: () => new Promise(() => {}) }), { status: 200, headers: { 'content-type': 'text/event-stream' } }) });
   const asked = performance.now(), heard: string[] = [];
-  assert.equal((await told.respond(request, { timeoutMs: 2000, onSpent: error => heard.push(error.code) }).catch((thrown: unknown) => thrown) as Thrown).code, 'budget_exceeded');
+  const onSpent = async (error: { code: string }) => { heard.push(error.code); throw new Error('the caller\'s own failure'); };
+  assert.equal((await told.respond(request, { timeoutMs: 2000, onSpent }).catch((thrown: unknown) => thrown) as Thrown).code, 'budget_exceeded');
   assert.ok(performance.now() - asked < 1000);
   assert.deepEqual(heard, ['budget_exceeded']);
   // A server that cannot be reached is a failure of its own kind, and the reason fetch gives stays behind.

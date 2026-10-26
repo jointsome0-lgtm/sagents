@@ -205,7 +205,13 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       let spent: ModelError | undefined;
       const quota = new AbortController();
       const told = (error: ModelError) => {
-        if (error.code === 'budget_exceeded' && !spent) { spent = error; quota.abort(error); onSpent(error); }
+        if (error.code === 'budget_exceeded' && !spent) {
+          spent = error;
+          quota.abort(error);
+          // onSpent is not waited for. A promise it returns is let go with its failure, which would otherwise end the
+          // process: the call fails with the used up balance all the same, so nothing of the call is lost.
+          void Promise.resolve(onSpent(error)).catch(() => {});
+        }
         return error;
       };
       const current = AbortSignal.any([...(signal ? [signal] : []), timer, quota.signal]);
