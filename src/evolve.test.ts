@@ -34,18 +34,20 @@ test('evolve sends no request past --calls, none after budget_exceeded or a stop
   const capped = await run(async () => { sent += 1; await new Promise(resolve => setTimeout(resolve, 5)); return file(); }, { calls: 7, parallel: 3 });
   assert.deepEqual([sent, capped.calls, capped.status], [7, 7, 'done']);
 
-  // budget_exceeded ends the run, and the requests under way are cut rather than left to be sent again.
+  // budget_exceeded cuts the requests under way rather than leaving them to be sent again, and is in the summary,
+  // even when answers that could not be used have ended the run before it.
   let cut = 0;
   const spent = await run(async (_request, controls) => {
     sent += 1;
-    if (sent === 3) throw new ModelError('budget_exceeded', 429);
+    if (sent === 2) { await new Promise(resolve => setTimeout(resolve, 50)); throw new ModelError('budget_exceeded', 429); }
+    if (sent !== 3) return { text: 'not json', usage: null };
     await new Promise((resolve, reject) => {
       const timer = setTimeout(resolve, 5000);
       controls?.signal?.addEventListener('abort', () => { clearTimeout(timer); cut += 1; reject(new ModelError('cancelled')); }, { once: true });
     });
     return file();
   }, { parallel: 3 });
-  assert.deepEqual([sent, cut, spent.status, spent.reason, spent.httpStatus], [3, 2, 'failed', 'budget_exceeded', 429]);
+  assert.deepEqual([sent, cut, spent.status, spent.reason, spent.httpStatus], [7, 1, 'failed', 'budget_exceeded', 429]);
 
   // A stop sends nothing more.
   const stop = new AbortController();

@@ -12,12 +12,12 @@ gives. `runEvolve` in `src/evolve.ts` holds the loop and the archive with no dis
 sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>]
 ```
 
-`--calls` has no default: it is the most requests this start sends, tries included. `--parallel` (1 to 16, default
-1) runs that many steps at once, and at most that many evaluations. `--tries` (0 to 10, default 2) is how often one
-step may run the evaluator on a draft before it submits. A line for every file evaluated goes to stderr, with its
-number, kind, family, parent and score or `not valid`; the summary is one JSON line on stdout. Ctrl+C stops the run:
-requests under way are cut, evaluators are killed, and a file whose evaluation was cut short stays in `files/` with
-no row.
+`--calls` has no default: it is the most calls this start makes, tries included; a call is one request, which the
+plan's connection may send twice (see the end of [The loop](#the-loop)). `--parallel` (1 to 16, default 1) runs that
+many steps at once, and at most that many evaluations. `--tries` (0 to 10, default 2) is how often one step may run
+the evaluator on a draft before it submits. A line for every file evaluated goes to stderr, with its number, kind,
+family, parent and score or `not valid`; the summary is one JSON line on stdout. Ctrl+C stops the run: requests under
+way are cut, evaluators are killed, and a file whose evaluation was cut short stays in `files/` with no row.
 
 ## What the file can do
 
@@ -69,13 +69,15 @@ stay as they are for the whole run, since nothing compares them between starts.
   family's best is its lowest-scoring valid file.
 - **The end.** The run ends at `--calls`; at any failure of the connection but `output_limit` and `declined`,
   `budget_exceeded` among them; after five answers in a row that give nothing to use, cut at the output limit,
-  declined or not of the schema; or at Ctrl+C. A failure outranks a stop and a stop the end of the calls in the
-  summary, whatever came first. A call is counted before its request is sent. When the calls are spent, requests
-  and evaluations under way finish and are kept; a failure of the connection cuts the requests under way, so that
-  none is sent again after it.
+  declined or not of the schema; or at Ctrl+C. In the summary `budget_exceeded` outranks any other end, a failure a
+  stop, and a stop the end of the calls, whatever came first. A call is counted before its request is sent. When
+  the calls are spent, requests and evaluations under way finish and are kept; a failure of the connection cuts the
+  requests under way, whatever ended the run before it, so that none is sent again after it.
 
 The plan's connection sends a request once more when the connection fails before any response, as it does for
-every command ([One request](ask.md)); the request's row then has `tries: 2`, and it is still one call.
+every command ([One request](ask.md)); the request's row then has `tries: 2`, and it is still one call. A server
+that took the first send may count both, so the requests a start sends can pass `--calls` by the rows with
+`tries: 2`.
 
 All requests of a run share the instructions and the spec as their system text, and one cache name kept in
 `run.json`, so that the service can keep that part cached.

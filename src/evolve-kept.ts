@@ -89,9 +89,10 @@ export function keepEvolve(dir: string, taskText: string, base: string) {
   }
 }
 
-// The evaluator runs with no shell, in a process group of its own, which is killed when the evaluator ends, at its
-// timeout and at a stop, so that nothing it started outlives it. A process that leaves the group escapes that, and
-// so does the group when sagents itself is killed with SIGKILL.
+// The evaluator runs with no shell, in a process group of its own, which is killed when the evaluator's own process
+// ends, at its timeout and at a stop, so that nothing it started outlives it or holds its output open until the
+// timeout. A process that leaves the group escapes that, and so does the group when sagents itself is killed with
+// SIGKILL.
 // It gets the environment without the key of a chat completions server, which it has no use for.
 export function runEvaluator(task: Task, file: string, cwd: string, signal?: AbortSignal): Promise<Evaluation> {
   const argv = task.evaluate.map(part => part === '{file}' ? resolve(file) : part), env = { ...process.env };
@@ -107,8 +108,8 @@ export function runEvaluator(task: Task, file: string, cwd: string, signal?: Abo
     child.stdout.setEncoding('utf8').on('data', (part: string) => { out = (out + part).slice(-OUT); });
     child.stderr.setEncoding('utf8').on('data', (part: string) => { err = (err + part).slice(-ERR); });
     child.on('error', () => finish(invalid('The evaluator could not be started.')));
+    child.on('exit', kill);
     child.on('close', (code, by) => {
-      kill();
       if (timedOut) return finish(invalid(`The evaluator ran past ${task.timeout} s and was stopped.`));
       if (signal?.aborted) return finish(invalid('The evaluator was stopped with the run.'));
       if (code !== 0) return finish(invalid(`The evaluator ended with ${code === null ? `signal ${by}` : `exit code ${code}`}.${err.trim() ? ` The end of its errors:\n${err.trim()}` : ''}`));

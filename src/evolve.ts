@@ -106,15 +106,15 @@ function readIdeated(text: string): Ideated | null {
 const placed = (candidate: Candidate) => `score ${candidate.score}, ${Object.entries(candidate.features ?? {}).map(([name, value]) => `${name} ${value}`).join(', ')}`;
 const verdict = (candidate: Candidate) => `${candidate.valid ? `valid, ${placed(candidate)}` : 'not valid'}${candidate.same === null ? '' : `; the same file as #${candidate.same}`}${candidate.feedback ? `\nFeedback:\n${candidate.feedback}` : ''}`;
 const byScore = (a: Candidate, b: Candidate) => a.score! - b.score!;
-// A failure outranks a stop, and a stop the end of the calls, whatever came first.
-const rank = (reason: string) => reason === 'calls' ? 0 : reason === 'stopped' ? 1 : 2;
+// `budget_exceeded` outranks any other end, a failure a stop, and a stop the end of the calls, whatever came first.
+const rank = (reason: string) => reason === 'calls' ? 0 : reason === 'stopped' ? 1 : reason === 'budget_exceeded' ? 3 : 2;
 
 export async function runEvolve({ task, store, respond, model, evaluate, calls: most, parallel = 1, tries = 2, cache, seed, signal: outer, onCandidate }: Evolve): Promise<EvolveReport> {
   if (!whole(most, 1) || !whole(parallel, 1) || parallel > 16 || !whole(tries, 0) || tries > 10) throw new EvolveError('The calls and parallel limits must be whole numbers above zero, parallel at most 16, and tries a whole number from 0 to 10.');
   const all = store.candidates, system = instructionsOf(task), ideas = ideasOf(task);
   const owned = createHash('sha256').update(JSON.stringify([cache, 'evolve'])).digest('hex').slice(0, 32);
-  // A failure of the connection cuts the requests under way, so that none of them is sent again after it;
-  // evaluations end only with a stop.
+  // A failure of the connection cuts the requests under way, whatever ended the run before it, so that none of them
+  // is sent again after it; evaluations end only with a stop.
   const halt = new AbortController(), stopped = outer ?? new AbortController().signal;
   const requests = outer ? AbortSignal.any([outer, halt.signal]) : halt.signal;
   const report: EvolveReport = { status: 'done', reason: 'calls', calls: 0, invalid: 0, candidates: 0, added: 0, valid: 0, cells: 0, families: 0, best: null };
@@ -122,11 +122,12 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
   let turns = 0, cursor = 0, explored = 0, sinceGain = 0, unusable = 0, emptyIdeas = 0;
   let ideating: Promise<void> | null = null;
   const end = (reason: string, error?: ModelError) => {
+    if (error) halt.abort();
     if (ended !== null && rank(reason) <= rank(ended)) return;
     ended = reason;
     if (error) {
+      for (const field of ['httpStatus', 'providerCode', 'param'] as const) delete report[field];
       Object.assign(report, { ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}), ...(error.providerCode ? { providerCode: error.providerCode } : {}), ...(error.param ? { param: error.param } : {}) });
-      halt.abort();
     }
   };
   // The end of the calls lets requests and evaluations under way finish: they are paid for already.
@@ -205,8 +206,9 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
       return answer.text;
     } catch (error) {
       if (error instanceof ModelError && error.tries === 2) row.tries = 2;
-      // Cut short by the run's own end: that end is already decided.
-      if (requests.aborted) { row.error = error instanceof ModelError ? error.code : 'cancelled'; return null; }
+      // Cut short by the run's own end: that end is already decided. A failure that came back as the run ended still
+      // counts, so that `budget_exceeded` is not lost behind another end.
+      if (requests.aborted && (!(error instanceof ModelError) || error.code === 'cancelled')) { row.error = 'cancelled'; return null; }
       if (!(error instanceof ModelError)) throw error;
       row.error = error.code;
       if (['output_limit', 'declined'].includes(error.code)) unused(); else end(error.code, error);
@@ -266,7 +268,8 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
       unusable = 0;
       const kept = await record(answer.tool, parent.family, parent.id, answer.file, n, answer.discoveries);
       if (!kept) return gained;
-      gained ||= kept.gain;
+      // A gain counts at once, so that steps that end meanwhile do not bring ideation early.
+      if (kept.gain) { gained = true; sinceGain = 0; }
       if (answer.tool === 'submit') return gained;
       const left = tries - t - 1;
       messages.push({ role: 'assistant', content: text }, { role: 'user', content: `The evaluator on your file: ${verdict(kept.candidate)}\n\n${left ? `${left} ${left === 1 ? 'try' : 'tries'} left.` : 'No tries are left: your next answer must use `submit`, and the schema allows only that.'}` });
@@ -284,7 +287,7 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
         while (ended === null) {
           if (ideating) { await ideating; continue; }
           if (!active().length || sinceGain >= task.stale) { ideating = ideate().finally(() => { ideating = null; }); await ideating; continue; }
-          if (await iterate(turns++)) sinceGain = 0; else sinceGain += 1;
+          if (!await iterate(turns++)) sinceGain += 1;
         }
       } catch (error) { crash ??= { error }; end('unexpected'); }
     };
