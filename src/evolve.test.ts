@@ -1,5 +1,5 @@
 // `evolve` with stand-ins for the model and, in the second test, for the server behind the command: no network and no sign-in.
-// This is here because a search spends calls in a loop: a limit that let one more request through, a failure that
+// This is here because a search spends calls in a loop: a limit that let one more request through, failures that
 // did not stop it, or a start that wrote over what an earlier one kept would cost money or lose the archive unnoticed.
 // The tests check what a run spends and keeps, not how it chooses its steps.
 import assert from 'node:assert/strict';
@@ -18,7 +18,7 @@ import { keepEvolve } from './evolve-kept.ts';
 
 const SPEC = 'Write a file that begins with ok, as short as can be.';
 
-test('evolve sends no request past --calls, none after budget_exceeded or a stop, and stops on answers it cannot use', async () => {
+test('evolve sends no request past --calls, none after budget_exceeded or a stop, and stops on answers it cannot use and on failures in a row', async () => {
   const task = readTask({ spec: SPEC, evaluate: ['check', '{file}'], cells: { len: [4, 8] } });
   let sent = 0;
   const run = (respond: (request: Request, controls?: Controls) => Promise<{ text: string; usage: null }>, more: { calls?: number; parallel?: number; signal?: AbortSignal } = {}) => {
@@ -58,6 +58,13 @@ test('evolve sends no request past --calls, none after budget_exceeded or a stop
   const wasted = await run(async () => { sent += 1; throw new ModelError('output_limit'); });
   assert.ok(sent <= 5, `${sent} requests`);
   assert.equal(wasted.status, 'failed');
+
+  // A failed request ends only its step, and failures in a row end the run long before its calls are spent.
+  const flaky = await run(async () => { sent += 1; if (sent % 3 === 0) throw new ModelError('provider_failed', 500); return file(); }, { calls: 9 });
+  assert.deepEqual([sent, flaky.status, flaky.failures], [9, 'done', 3]);
+  const down = await run(async () => { sent += 1; throw new ModelError('timeout'); });
+  assert.ok(sent <= 3, `${sent} requests`);
+  assert.deepEqual([down.status, down.reason], ['failed', 'timeout']);
 });
 
 test('evolve keeps a run that only grows and goes on from it, refuses a second writer, keeps no answer text in its usage rows, and maps it without writing to it or loading anything', () => {

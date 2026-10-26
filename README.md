@@ -158,7 +158,7 @@ quotes are compared and findings taken back, the limits and the report.
 `runEvolve` in `src/evolve.ts` holds the loop and the archive; `keepEvolve` in `src/evolve-kept.ts` keeps its directory.
 
 ```sh
-sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>]
+sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>] [--timeout <s>]
 sagents evolve-map <dir> > map.html
 ```
 

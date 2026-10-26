@@ -16,8 +16,9 @@ sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>
 plan's connection may send twice (see the end of [The loop](#the-loop)). `--parallel` (1 to 16, default 1) runs that
 many steps at once, and at most that many evaluations. `--tries` (0 to 10, default 2) is how often one step may run
 the evaluator on a draft before it submits. `--timeout` (1 to 3600 seconds, default 180) limits each request; a
-request past it is a `timeout`, which ends the run, and its tokens are spent with no answer, so a model that thinks
-for minutes needs more. A line for every file evaluated goes to stderr, with its number, kind,
+request past it is a `timeout`, which ends its step, and its tokens are spent with no answer, so a model that
+thinks for minutes needs more, and ideation, whose answer carries several files, more still. A line for every file
+evaluated goes to stderr, with its number, kind,
 family, parent and score or `not valid`; the summary is one JSON line on stdout. Ctrl+C stops the run: requests under
 way are cut, evaluators are killed, and a file whose evaluation was cut short stays in `files/` with no row.
 
@@ -59,8 +60,9 @@ stay as they are for the whole run, since nothing compares them between starts.
 - **Ideation** asks for families, each a name, an idea in one line and a first file, told the families that exist
   with their ideas. It asks for as many as one answer can carry: 80,000 characters divided by `size`, from one to
   five, so two at the default size. Each first file is evaluated, and a valid one starts its family. Ideation runs
-  when no family has a valid file and whenever `stale` steps pass with no family improving. After three ideations
-  in a row with no valid file and no family, the run ends with `no_valid_start`.
+  when no family has a valid file and whenever `stale` steps pass with no family improving. An ideation that gives
+  nothing, by a failure or an answer that cannot be used, is asked again rather than put off by `stale` more steps.
+  After three ideations in a row with no valid file and no family, the run ends with `no_valid_start`.
 - **A step** takes the best file of a family, the families in turn; every fourth step takes instead an elite of the
   archive, the cells in turn, so that a cell no family leads still gets worked on. The request holds the parent with
   its score, features and feedback, up to two other files, the best of other families first and then the elites of
@@ -69,12 +71,16 @@ stay as they are for the whole run, since nothing compares them between starts.
   last try the schema allows only `submit`. A step costs one request and one more for every try.
 - **The archive** keeps every file evaluated, tries included. A cell's elite is its lowest-scoring valid file, and a
   family's best is its lowest-scoring valid file.
-- **The end.** The run ends at `--calls`; at any failure of the connection but `output_limit` and `declined`,
-  `budget_exceeded` among them; after five answers in a row that give nothing to use, cut at the output limit,
-  declined or not of the schema; or at Ctrl+C. In the summary `budget_exceeded` outranks any other end, a failure a
-  stop, and a stop the end of the calls, whatever came first. A call is counted before its request is sent. When
-  the calls are spent, requests and evaluations under way finish and are kept; a failure of the connection cuts the
-  requests under way, whatever ended the run before it, so that none is sent again after it.
+- **The end.** The run ends at `--calls`; after three failures of one request in a row; at once at any other
+  failure of the connection but `output_limit` and `declined`, `budget_exceeded`, `rate_limited` and `unauthorized`
+  among them; after five answers in a row that give nothing to use, cut at the output limit, declined or not of the
+  schema; or at Ctrl+C. A failure of one request, `timeout`, `provider_failed`, `model_unavailable`,
+  `incomplete_stream`, `invalid_stream`, `invalid_response` or `empty_response`, ends only its step, and the
+  requests under way go on; the summary counts failed requests in `failures` and answers that gave nothing to use in
+  `invalid`. In the summary `budget_exceeded` outranks any other end, a failure a stop, and a stop the end of the
+  calls, whatever came first. A call is counted before its request is sent. When the calls are spent, requests and
+  evaluations under way finish and are kept; a failure that ends the run cuts the requests under way, whatever ended
+  the run before it, so that none is sent again after it.
 
 The plan's connection sends a request once more when the connection fails before any response, as it does for
 every command ([One request](ask.md)); the request's row then has `tries: 2`, and it is still one call. A server

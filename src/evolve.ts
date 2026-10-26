@@ -27,13 +27,13 @@ export type Store = { candidates: Candidate[]; calls: number; put: (sha: string,
   add: (candidate: Candidate) => void; usage: (row: Sent | UsageRow) => void };
 export type Evolve = { task: Task; store: Store; respond: Respond; model: string; evaluate: (sha: string, signal: AbortSignal) => Promise<Evaluation>;
   calls: number; parallel?: number; tries?: number; timeoutMs?: number; cache: string; seed?: string; signal?: AbortSignal; onCandidate?: (candidate: Candidate) => void };
-export type EvolveReport = { status: 'done' | 'stopped' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string; calls: number; invalid: number;
+export type EvolveReport = { status: 'done' | 'stopped' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string; calls: number; invalid: number; failures: number;
   candidates: number; added: number; valid: number; cells: number; families: number; best: { id: number; family: string; score: number } | null };
 
 // The plan connection ends an answer past 100,000 characters, and a file comes inside JSON: what one answer may
 // carry is kept well under that.
 const ANSWER = 80_000;
-const FEEDBACK = 4000, DISCOVERY = 300, DISCOVERIES = 20, FAMILIES = 5, NAME = 40, IDEA = 300, EXPLORE = 4, UNUSABLE = 5, IDEAS = 3;
+const FEEDBACK = 4000, DISCOVERY = 300, DISCOVERIES = 20, FAMILIES = 5, NAME = 40, IDEA = 300, EXPLORE = 4, UNUSABLE = 5, FAILURES = 3, IDEAS = 3;
 export const clip = (text: string, chars: number) => text.length <= chars ? text : `${text.slice(0, chars).replace(/[\uD800-\uDBFF]$/, '')}…`;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const whole = (value: unknown, least: number) => Number.isSafeInteger(value) && (value as number) >= least;
@@ -108,6 +108,9 @@ function readIdeated(text: string): Ideated | null {
 const placed = (candidate: Candidate) => `score ${candidate.score}, ${Object.entries(candidate.features ?? {}).map(([name, value]) => `${name} ${value}`).join(', ')}`;
 const verdict = (candidate: Candidate) => `${candidate.valid ? `valid, ${placed(candidate)}` : 'not valid'}${candidate.same === null ? '' : `; the same file as #${candidate.same}`}${candidate.feedback ? `\nFeedback:\n${candidate.feedback}` : ''}`;
 const byScore = (a: Candidate, b: Candidate) => a.score! - b.score!;
+// A failure of one request, a timeout, a server's error or a broken or empty answer, ends only its step, so that it
+// cuts no other request under way; FAILURES of them in a row end the run, as any other failure does at once.
+const STEP_FAILURES = ['timeout', 'provider_failed', 'model_unavailable', 'incomplete_stream', 'invalid_stream', 'invalid_response', 'empty_response'];
 // `budget_exceeded` outranks any other end, a failure a stop, and a stop the end of the calls, whatever came first.
 const rank = (reason: string) => reason === 'calls' ? 0 : reason === 'stopped' ? 1 : reason === 'budget_exceeded' ? 3 : 2;
 
@@ -115,11 +118,11 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
   if (!whole(most, 1) || !whole(parallel, 1) || parallel > 16 || !whole(tries, 0) || tries > 10) throw new EvolveError('The calls and parallel limits must be whole numbers above zero, parallel at most 16, and tries a whole number from 0 to 10.');
   const all = store.candidates, system = instructionsOf(task), ideas = ideasOf(task);
   const owned = createHash('sha256').update(JSON.stringify([cache, 'evolve'])).digest('hex').slice(0, 32);
-  // A failure of the connection cuts the requests under way, whatever ended the run before it, so that none of them
+  // A failure that ends the run cuts the requests under way, whatever ended the run before it, so that none of them
   // is sent again after it; evaluations end only with a stop.
   const halt = new AbortController(), stopped = outer ?? new AbortController().signal;
   const requests = outer ? AbortSignal.any([outer, halt.signal]) : halt.signal;
-  const report: EvolveReport = { status: 'done', reason: 'calls', calls: 0, invalid: 0, candidates: 0, added: 0, valid: 0, cells: 0, families: 0, best: null };
+  const report: EvolveReport = { status: 'done', reason: 'calls', calls: 0, invalid: 0, failures: 0, candidates: 0, added: 0, valid: 0, cells: 0, families: 0, best: null };
   let ended: string | null = null, nextId = all.reduce((most, candidate) => Math.max(most, candidate.id), 0) + 1;
   // A second start goes on with the counts of the kept steps, as the loop would have made them, so that a run stopped
   // and started again still turns to ideation after `stale` steps with no gain, and gives the families and the cells
@@ -138,7 +141,7 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     if (step.idea) sinceGain = 0;
     else { turns += 1; sinceGain = step.gain ? 0 : sinceGain + 1; }
   }
-  let explored = Math.floor(turns / EXPLORE), cursor = turns - explored, unusable = 0, emptyIdeas = 0;
+  let explored = Math.floor(turns / EXPLORE), cursor = turns - explored, unusable = 0, failing = 0, emptyIdeas = 0;
   let ideating: Promise<void> | null = null;
   const end = (reason: string, error?: ModelError) => {
     if (error) halt.abort();
@@ -220,6 +223,7 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     const began = performance.now();
     try {
       const answer = await respond({ model, system, messages, schema, cache: owned }, { signal: requests, timeoutMs });
+      failing = 0;
       Object.assign(row, { input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null, written: answer.usage?.writtenInputTokens ?? null,
         output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });
       if (answer.tries === 2) row.tries = 2;
@@ -231,7 +235,9 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
       if (requests.aborted && (!(error instanceof ModelError) || error.code === 'cancelled')) { row.error = 'cancelled'; return null; }
       if (!(error instanceof ModelError)) throw error;
       row.error = error.code;
-      if (['output_limit', 'declined'].includes(error.code)) unused(); else end(error.code, error);
+      if (['output_limit', 'declined'].includes(error.code)) { failing = 0; unused(); return null; }
+      report.failures += 1;
+      if (!STEP_FAILURES.includes(error.code) || ++failing >= FAILURES) end(error.code, error);
       return null;
     } finally {
       row.ms = Math.round(performance.now() - began);
@@ -242,7 +248,6 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
   const ideate = async () => {
     const n = take();
     if (n === null) return;
-    sinceGain = 0;
     const step = nextStep++, known = families(), taken = new Set(known);
     let k = 1;
     const fresh = () => { while (taken.has(`f${k}`)) k += 1; taken.add(`f${k}`); return `f${k}`; };
@@ -254,7 +259,10 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     const text = await ask('ideate', null, n, [{ role: 'user', content }], IDEATE_SCHEMA);
     const answer = text === null ? null : readIdeated(text);
     if (text !== null && !answer) unused();
+    // An ideation that gave nothing is asked again rather than put off by `stale` more steps; failures and answers
+    // that cannot be used end the run when they come in a row.
     if (!answer) return;
+    sinceGain = 0;
     unusable = 0;
     // Every first file is settled before this returns, so that none is written after a failure has ended the run.
     const settled = await Promise.allSettled(answer.families.slice(0, ideas).map((family, index) => record('idea', fresh(), null, family.file, n, step, index ? [] : answer.discoveries,
