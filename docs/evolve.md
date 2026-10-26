@@ -9,13 +9,15 @@ gives. `runEvolve` in `src/evolve.ts` holds the loop and the archive with no dis
 `runEvaluator` in `src/evolve-kept.ts` keep the directory and run the evaluator.
 
 ```sh
-sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>]
+sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>] [--timeout <s>]
 ```
 
 `--calls` has no default: it is the most calls this start makes, tries included; a call is one request, which the
 plan's connection may send twice (see the end of [The loop](#the-loop)). `--parallel` (1 to 16, default 1) runs that
 many steps at once, and at most that many evaluations. `--tries` (0 to 10, default 2) is how often one step may run
-the evaluator on a draft before it submits. A line for every file evaluated goes to stderr, with its number, kind,
+the evaluator on a draft before it submits. `--timeout` (1 to 3600 seconds, default 180) limits each request; a
+request past it is a `timeout`, which ends the run, and its tokens are spent with no answer, so a model that thinks
+for minutes needs more. A line for every file evaluated goes to stderr, with its number, kind,
 family, parent and score or `not valid`; the summary is one JSON line on stdout. Ctrl+C stops the run: requests under
 way are cut, evaluators are killed, and a file whose evaluation was cut short stays in `files/` with no row.
 

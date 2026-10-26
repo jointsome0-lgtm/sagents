@@ -24,7 +24,7 @@ export type UsageRow = { n: number; at: string; kind: 'ideate' | 'iterate'; fami
 export type Store = { candidates: Candidate[]; calls: number; put: (sha: string, text: string) => void; text: (sha: string) => string;
   add: (candidate: Candidate) => void; usage: (row: Sent | UsageRow) => void };
 export type Evolve = { task: Task; store: Store; respond: Respond; model: string; evaluate: (sha: string, signal: AbortSignal) => Promise<Evaluation>;
-  calls: number; parallel?: number; tries?: number; cache: string; seed?: string; signal?: AbortSignal; onCandidate?: (candidate: Candidate) => void };
+  calls: number; parallel?: number; tries?: number; timeoutMs?: number; cache: string; seed?: string; signal?: AbortSignal; onCandidate?: (candidate: Candidate) => void };
 export type EvolveReport = { status: 'done' | 'stopped' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string; calls: number; invalid: number;
   candidates: number; added: number; valid: number; cells: number; families: number; best: { id: number; family: string; score: number } | null };
 
@@ -109,7 +109,7 @@ const byScore = (a: Candidate, b: Candidate) => a.score! - b.score!;
 // `budget_exceeded` outranks any other end, a failure a stop, and a stop the end of the calls, whatever came first.
 const rank = (reason: string) => reason === 'calls' ? 0 : reason === 'stopped' ? 1 : reason === 'budget_exceeded' ? 3 : 2;
 
-export async function runEvolve({ task, store, respond, model, evaluate, calls: most, parallel = 1, tries = 2, cache, seed, signal: outer, onCandidate }: Evolve): Promise<EvolveReport> {
+export async function runEvolve({ task, store, respond, model, evaluate, calls: most, parallel = 1, tries = 2, timeoutMs, cache, seed, signal: outer, onCandidate }: Evolve): Promise<EvolveReport> {
   if (!whole(most, 1) || !whole(parallel, 1) || parallel > 16 || !whole(tries, 0) || tries > 10) throw new EvolveError('The calls and parallel limits must be whole numbers above zero, parallel at most 16, and tries a whole number from 0 to 10.');
   const all = store.candidates, system = instructionsOf(task), ideas = ideasOf(task);
   const owned = createHash('sha256').update(JSON.stringify([cache, 'evolve'])).digest('hex').slice(0, 32);
@@ -199,7 +199,7 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     const row: UsageRow = { n, at, kind, family, ms: 0, input: null, cached: null, written: null, output: null, reasoning: null };
     const began = performance.now();
     try {
-      const answer = await respond({ model, system, messages, schema, cache: owned }, { signal: requests });
+      const answer = await respond({ model, system, messages, schema, cache: owned }, { signal: requests, timeoutMs });
       Object.assign(row, { input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null, written: answer.usage?.writtenInputTokens ?? null,
         output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });
       if (answer.tries === 2) row.tries = 2;

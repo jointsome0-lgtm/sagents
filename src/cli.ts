@@ -26,7 +26,7 @@ sagents live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-m
 sagents eval <dir> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
 sagents eval --state <file> --world <world.json> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
                                a judge reads a finished live journal with log, show and diff, and gives a report
-sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>]
+sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>] [--timeout <s>]
                                a model improves one text file against the task's evaluator, keeping in the directory
                                an archive of the best valid file of every cell; a second start goes on with the same task;
                                a line for every file evaluated on stderr, and the summary as one JSON line on stdout
@@ -249,10 +249,13 @@ else if (command === 'numbers') {
 } else if (command === 'evolve') {
   let close = () => {};
   try {
-    const given = argumentsOf({ task: { type: 'string' }, model: { type: 'string' }, calls: { type: 'string' }, parallel: { type: 'string' }, tries: { type: 'string' } }, 1);
+    const given = argumentsOf({ task: { type: 'string' }, model: { type: 'string' }, calls: { type: 'string' }, parallel: { type: 'string' }, tries: { type: 'string' },
+      timeout: { type: 'string' } }, 1);
     const calls = Number(given?.values.calls), parallel = Number(given?.values.parallel ?? 1), tries = Number(given?.values.tries ?? 2);
+    const timeout = Number(given?.values.timeout ?? 180);
     if (!given || given.positionals.length !== 1 || !given.values.task || !given.values.model || !Number.isSafeInteger(calls) || calls < 1
-      || !Number.isSafeInteger(parallel) || parallel < 1 || parallel > 16 || !Number.isSafeInteger(tries) || tries < 0 || tries > 10) {
+      || !Number.isSafeInteger(parallel) || parallel < 1 || parallel > 16 || !Number.isSafeInteger(tries) || tries < 0 || tries > 10
+      || !(timeout >= 1 && timeout <= 3600)) {
       console.error(USAGE);
       process.exitCode = 1;
     } else {
@@ -277,7 +280,7 @@ else if (command === 'numbers') {
       if (kept.unreadable) console.error(`${kept.unreadable} cut or unreadable lines in the kept files were skipped`);
       const stop = new AbortController();
       for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
-      const result = await runEvolve({ task, store: kept.store, ...modelFor(given.values.model as string), calls, parallel, tries, cache: kept.cache, seed, signal: stop.signal,
+      const result = await runEvolve({ task, store: kept.store, ...modelFor(given.values.model as string), calls, parallel, tries, timeoutMs: timeout * 1000, cache: kept.cache, seed, signal: stop.signal,
         // The evaluator's command runs from the task file's directory, as its paths are written there.
         evaluate: (sha, signal) => runEvaluator(task, kept.path(sha), base, signal),
         // A family is shown by its number: its name is the model's words, which go only into the archive.
