@@ -201,13 +201,13 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
             sent = true;
             response = await fetcher(url, { method: 'POST', redirect: 'error', signal: current, body,
               headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json' } });
+            // A broken body must not hide an exhausted balance, nor a deadline that passes as it comes.
+            if (response.status === 402) {
+              if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
+              throw failure(402, undefined);
+            }
             return response;
           }, current, until);
-          if (response.status === 402) {
-            // A broken body must not hide an exhausted balance.
-            if (!response.body?.locked) void response.body?.cancel().catch(error => { if (!(error instanceof Error)) throw error; });
-            throw failure(402, undefined);
-          }
           // A server may return JSON even when a stream was requested.
           streamed = stream && response.ok && !response.headers.get('content-type')?.includes('application/json');
           answer = streamed ? await untilStopped(() => streamOf(response!.body, delta => untilStopped(() => onText(delta), current, until), stopped), current, until)
@@ -216,7 +216,8 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
               return null;
             }), current, until);
         } catch (error) {
-          const reason = stopped();
+          // A used up balance outranks a stop or a timeout that came with it, so that nothing is sent after it.
+          const reason = error instanceof ModelError && error.code === 'budget_exceeded' ? null : stopped();
           if (reason) throw reason;
           if (error instanceof TypeError) {
             const failure = new ModelError('provider_failed', response?.status);

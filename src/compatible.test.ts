@@ -126,6 +126,9 @@ test('a used up balance is budget_exceeded, nothing is sent again, and a failure
     assert.deepEqual(leaks(error), []);
     assert.equal(server.calls.length, 1);
   }
+  // A used up balance that comes back as the deadline passes is still budget_exceeded, so that nothing is sent after it.
+  const late = createCompatible({ env, fetch: async () => { const end = performance.now() + 30; while (performance.now() < end); return refusal(402, { code: 402 }); } });
+  assert.equal((await late.respond(request, { timeoutMs: 10 }).catch((thrown: unknown) => thrown) as Thrown).code, 'budget_exceeded');
   // A server that cannot be reached is a failure of its own kind, and the reason fetch gives stays behind.
   const { respond } = createCompatible({ env, fetch: async () => { throw new TypeError(`fetch failed ${KEY}`); } });
   const unreachable = await respond(request).catch((thrown: unknown) => thrown) as Thrown;

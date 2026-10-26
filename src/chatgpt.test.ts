@@ -251,6 +251,9 @@ test('failures of the API become codes, a used up limit is budget_exceeded, and 
     assert.equal(error.code, code);
     assert.deepEqual(leaks(error), []);
   }
+  // A used up limit that comes back as the deadline passes is still budget_exceeded, so that nothing is sent after it.
+  const late = createChatgpt({ path, fetch: async () => { const end = performance.now() + 30; while (performance.now() < end); return new Response(null, { status: 402 }); } });
+  assert.equal((await late.respond(request, { timeoutMs: 10 }).catch((thrown: unknown) => thrown) as { code?: string }).code, 'budget_exceeded');
   // The service says which model answers. Another one than was asked for is a failure, before any of its text is
   // passed on and whatever it wrote; the same one, and a stream that names none, are an answer.
   const naming = (model?: string) => sse([{ type: 'response.created', response: model === undefined ? {} : { model } }, { type: 'response.output_text.delta', delta: 'ok' },

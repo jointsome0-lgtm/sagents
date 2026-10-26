@@ -428,8 +428,9 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
             reasoningTokens: count(usage?.output_tokens_details?.reasoning_tokens) }, ...(tries ? { tries } : {}) };
         }, current, until);
       } catch (error) {
-        const failed = signal?.aborted ? new ModelError('cancelled') : timer.aborted || performance.now() >= until ? new ModelError('timeout')
-          : error instanceof ModelError ? error : new ModelError('provider_failed');
+        // A used up limit outranks a stop or a timeout that came with it, so that nothing is sent after it.
+        const failed = error instanceof ModelError && error.code === 'budget_exceeded' ? error : signal?.aborted ? new ModelError('cancelled')
+          : timer.aborted || performance.now() >= until ? new ModelError('timeout') : error instanceof ModelError ? error : new ModelError('provider_failed');
         failed.stage = status === undefined ? 'connect' : 'stream';
         if (tries) failed.tries = tries;
         throw failed;

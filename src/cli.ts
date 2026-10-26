@@ -260,6 +260,8 @@ else if (command === 'numbers') {
       process.exitCode = 1;
     } else {
       const { EvolveError, readTask, runEvolve } = await import('./evolve.ts'), { keepEvolve, runEvaluator } = await import('./evolve-kept.ts');
+      // An evaluator is stopped with its process group, which Windows does not have.
+      if (process.platform === 'win32') throw new EvolveError('evolve runs on Linux and macOS, where an evaluator is stopped with its process group.');
       const taskPath = given.values.task as string, base = dirname(resolve(taskPath));
       let taskText: string, value: unknown;
       try { taskText = readFileSync(taskPath, 'utf8'); value = JSON.parse(taskText); } catch (error) {

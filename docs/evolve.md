@@ -21,6 +21,8 @@ thinks for minutes needs more, and ideation, whose answer carries several files,
 evaluated goes to stderr, with its number, kind,
 family, parent and score or `not valid`; the summary is one JSON line on stdout. Ctrl+C stops the run: requests under
 way are cut, evaluators are killed, and a file whose evaluation was cut short stays in `files/` with no row.
+`evolve` runs on Linux and macOS, since an evaluator is stopped with its process group, which Windows does not have;
+`evolve-map` runs anywhere.
 
 ## What the file can do
 
@@ -39,12 +41,12 @@ the file is a program, let the evaluator run it in a sandbox with no network and
 | --- | --- |
 | `spec` | The problem in the user's words: what the file must do and how it is checked and scored. Every request carries it. |
 | `evaluate` | The evaluator as a list of arguments, with no shell: a program and its arguments, one of which is exactly `"{file}"` and becomes the path of the file to judge. It runs from the task file's directory. |
-| `cells` | The archive's features, 1 to 4, each a list of ascending edges. A value below the first edge is in bin 0, one at or past the last edge in the last bin. |
+| `cells` | The archive's features, 1 to 4. Each is named by a letter and up to 39 more letters, digits, `_` or `-`, and has a list of 1 to 20 ascending finite edges. A value below the first edge is in bin 0, one at or past the last edge in the last bin. |
 | `file` | Optional. The seed, a path from the task file's directory, read only when the run has nothing yet. Without it the run begins with ideation. |
 | `rules` | Optional. More instructions, such as "keep the command-line interface". |
-| `timeout` | Optional. Seconds an evaluation may take, 60 by default, at most 3600. Past it the evaluator's process group is killed and the file is not valid. |
-| `size` | Optional. The most characters a file may have, 40,000 by default, at most 80,000, since the plan connection ends an answer past 100,000 characters and the file comes inside JSON. A longer file is kept and not evaluated. |
-| `stale` | Optional. After this many steps with no family improving its best, ideation runs again; 10 by default. |
+| `timeout` | Optional. The whole seconds an evaluation may take, 60 by default, at most 3600. Past it the evaluator's process group is killed and the file is not valid. |
+| `size` | Optional. The most characters a file may have, a whole number, 40,000 by default, at most 80,000, since the plan connection ends an answer past 100,000 characters and the file comes inside JSON. A longer file is kept and not evaluated. |
+| `stale` | Optional. A whole number: after this many steps that kept a file and improved no family's best, ideation runs again; 10 by default. |
 
 The evaluator prints, as the last line of its output, one JSON object: `valid`, true or false; when valid, `score`, a
 finite number, lower is better, and `features`, a number for every feature of `cells`; and `feedback`, a short text
@@ -60,9 +62,11 @@ stay as they are for the whole run, since nothing compares them between starts.
 - **Ideation** asks for families, each a name, an idea in one line and a first file, told the families that exist
   with their ideas. It asks for as many as one answer can carry: 80,000 characters divided by `size`, from one to
   five, so two at the default size. Each first file is evaluated, and a valid one starts its family. Ideation runs
-  when no family has a valid file and whenever `stale` steps pass with no family improving. An ideation that gives
-  nothing, by a failure or an answer that cannot be used, is asked again rather than put off by `stale` more steps.
-  After three ideations in a row with no valid file and no family, the run ends with `no_valid_start`.
+  when no family has a valid file and whenever `stale` steps that kept a file pass with no family improving; a step
+  whose request failed or whose answer gave nothing to use is not counted. An ideation that gives nothing, by a
+  failure or an answer that cannot be used, is asked again rather than put off by `stale` more steps. While no
+  family has a valid file, three ideations that begin none, failed and unusable ones among them, end the run with
+  `no_valid_start`.
 - **A step** takes the best file of a family, the families in turn; every fourth step takes instead an elite of the
   archive, the cells in turn, so that a cell no family leads still gets worked on. The request holds the parent with
   its score, features and feedback, up to two other files, the best of other families first and then the elites of
@@ -81,6 +85,9 @@ stay as they are for the whole run, since nothing compares them between starts.
   calls, whatever came first. A call is counted before its request is sent. When the calls are spent, requests and
   evaluations under way finish and are kept; a failure that ends the run cuts the requests under way, whatever ended
   the run before it, so that none is sent again after it.
+
+In the summary `calls`, `added`, `invalid` and `failures` count this start, and `candidates`, `valid`, `cells`,
+`families` and `best` the whole archive, with what earlier starts kept.
 
 The plan's connection sends a request once more when the connection fails before any response, as it does for
 every command ([One request](ask.md)); the request's row then has `tries: 2`, and it is still one call. A server
@@ -104,7 +111,8 @@ match its name.
   `parent`, `sha`, `chars`, `valid`, `score`, `features`, `feedback`, `cell`, `same`, `discoveries`, `call` and
   `step`, the number of the step that brought the file, shared by the tries and the submit of one step and by the
   first files of one ideation, null for the seed; on a try or a submit `others`, the ids of the other files its
-  request showed beside the parent; and the model's `name` and `idea` on the first row of a family;
+  request showed beside the parent, and `turn`, `family` when the parent was its family's best and `cell` when it
+  was a cell's elite; and the model's `name` and `idea` on the first row of a family;
 - `usage.jsonl`, two rows per request: `n`, `at`, `kind` (`ideate` or `iterate`) and `family` with `sent: true`
   before it is sent, and the same with `ms`, the input, cached, written, output and reasoning tokens, `error` with a
   code when it failed and `tries: 2` when it was sent twice, when it ends. A request with only its first row was
@@ -114,10 +122,13 @@ match its name.
 A family is named by a number, `f1`, `f2` and so on, or `seed`, in the usage rows and on stderr; its name, the
 model's words, is only in the archive and the requests. A second start goes on from what is kept: the request
 numbers and the steps go on after the highest kept, the ids continue, and a line cut by a crash is skipped. The
-counts the loop chooses by are taken from the kept steps, in the order they began, as the loop would have made them:
-the steps since the last ideation or gain, so that a run stopped and started again still turns to ideation after
-`stale` steps with no gain, and the turns of the families and of the cells. A step that kept no file is not counted,
-and rows kept before steps were numbered give no counts. The model's `notes` are not kept.
+counts the loop chooses by are taken from the kept files in the order they were kept, as the loop counts them: the
+steps since the last ideation or gain, so that a run stopped and started again still turns to ideation after
+`stale` steps with no gain, and the turns of the families and of the cells, by each step's `turn`. Only kept files
+count, so a step that kept none gives its turn back, and an ideation whose answer held no family is not seen. Rows
+kept before steps were numbered give no counts, and those kept before `turn` count as the families' turns. A start
+is refused when rows edited by hand number so high that the next numbers would not be exact. The model's `notes`
+are not kept.
 
 ## The map
 
@@ -140,6 +151,6 @@ script, so it opens offline in any browser, in light or dark. It shows:
   many steps were shown the file itself, and the whole text of a file with no parent, of each family's best and of
   each elite.
 
-A mark opens its file. A line the run is still writing is left out, and so is the text of a file of `files/` that a
-kill cut short. The page holds the archive's text, the model's files and the evaluator's feedback, so share it as you
-would share the directory.
+A mark opens its file. A line the run is still writing is left out, and so is a row whose fields are not of their
+kinds, as one edited by hand, and the text of a file of `files/` that a kill cut short. The page holds the
+archive's text, the model's files and the evaluator's feedback, so share it as you would share the directory.

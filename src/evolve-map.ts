@@ -17,6 +17,22 @@ const unreadable = (error: unknown) => {
   return error;
 };
 
+// A row is shown only when every field is of its kind, so that a row edited by hand cannot put markup into the page.
+const isId = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 1;
+const isCount = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
+const isText = (value: unknown) => typeof value === 'string';
+const absentOr = (value: unknown, kind: (value: unknown) => boolean) => value === undefined || kind(value);
+const isCandidate = (row: unknown): row is Candidate => isObject(row) && isId(row.id) && isText(row.at) && ['seed', 'idea', 'try', 'submit'].includes(row.kind as string)
+  && isText(row.family) && (row.parent === null || isId(row.parent)) && typeof row.sha === 'string' && /^[0-9a-f]{64}$/.test(row.sha) && isCount(row.chars) && isText(row.feedback)
+  && (row.valid === true ? Number.isFinite(row.score) && isObject(row.features) && Object.values(row.features).every(Number.isFinite) && typeof row.cell === 'string' && /^\d+(,\d+)*$/.test(row.cell)
+    : row.valid === false && row.score === null && row.features === null && row.cell === null)
+  && (row.same === null || isId(row.same)) && Array.isArray(row.discoveries) && row.discoveries.every(isText) && (row.call === null || isId(row.call))
+  && absentOr(row.step, step => step === null || isId(step)) && absentOr(row.others, others => Array.isArray(others) && others.every(isId))
+  && absentOr(row.turn, turn => turn === 'family' || turn === 'cell') && absentOr(row.name, isText) && absentOr(row.idea, isText);
+const isUsage = (row: unknown): row is Sent | UsageRow => isObject(row) && isId(row.n) && isText(row.at) && (row.kind === 'ideate' || row.kind === 'iterate')
+  && (row.family === null || isText(row.family)) && ('ms' in row ? isCount(row.ms) && ['input', 'cached', 'written', 'output', 'reasoning'].every(field => row[field] === null || isCount(row[field]))
+    && absentOr(row.error, isText) && absentOr(row.tries, tries => tries === 2) : row.sent === true);
+
 export function readEvolveRun(dir: string): EvolveRun {
   const path = resolve(dir);
   const read = (name: string): string | null => {
@@ -30,8 +46,7 @@ export function readEvolveRun(dir: string): EvolveRun {
   if (found === null) throw new EvolveError('The directory has no candidates.jsonl: it is not the directory of an evolve run.');
   let task: Task | null = null;
   try { task = readTask(JSON.parse(read('task.json') ?? 'null')); } catch (error) { if (!(error instanceof EvolveError || error instanceof SyntaxError)) throw error; }
-  return { path, task, candidates: rows(found).filter(row => isObject(row) && Number.isSafeInteger(row.id)) as Candidate[],
-    usage: rows(read('usage.jsonl')).filter(row => isObject(row) && Number.isSafeInteger(row.n)) as (Sent | UsageRow)[],
+  return { path, task, candidates: rows(found).filter(isCandidate), usage: rows(read('usage.jsonl')).filter(isUsage),
     // A file that a kill cut short no longer matches its name, and is not shown as the file.
     text: sha => {
       if (!/^[0-9a-f]{64}$/.test(sha)) return null;
@@ -123,7 +138,7 @@ export function evolveMap(run: EvolveRun): string {
   const eliteIds = new Set([...elites.values()].map(c => c.id)), kept = new Set([...[...bests.values()].filter(c => c !== null).map(c => c!.id), ...eliteIds]);
   const best = lowest(valid), sum = (field: 'input' | 'cached' | 'output' | 'reasoning') => ends.reduce((total, row) => total + (row[field] ?? 0), 0);
   // The tries and the submit of one step showed the same files, so a file shown is counted once a step.
-  const stepOf = (c: Candidate) => Number.isSafeInteger(c.step) ? c.step! : null, othersOf = (c: Candidate) => Array.isArray(c.others) ? c.others.filter(id => Number.isSafeInteger(id)) : [];
+  const stepOf = (c: Candidate) => c.step ?? null, othersOf = (c: Candidate) => c.others ?? [];
   const shownIn = new Map<number, Set<string>>();
   for (const c of candidates) for (const id of othersOf(c)) shownIn.set(id, (shownIn.get(id) ?? new Set<string>()).add(stepOf(c) === null ? `#${c.id}` : `${stepOf(c)}`));
 

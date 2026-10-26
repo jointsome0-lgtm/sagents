@@ -14,10 +14,11 @@ export type Task = { spec: string; file: string | null; evaluate: string[]; time
 export type Evaluation = { valid: boolean; score: number | null; features: { [feature: string]: number } | null; feedback: string };
 export type Kind = 'seed' | 'idea' | 'try' | 'submit';
 // `step` is shared by the files of one step and by the first files of one ideation; rows kept before steps were
-// numbered have none. `others` are the files a step showed beside its parent, on its tries and submits. `name` and
-// `idea` are the model's words for a family, on the row of its first file only.
+// numbered have none. `others` are the files a step showed beside its parent, and `turn` whether that parent was its
+// family's best or a cell's elite, on its tries and submits. `name` and `idea` are the model's words for a family, on
+// the row of its first file only.
 export type Candidate = Evaluation & { id: number; at: string; kind: Kind; family: string; parent: number | null; sha: string; chars: number; cell: string | null;
-  same: number | null; discoveries: string[]; call: number | null; step?: number | null; others?: number[]; name?: string; idea?: string };
+  same: number | null; discoveries: string[]; call: number | null; step?: number | null; others?: number[]; turn?: 'family' | 'cell'; name?: string; idea?: string };
 // A request has a row when it is sent and another when it ends; one that a kill cut short has only the first.
 export type Sent = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; sent: true };
 export type UsageRow = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; ms: number; input: number | null; cached: number | null; written: number | null;
@@ -124,24 +125,28 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
   const requests = outer ? AbortSignal.any([outer, halt.signal]) : halt.signal;
   const report: EvolveReport = { status: 'done', reason: 'calls', calls: 0, invalid: 0, failures: 0, candidates: 0, added: 0, valid: 0, cells: 0, families: 0, best: null };
   let ended: string | null = null, nextId = all.reduce((most, candidate) => Math.max(most, candidate.id), 0) + 1;
-  // A second start goes on with the counts of the kept steps, as the loop would have made them, so that a run stopped
-  // and started again still turns to ideation after `stale` steps with no gain, and gives the families and the cells
-  // their turns in order, every EXPLORE-th step a cell's. The steps are taken in the order they began.
-  const steps = new Map<number, { idea: boolean; gain: boolean }>(), lows = new Map<string, number>();
-  for (const candidate of all) {
-    const low = lows.get(candidate.family), gain = candidate.valid && (low === undefined || candidate.score! < low);
+  // A second start goes on with the counts of the kept steps, as the loop made them, so that a run stopped and
+  // started again still turns to ideation after `stale` steps with no gain, and gives the families and the cells
+  // their turns in order. The files are taken in the order they were kept and counted as the loop counts them: a
+  // gain at its file, a step at its last file and an ideation at its last first file.
+  const lows = new Map<string, number>(), lastOf = new Map<number, number>(), gained = new Set<number>();
+  all.forEach((candidate, i) => { if (whole(candidate.step, 1)) lastOf.set(candidate.step!, i); });
+  let turns = 0, cursor = 0, explored = 0, sinceGain = 0;
+  all.forEach((candidate, i) => {
+    const low = lows.get(candidate.family), gain = candidate.valid && (low === undefined || candidate.score! < low), step = candidate.step!, last = lastOf.get(step) === i;
     if (gain) lows.set(candidate.family, candidate.score!);
-    if (!Number.isSafeInteger(candidate.step)) continue;
-    const step = steps.get(candidate.step!) ?? { idea: candidate.kind === 'idea', gain: false };
-    step.gain ||= gain;
-    steps.set(candidate.step!, step);
-  }
-  let nextStep = [...steps.keys()].reduce((most, step) => Math.max(most, step), 0) + 1, turns = 0, sinceGain = 0;
-  for (const [, step] of [...steps].sort(([a], [b]) => a - b)) {
-    if (step.idea) sinceGain = 0;
-    else { turns += 1; sinceGain = step.gain ? 0 : sinceGain + 1; }
-  }
-  let explored = Math.floor(turns / EXPLORE), cursor = turns - explored, unusable = 0, failing = 0, emptyIdeas = 0;
+    if (!lastOf.has(step)) return;
+    if (candidate.kind === 'idea') { if (last) sinceGain = 0; return; }
+    if (gain) { gained.add(step); sinceGain = 0; }
+    if (!last) return;
+    turns += 1;
+    if (candidate.turn === 'cell') explored += 1; else cursor += 1;
+    if (!gained.has(step)) sinceGain += 1;
+  });
+  let nextStep = [...lastOf.keys()].reduce((most, step) => Math.max(most, step), 0) + 1, unusable = 0, failing = 0, emptyIdeas = 0;
+  // Rows edited by hand may number so high that the next numbers would not be exact; nothing is sent then.
+  const room = most * FAMILIES + parallel;
+  if (![store.calls, nextId, nextStep].every(next => Number.isSafeInteger(next + room))) throw new EvolveError('The kept rows number their requests, files or steps too high to go on.');
   let ideating: Promise<void> | null = null;
   const end = (reason: string, error?: ModelError) => {
     if (error) halt.abort();
@@ -197,15 +202,14 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     }
     return work;
   };
-  const record = async (kind: Kind, family: string, parent: number | null, text: string, call: number | null, step: number | null, found: string[],
-    others: number[] | null = null, words: { name: string; idea: string } | null = null) => {
+  const record = async (text: string, row: Pick<Candidate, 'kind' | 'family' | 'parent' | 'call' | 'step'>, found: string[], more: Pick<Candidate, 'others' | 'turn' | 'name' | 'idea'> = {}) => {
     const sha = createHash('sha256').update(text).digest('hex'), earlier = all.find(candidate => candidate.sha === sha);
     const evaluation = earlier ? { valid: earlier.valid, score: earlier.score, features: earlier.features, feedback: earlier.feedback } : await evaluationOf(sha, text);
     if (!evaluation || stopped.aborted) return null;
-    const top = best(family), gain = evaluation.valid && (!top || evaluation.score! < top.score!);
-    const candidate: Candidate = { id: nextId++, at: new Date().toISOString(), kind, family, parent, sha, chars: text.length, ...evaluation,
+    const top = best(row.family), gain = evaluation.valid && (!top || evaluation.score! < top.score!);
+    const candidate: Candidate = { id: nextId++, at: new Date().toISOString(), kind: row.kind, family: row.family, parent: row.parent, sha, chars: text.length, ...evaluation,
       cell: evaluation.valid ? cellOf(evaluation.features!, task) : null, same: (earlier ?? all.find(other => other.sha === sha))?.id ?? null,
-      discoveries: found.slice(0, 3).map(line => clip(line.trim(), DISCOVERY)).filter(Boolean), call, step, ...(others ? { others } : {}), ...(words ?? {}) };
+      discoveries: found.slice(0, 3).map(line => clip(line.trim(), DISCOVERY)).filter(Boolean), call: row.call, step: row.step, ...more };
     all.push(candidate);
     store.add(candidate);
     report.added += 1;
@@ -259,33 +263,40 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     const text = await ask('ideate', null, n, [{ role: 'user', content }], IDEATE_SCHEMA);
     const answer = text === null ? null : readIdeated(text);
     if (text !== null && !answer) unused();
-    // An ideation that gave nothing is asked again rather than put off by `stale` more steps; failures and answers
-    // that cannot be used end the run when they come in a row.
-    if (!answer) return;
-    sinceGain = 0;
-    unusable = 0;
-    // Every first file is settled before this returns, so that none is written after a failure has ended the run.
-    const settled = await Promise.allSettled(answer.families.slice(0, ideas).map((family, index) => record('idea', fresh(), null, family.file, n, step, index ? [] : answer.discoveries,
-      null, { name: clip(family.name.trim().replace(/\s+/g, ' '), NAME) || 'unnamed', idea: clip(family.idea.trim(), IDEA) })));
-    const failure = settled.find(result => result.status === 'rejected');
-    if (failure) throw failure.reason;
-    if (settled.some(result => result.status === 'fulfilled' && result.value?.candidate.valid)) emptyIdeas = 0;
-    else if (++emptyIdeas >= IDEAS && !active().length) end('no_valid_start');
+    let started = false;
+    if (answer) {
+      unusable = 0;
+      // Every first file is settled before this returns, so that none is written after a failure has ended the run.
+      const settled = await Promise.allSettled(answer.families.slice(0, ideas).map((family, index) => record(family.file, { kind: 'idea', family: fresh(), parent: null, call: n, step },
+        index ? [] : answer.discoveries, { name: clip(family.name.trim().replace(/\s+/g, ' '), NAME) || 'unnamed', idea: clip(family.idea.trim(), IDEA) })));
+      const failure = settled.find(result => result.status === 'rejected');
+      if (failure) throw failure.reason;
+      started = settled.some(result => result.status === 'fulfilled' && result.value?.candidate.valid);
+      // The steps with no gain count from the last first file kept, as a second start counts them.
+      sinceGain = 0;
+    }
+    // An ideation that gave nothing, by a failure or an answer that cannot be used, is asked again rather than put off
+    // by `stale` more steps; every ideation that begins no valid family counts toward the end at IDEAS, so that
+    // failures between answers cannot keep a run with nothing to improve asking.
+    if (started) emptyIdeas = 0;
+    else if (ended === null && ++emptyIdeas >= IDEAS && !active().length) end('no_valid_start');
   };
 
-  // Whether the step improved its family's best.
-  const iterate = async (turn: number): Promise<boolean> => {
+  // Whether the step improved its family's best, or null when it kept no file: only a step that kept a file and
+  // improved nothing counts toward `stale`.
+  const iterate = async (nth: number): Promise<boolean | null> => {
     const step = nextStep++, tops = active(), cells = elites();
     // Every EXPLORE-th step takes an elite of the archive, so that a cell no family leads still gets worked on;
     // the families take their turns among the other steps.
-    const parent = turn % EXPLORE === EXPLORE - 1 && cells.length > 1 ? cells[explored++ % cells.length] : tops[cursor++ % tops.length];
+    const turn = nth % EXPLORE === EXPLORE - 1 && cells.length > 1 ? 'cell' : 'family';
+    const parent = turn === 'cell' ? cells[explored++ % cells.length] : tops[cursor++ % tops.length];
     const others = [...tops.filter(candidate => candidate.family !== parent.family).sort(byScore), ...cells.filter(candidate => candidate.cell !== parent.cell).sort(byScore)]
       .filter((candidate, i, list) => candidate.id !== parent.id && list.findIndex(other => other.id === candidate.id) === i).slice(0, 2);
     const shown = (candidate: Candidate) => `#${candidate.id}, family ${named(candidate.family)}, ${placed(candidate)}:\n${store.text(candidate.sha)}`;
     const messages: Message[] = [{ role: 'user', content: [`The parent, to improve: ${shown(parent)}`, parent.feedback ? `Its feedback:\n${parent.feedback}` : 'The evaluator gave no feedback on it.',
       others.length ? `Other files of the archive, to borrow from:\n\n${others.map(shown).join('\n\n')}` : 'There are no other files in the archive yet.', told(),
       tries ? `You have ${tries} ${tries === 1 ? 'try' : 'tries'}: with \`try\` the evaluator runs your file and you see what it says; with \`submit\` your file is evaluated and kept, and this work ends.` : 'Use `submit`: your file is evaluated and kept, and this work ends.'].join('\n\n') }];
-    let gained = false;
+    let gained: boolean | null = null;
     for (let t = 0; ; t += 1) {
       const n = take();
       if (n === null) return gained;
@@ -294,10 +305,11 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
       if (text !== null && !answer) unused();
       if (!answer || text === null) return gained;
       unusable = 0;
-      const kept = await record(answer.tool, parent.family, parent.id, answer.file, n, step, answer.discoveries, others.map(candidate => candidate.id));
+      const kept = await record(answer.file, { kind: answer.tool, family: parent.family, parent: parent.id, call: n, step }, answer.discoveries,
+        { others: others.map(candidate => candidate.id), turn });
       if (!kept) return gained;
       // A gain counts at once, so that steps that end meanwhile do not bring ideation early.
-      if (kept.gain) { gained = true; sinceGain = 0; }
+      if (kept.gain) { gained = true; sinceGain = 0; } else gained ??= false;
       if (answer.tool === 'submit') return gained;
       const left = tries - t - 1;
       messages.push({ role: 'assistant', content: text }, { role: 'user', content: `The evaluator on your file: ${verdict(kept.candidate)}\n\n${left ? `${left} ${left === 1 ? 'try' : 'tries'} left.` : 'No tries are left: your next answer must use `submit`, and the schema allows only that.'}` });
@@ -309,13 +321,13 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
   // A worker that fails ends the others before the failure is passed on, so that nothing writes after the caller closes the store.
   let crash: { error: unknown } | null = null;
   try {
-    if (seed !== undefined && !all.length) await record('seed', 'seed', null, seed, null, null, []);
+    if (seed !== undefined && !all.length) await record(seed, { kind: 'seed', family: 'seed', parent: null, call: null, step: null }, []);
     const worker = async () => {
       try {
         while (ended === null) {
           if (ideating) { await ideating; continue; }
           if (!active().length || sinceGain >= task.stale) { ideating = ideate().finally(() => { ideating = null; }); await ideating; continue; }
-          if (!await iterate(turns++)) sinceGain += 1;
+          if (await iterate(turns++) === false) sinceGain += 1;
         }
       } catch (error) { crash ??= { error }; end('unexpected'); }
     };

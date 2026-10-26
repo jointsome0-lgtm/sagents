@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -21,7 +21,7 @@ const SPEC = 'Write a file that begins with ok, as short as can be.';
 test('evolve sends no request past --calls, none after budget_exceeded or a stop, and stops on answers it cannot use and on failures in a row', async () => {
   const task = readTask({ spec: SPEC, evaluate: ['check', '{file}'], cells: { len: [4, 8] } });
   let sent = 0;
-  const run = (respond: (request: Request, controls?: Controls) => Promise<{ text: string; usage: null }>, more: { calls?: number; parallel?: number; signal?: AbortSignal } = {}) => {
+  const run = (respond: (request: Request, controls?: Controls) => Promise<{ text: string; usage: null }>, more: { calls?: number; parallel?: number; signal?: AbortSignal; seed?: string } = {}) => {
     const texts = new Map<string, string>();
     const store: Store = { candidates: [], calls: 0, put: (sha, text) => { texts.set(sha, text); }, text: sha => texts.get(sha)!, add: () => {}, usage: () => {} };
     sent = 0;
@@ -65,6 +65,10 @@ test('evolve sends no request past --calls, none after budget_exceeded or a stop
   const down = await run(async () => { sent += 1; throw new ModelError('timeout'); });
   assert.ok(sent <= 3, `${sent} requests`);
   assert.deepEqual([down.status, down.reason], ['failed', 'timeout']);
+
+  // A run with no valid file ends after three ideations that begin none, failed and declined ones among them.
+  const barren = await run(async () => { sent += 1; throw new ModelError(sent % 3 ? 'timeout' : 'declined'); }, { seed: undefined });
+  assert.deepEqual([sent, barren.reason], [3, 'no_valid_start']);
 });
 
 test('evolve keeps a run that only grows and goes on from it, refuses a second writer, keeps no answer text in its usage rows, and maps it without writing to it or loading anything', () => {
@@ -114,6 +118,11 @@ console.log(JSON.stringify(text.startsWith('ok') ? { valid: true, score: text.le
   // directory all the same, and its page loads nothing and runs nothing, whatever the model wrote.
   writeFileSync(join(root, 'other.json'), taskText.replace('short', 'brief'));
   assert.match(start(1, join(root, 'other.json')).stderr, /another task file/);
+  // Rows edited by hand, with markup where a number belongs, are left out of the map rather than drawn.
+  const link = '</title><a href="https://leak.invalid/">x</a><title>';
+  appendFileSync(join(dir, 'candidates.jsonl'), `${JSON.stringify({ ...rows(two['candidates.jsonl'])[0], id: 999, call: link })}\n`);
+  appendFileSync(join(dir, 'usage.jsonl'), `${JSON.stringify({ n: 999, at: '', kind: 'iterate', family: null, ms: 1, input: link, cached: null, written: null, output: null, reasoning: null })}\n`);
+  const three = kept();
   const held = keepEvolve(dir, taskText, root);
   try {
     assert.match(start(1).stderr, /Another run holds this directory/);
@@ -122,5 +131,5 @@ console.log(JSON.stringify(text.startsWith('ok') ? { valid: true, score: text.le
     assert.match(map.stdout, /ANSWER-TEXT&#60;img src=&#34;https:/);
     assert.doesNotMatch(map.stdout, /<(?:script|img|iframe|object|embed|link)\b|\b(?:src|href)\s*=\s*["'](?!#)|url\(|@import/i);
   } finally { held.close(); }
-  assert.deepEqual(kept(), two);
+  assert.deepEqual(kept(), three);
 });
