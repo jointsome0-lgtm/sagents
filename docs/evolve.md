@@ -95,8 +95,10 @@ match its name.
   is refused, since the evaluator runs from there;
 - `files/<sha256>.txt`, every file seen;
 - `candidates.jsonl`, a row per file evaluated: `id`, `at`, `kind` (`seed`, `idea`, `try` or `submit`), `family`,
-  `parent`, `sha`, `chars`, `valid`, `score`, `features`, `feedback`, `cell`, `same`, `discoveries` and `call`, with
-  the model's `name` and `idea` on the first row of a family;
+  `parent`, `sha`, `chars`, `valid`, `score`, `features`, `feedback`, `cell`, `same`, `discoveries`, `call` and
+  `step`, the number of the step that brought the file, shared by the tries and the submit of one step and by the
+  first files of one ideation, null for the seed; on a try or a submit `others`, the ids of the other files its
+  request showed beside the parent; and the model's `name` and `idea` on the first row of a family;
 - `usage.jsonl`, two rows per request: `n`, `at`, `kind` (`ideate` or `iterate`) and `family` with `sent: true`
   before it is sent, and the same with `ms`, the input, cached, written, output and reasoning tokens, `error` with a
   code when it failed and `tries: 2` when it was sent twice, when it ends. A request with only its first row was
@@ -105,8 +107,11 @@ match its name.
 
 A family is named by a number, `f1`, `f2` and so on, or `seed`, in the usage rows and on stderr; its name, the
 model's words, is only in the archive and the requests. A second start goes on from what is kept: the request
-numbers go on after the highest kept, the ids continue, and a line cut by a crash is skipped. The model's `notes`
-are not kept.
+numbers and the steps go on after the highest kept, the ids continue, and a line cut by a crash is skipped. The
+counts the loop chooses by are taken from the kept steps, in the order they began, as the loop would have made them:
+the steps since the last ideation or gain, so that a run stopped and started again still turns to ideation after
+`stale` steps with no gain, and the turns of the families and of the cells. A step that kept no file is not counted,
+and rows kept before steps were numbered give no counts. The model's `notes` are not kept.
 
 ## The map
 
@@ -125,8 +130,9 @@ script, so it opens offline in any browser, in light or dark. It shows:
   better at the top, with a line from its parent; the families with no valid file share the last lane;
 - the cells and their elites, as a grid for one or two features and as a table past that;
 - the families with their requests and tokens, and the discoveries;
-- every file with its feedback and its change against its parent, and the whole text of a file with no parent, of
-  each family's best and of each elite.
+- every file with its step, its feedback, the files shown beside its parent and its change against its parent, how
+  many steps were shown the file itself, and the whole text of a file with no parent, of each family's best and of
+  each elite.
 
 A mark opens its file. A line the run is still writing is left out, and so is the text of a file of `files/` that a
 kill cut short. The page holds the archive's text, the model's files and the evaluator's feedback, so share it as you

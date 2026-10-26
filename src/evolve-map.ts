@@ -122,6 +122,10 @@ export function evolveMap(run: EvolveRun): string {
   for (const c of valid) if (c.cell !== null && (!elites.has(c.cell) || c.score! < elites.get(c.cell)!.score!)) elites.set(c.cell, c);
   const eliteIds = new Set([...elites.values()].map(c => c.id)), kept = new Set([...[...bests.values()].filter(c => c !== null).map(c => c!.id), ...eliteIds]);
   const best = lowest(valid), sum = (field: 'input' | 'cached' | 'output' | 'reasoning') => ends.reduce((total, row) => total + (row[field] ?? 0), 0);
+  // The tries and the submit of one step showed the same files, so a file shown is counted once a step.
+  const stepOf = (c: Candidate) => Number.isSafeInteger(c.step) ? c.step! : null, othersOf = (c: Candidate) => Array.isArray(c.others) ? c.others.filter(id => Number.isSafeInteger(id)) : [];
+  const shownIn = new Map<number, Set<string>>();
+  for (const c of candidates) for (const id of othersOf(c)) shownIn.set(id, (shownIn.get(id) ?? new Set<string>()).add(stepOf(c) === null ? `#${c.id}` : `${stepOf(c)}`));
 
   // Every lane has the one score scale, so that lanes compare at a glance: lower and so better at the top, in tens
   // when the scores span a hundredfold.
@@ -185,7 +189,8 @@ export function evolveMap(run: EvolveRun): string {
       const [x, yy] = at.get(c.id)!, from = c.parent === null ? undefined : at.get(c.parent);
       if (from) edges.push(`<path class="edge" d="M${from[0]} ${from[1]}L${x} ${yy}"/>`);
       const shape = (r: number, kind: string) => c.kind === 'seed' || c.kind === 'idea' ? `<rect class="${kind}" x="${x - r}" y="${yy - r}" width="${2 * r}" height="${2 * r}" rx="1"/>` : `<circle class="${kind}" cx="${x}" cy="${yy}" r="${r}"/>`;
-      const said = `#${c.id}, ${KIND[c.kind] ?? c.kind}, ${c.family}${c.parent === null ? '' : ` from #${c.parent}`}, request ${c.call ?? 0}\n${c.valid ? `score ${fmt(c.score!)}, cell ${c.cell}` : 'not valid'}${c.same === null ? '' : `\nthe same file as #${c.same}`}`;
+      const said = `#${c.id}, ${KIND[c.kind] ?? c.kind}, ${c.family}${c.parent === null ? '' : ` from #${c.parent}`}, request ${c.call ?? 0}${stepOf(c) === null ? '' : `, step ${stepOf(c)}`}\n${c.valid ? `score ${fmt(c.score!)}, cell ${c.cell}` : 'not valid'}${c.same === null ? '' : `\nthe same file as #${c.same}`}`
+        + `${othersOf(c).length ? `\nshown beside its parent: ${othersOf(c).map(id => `#${id}`).join(', ')}` : ''}`;
       marks.push(`<a href="#c${c.id}"><title>${esc(said)}</title>${shape(6.5, 'ring')}${shape(4.5, `${c.valid ? 'dot' : 'gone'}${c.kind === 'try' ? ' hollow' : ''}`)}<circle class="hit" cx="${x}" cy="${yy}" r="12"/></a>`);
       if (top && c.id === top.id) labels.push(`<text class="value" x="${x + 9}" y="${yy + 4}">${fmt(c.score!)}</text>`);
     }
@@ -264,9 +269,12 @@ export function evolveMap(run: EvolveRun): string {
     }
     const all = text !== null && (!change || kept.has(c.id)) ? `<details${change ? '' : ' open'}><summary>The whole file</summary><pre>${esc(text)}</pre></details>` : '';
     const words = c.name !== undefined ? `<p><b>${esc(c.name)}</b>${c.idea ? `: ${esc(c.idea)}` : ''}</p>` : '';
-    const roles = [bests.get(c.family)?.id === c.id ? 'family best' : '', eliteIds.has(c.id) ? 'elite' : ''].filter(Boolean).join(', ');
+    const beside = othersOf(c).map(id => { const other = byId.get(id); return `<a href="#c${id}">#${id}</a>${other ? ` (${esc(other.family)}, ${other.valid ? fmt(other.score!) : 'not valid'})` : ''}`; });
+    const shown = shownIn.get(c.id)?.size ?? 0;
+    const roles = [bests.get(c.family)?.id === c.id ? 'family best' : '', eliteIds.has(c.id) ? 'elite' : '', shown ? `shown in ${whole(shown)} ${shown === 1 ? 'step' : 'steps'}` : ''].filter(Boolean).join(', ');
     return `<details id="c${c.id}"><summary>#${c.id} ${esc(KIND[c.kind] ?? c.kind)}, ${esc(c.family)}${parent ? ` from <a href="#c${parent.id}">#${parent.id}</a>` : ''}: ${c.valid ? `score ${fmt(c.score!)}, cell ${esc(String(c.cell))}` : 'not valid'}`
-      + `<span class="muted">, request ${c.call ?? 0}, ${whole(c.chars)} characters${c.same === null ? '' : `, the same file as #${c.same}`}${roles ? `, ${roles}` : ''}</span></summary>${words}`
+      + `<span class="muted">, request ${c.call ?? 0}${stepOf(c) === null ? '' : `, step ${stepOf(c)}`}, ${whole(c.chars)} characters${c.same === null ? '' : `, the same file as #${c.same}`}${roles ? `, ${roles}` : ''}</span></summary>${words}`
+      + `${beside.length ? `<p class="muted">Shown beside its parent: ${beside.join(', ')}</p>` : ''}`
       + `${c.feedback ? `<p class="muted">Feedback</p><pre>${esc(c.feedback)}</pre>` : ''}${c.discoveries?.length ? `<ul>${c.discoveries.map(line => `<li>${esc(line)}</li>`).join('')}</ul>` : ''}`
       + `${text === null ? `<p class="muted">files/${esc(c.sha)}.txt is missing or was cut short by a kill.</p>` : ''}${change}${all}</details>`;
   });
