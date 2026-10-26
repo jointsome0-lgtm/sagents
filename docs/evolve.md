@@ -105,3 +105,27 @@ A family is named by a number, `f1`, `f2` and so on, or `seed`, in the usage row
 model's words, is only in the archive and the requests. A second start goes on from what is kept: the request
 numbers go on after the highest kept, the ids continue, and a line cut by a crash is skipped. The model's `notes`
 are not kept.
+
+## The map
+
+```sh
+sagents evolve-map <dir> > map.html
+```
+
+`evolve-map` draws a run as one HTML page on stdout, to see the path a search took, after it or while it runs. It
+only reads the directory: it takes no lock, writes nothing and sends no request. The page loads nothing and runs no
+script, so it opens offline in any browser, in light or dark. It shows:
+
+- the requests in order, with the ideations, the failures, the answers that gave nothing to use and the requests
+  with no end kept;
+- the best valid score so far;
+- a lane for every family with a valid file: each file at the request that brought it and its score, lower and
+  better at the top, with a line from its parent; the families with no valid file share the last lane;
+- the cells and their elites, as a grid for one or two features and as a table past that;
+- the families with their requests and tokens, and the discoveries;
+- every file with its feedback and its change against its parent, and the whole text of a file with no parent, of
+  each family's best and of each elite.
+
+A mark opens its file. A line the run is still writing is left out, and so is the text of a file of `files/` that a
+kill cut short. The page holds the archive's text, the model's files and the evaluator's feedback, so share it as you
+would share the directory.

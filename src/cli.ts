@@ -30,6 +30,9 @@ sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>
                                a model improves one text file against the task's evaluator, keeping in the directory
                                an archive of the best valid file of every cell; a second start goes on with the same task;
                                a line for every file evaluated on stderr, and the summary as one JSON line on stdout
+sagents evolve-map <dir>       the map of an evolve run as one HTML page on stdout, which loads nothing and runs no script:
+                               the files by request and score with their families and parents, the cells and their elites,
+                               the discoveries, and every file with its change against its parent; the directory is only read
 sagents numbers <dir>... [--json] [--prices <file>]
                                the story's time, actions and requests counted from kept files, with no model
                                --prices adds dollars from the file's prices per million tokens for each model
@@ -288,6 +291,21 @@ else if (command === 'numbers') {
     console.error(`failed: ${error instanceof EvolveError ? error.message : 'unexpected'}`);
     process.exitCode = 1;
   } finally { close(); }
+} else if (command === 'evolve-map') {
+  try {
+    const given = argumentsOf({}, 1);
+    if (!given || given.positionals.length !== 1) {
+      console.error(USAGE);
+      process.exitCode = 1;
+    } else {
+      const { evolveMap, readEvolveRun } = await import('./evolve-map.ts');
+      process.stdout.write(evolveMap(readEvolveRun(given.positionals[0])));
+    }
+  } catch (error) {
+    const { EvolveError } = await import('./evolve.ts');
+    console.error(`failed: ${error instanceof EvolveError ? error.message : 'unexpected'}`);
+    process.exitCode = 1;
+  }
 } else if (command === 'live') {
   try {
     const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, 'world-model': { type: 'string' }, minutes: { type: 'string' }, calls: { type: 'string' }, tokens: { type: 'string' },

@@ -159,13 +159,16 @@ quotes are compared and findings taken back, the limits and the report.
 
 ```sh
 sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>]
+sagents evolve-map <dir> > map.html
 ```
 
 `evolve` lets a model improve one text file against an evaluator command that the task file names, in fresh
 requests, and keeps every file it evaluated with an archive of the best valid file of each cell of the evaluator's
-numbers. Nothing in it knows what the file is: a program, a world file or any other text.
+numbers. Nothing in it knows what the file is: a program, a world file or any other text. `evolve-map` draws a run,
+its families, its cells and every file against its parent, as one page that loads nothing.
 
-- [An evolutionary search](docs/evolve.md): What is in the task file, what does a step send, and what is kept?
+- [An evolutionary search](docs/evolve.md): What is in the task file, what does a step send, what is kept, and what
+  does the map show?
 
 ### Numbers of kept runs
 

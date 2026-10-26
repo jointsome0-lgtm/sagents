@@ -60,7 +60,7 @@ test('evolve sends no request past --calls, none after budget_exceeded or a stop
   assert.equal(wasted.status, 'failed');
 });
 
-test('evolve keeps a run that only grows and goes on from it, refuses a second writer, and keeps no answer text in its usage rows', () => {
+test('evolve keeps a run that only grows and goes on from it, refuses a second writer, keeps no answer text in its usage rows, and maps it without writing to it or loading anything', () => {
   const root = mkdtempSync(join(tmpdir(), 'sagents-evolve-')), dir = join(root, 'run'), home = mkdtempSync(join(tmpdir(), 'sagents-evolve-home-'));
   writeFileSync(join(root, 'check.js'), `const text = require('fs').readFileSync(process.argv[2], 'utf8');
 console.log('evaluating');
@@ -69,10 +69,11 @@ console.log(JSON.stringify(text.startsWith('ok') ? { valid: true, score: text.le
   writeFileSync(join(root, 'seed.txt'), seed);
   const taskText = JSON.stringify({ spec: SPEC, file: 'seed.txt', evaluate: ['node', 'check.js', '{file}'], cells: { len: [4, 8] } });
   writeFileSync(join(root, 'task.json'), taskText);
-  // The stand-in server answers every request with a new file, and with words that must stay out of the usage rows and the output.
+  // The stand-in server answers every request with a new file, with words that must stay out of the usage rows and the
+  // output, and with markup that the map must show as text.
   const preload = `data:text/javascript,${encodeURIComponent(`let n = 0; globalThis.fetch = async () => {
     n += 1;
-    const content = JSON.stringify({ notes: 'NOTE-OF-THE-STAND-IN', discoveries: ['FOUND-BY-THE-STAND-IN'], tool: 'submit', file: 'ok' + 'x'.repeat(n % 7) + 'ANSWER-TEXT' + process.pid });
+    const content = JSON.stringify({ notes: 'NOTE-OF-THE-STAND-IN', discoveries: ['FOUND-BY-THE-STAND-IN'], tool: 'submit', file: 'ok' + 'x'.repeat(n % 7) + 'ANSWER-TEXT<img src="https://leak.invalid/">' + process.pid });
     return new Response(JSON.stringify({ choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content } }], usage: { prompt_tokens: 100, completion_tokens: 10 } }), { status: 200 });
   };`)}`;
   const start = (calls: number, file = join(root, 'task.json')) => spawnSync(process.execPath, ['--import', preload, join(import.meta.dirname, 'cli.ts'), 'evolve', dir, '--task', file, '--model', 'api:stand-in', '--calls', String(calls)],
@@ -102,10 +103,17 @@ console.log(JSON.stringify(text.startsWith('ok') ? { valid: true, score: text.le
   assert.equal(new Set(rows(two['usage.jsonl']).map(row => row.n)).size, 5);
   assert.equal(new Set(ids).size, ids.length);
 
-  // Another task in the same directory, or a directory that another run holds, starts nothing.
+  // Another task in the same directory, or a directory that another run holds, starts nothing. The map reads a held
+  // directory all the same, and its page loads nothing and runs nothing, whatever the model wrote.
   writeFileSync(join(root, 'other.json'), taskText.replace('short', 'brief'));
   assert.match(start(1, join(root, 'other.json')).stderr, /another task file/);
   const held = keepEvolve(dir, taskText, root);
-  try { assert.match(start(1).stderr, /Another run holds this directory/); } finally { held.close(); }
+  try {
+    assert.match(start(1).stderr, /Another run holds this directory/);
+    const map = spawnSync(process.execPath, [join(import.meta.dirname, 'cli.ts'), 'evolve-map', dir], { encoding: 'utf8', timeout: 60_000, env: { PATH: process.env.PATH, HOME: home } });
+    assert.equal(map.status, 0, map.stderr);
+    assert.match(map.stdout, /ANSWER-TEXT&#60;img src=&#34;https:/);
+    assert.doesNotMatch(map.stdout, /<(?:script|img|iframe|object|embed|link)\b|\b(?:src|href)\s*=\s*["'](?!#)|url\(|@import/i);
+  } finally { held.close(); }
   assert.deepEqual(kept(), two);
 });

@@ -70,6 +70,7 @@ line:
 | `src/numbers.ts` | Counts the story's time, actions and requests from kept event and usage files, with no model and no writes; it uses the lab's file reader and never opens SQLite. |
 | `src/evolve.ts` | `evolve`: the search loop, the archive and its requests, with the store and the evaluator given, and no disk access. |
 | `src/evolve-kept.ts` | `evolve`: the run directory, which only grows, with its lock, and the evaluator as a child process with no shell. |
+| `src/evolve-map.ts` | `evolve-map`: reads a run directory, writing nothing, and draws it as one HTML page that loads nothing and runs no script. |
 | `src/kept.ts` | Beside the live mode, writes the directory of `live --run`: it only makes files where there are none and adds lines to them. |
 | `lab/data.ts` | The lab, `sagents lab`: reads the experiments under the directories it is given and writes nothing. |
 | `lab/server.ts` | The lab: serves the page at `/` and `/view/<id>` on `127.0.0.1`, usually port 4747. |
