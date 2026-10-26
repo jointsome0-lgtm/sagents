@@ -43,14 +43,13 @@ export type EvolveReport = { status: 'done' | 'stopped' | 'failed'; reason: stri
 // The plan connection ends an answer past 100,000 characters, and a file comes inside JSON: what one answer may
 // carry is kept well under that.
 const ANSWER = 80_000;
-// `stale` goes up to STALE, past the steps of any run, so that a task can turn ideation off once a family is valid.
-const FEEDBACK = 4000, DISCOVERY = 300, DISCOVERIES = 20, FAMILIES = 5, NAME = 40, IDEA = 300, EXPLORE = 4, UNUSABLE = 5, FAILURES = 3, IDEAS = 3, STALE = 1_000_000;
+const FEEDBACK = 4000, DISCOVERY = 300, DISCOVERIES = 20, FAMILIES = 5, NAME = 40, IDEA = 300, EXPLORE = 4, UNUSABLE = 5, FAILURES = 3, IDEAS = 3;
 export const clip = (text: string, chars: number) => text.length <= chars ? text : `${text.slice(0, chars).replace(/[\uD800-\uDBFF]$/, '')}…`;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const whole = (value: unknown, least: number) => Number.isSafeInteger(value) && (value as number) >= least;
 
 const TASK = 'The task file cannot be used: it needs `spec`, a text; `evaluate`, a list of strings that begins with a program and holds the element "{file}" once; '
-  + `and \`cells\`, an object of 1 to 4 features, each a list of 1 to 20 ascending finite numbers. \`file\` and \`rules\` are texts, \`timeout\` (seconds, up to 3600), \`size\` (characters, up to ${ANSWER}) and \`stale\` (steps, up to ${STALE}) are whole numbers above zero.`;
+  + `and \`cells\`, an object of 1 to 4 features, each a list of 1 to 20 ascending finite numbers. \`file\` and \`rules\` are texts, \`timeout\` (seconds, up to 3600), \`size\` (characters, up to ${ANSWER}) and \`stale\` (steps, below 2^53) are whole numbers above zero.`;
 export function readTask(value: unknown): Task {
   if (!isObject(value) || typeof value.spec !== 'string' || !value.spec.trim() || !Array.isArray(value.evaluate) || !value.evaluate.length
     || !value.evaluate.every(part => typeof part === 'string') || !value.evaluate[0] || value.evaluate[0] === '{file}' || value.evaluate.filter(part => part === '{file}').length !== 1
@@ -60,7 +59,7 @@ export function readTask(value: unknown): Task {
     || !edges.every((edge, i) => finite(edge) && (i === 0 || edge > edges[i - 1])))) throw new EvolveError(TASK);
   const { file = null, rules = '', timeout = 60, size = 40_000, stale = 10 } = value;
   if (!(file === null || (typeof file === 'string' && file)) || typeof rules !== 'string' || !whole(timeout, 1) || (timeout as number) > 3600
-    || !whole(size, 1) || (size as number) > ANSWER || !whole(stale, 1) || (stale as number) > STALE) throw new EvolveError(TASK);
+    || !whole(size, 1) || (size as number) > ANSWER || !whole(stale, 1)) throw new EvolveError(TASK);
   return { spec: value.spec, file: file as string | null, evaluate: value.evaluate as string[], timeout: timeout as number, cells: value.cells as Task['cells'], rules, size: size as number, stale: stale as number };
 }
 
@@ -254,7 +253,8 @@ export async function runEvolve({ task, store, respond, models, evaluate, calls:
     mine.requests += 1;
     const began = performance.now();
     try {
-      const answer = await respond({ model, system, messages, schema, cache: keys.get(model) }, { signal: requests, timeoutMs });
+      // A used up limit ends the run as the connection reads it, so that no step under way beside it sends meanwhile.
+      const answer = await respond({ model, system, messages, schema, cache: keys.get(model) }, { signal: requests, timeoutMs, onSpent: error => end(error.code, error) });
       failing = 0;
       Object.assign(row, { input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null, written: answer.usage?.writtenInputTokens ?? null,
         output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });

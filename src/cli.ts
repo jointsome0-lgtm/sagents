@@ -280,7 +280,7 @@ else if (command === 'numbers') {
           throw new EvolveError('The task\'s `file` cannot be read; it is a path from the task file\'s directory.');
         }
       }
-      if (kept.unreadable) console.error(`${kept.unreadable} cut or unreadable lines in the kept files were skipped`);
+      if (kept.unreadable) console.error(`skipped ${kept.unreadable} line${kept.unreadable === 1 ? '' : 's'} of the kept files, cut, unreadable or not of their kinds`);
       const stop = new AbortController();
       for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
       // Each name has its connection, as each character of `live --cast` has.

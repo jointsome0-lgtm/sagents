@@ -48,6 +48,20 @@ test('evolve sends no request past --calls, none after budget_exceeded or a stop
     return file();
   }, { parallel: 3 });
   assert.deepEqual([sent, cut, spent.status, spent.reason, spent.httpStatus], [7, 1, 'failed', 'budget_exceeded', 429]);
+  // A used up limit that the connection tells as it reads it ends the run then, before its own request is let go, so
+  // that the steps under way beside it send nothing more meanwhile.
+  let heardAt = 0;
+  const heard = await run(async (_request, controls) => {
+    sent += 1;
+    if (sent !== 2) { await new Promise(resolve => setTimeout(resolve, 1)); return file(); }
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const error = new ModelError('budget_exceeded');
+    controls?.onSpent?.(error);
+    heardAt = sent;
+    await new Promise(resolve => setTimeout(resolve, 50));
+    throw error;
+  }, { calls: 500, parallel: 3 });
+  assert.deepEqual([sent, heard.reason], [heardAt, 'budget_exceeded']);
 
   // A stop sends nothing more.
   const stop = new AbortController();

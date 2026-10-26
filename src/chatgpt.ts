@@ -63,8 +63,10 @@ export const CACHE = /^[A-Za-z0-9_-]{1,64}$/;
 export type Usage = { inputTokens: number | null; cachedInputTokens: number | null; writtenInputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null };
 export type Result = { text: string; usage: Usage | null; endpoint?: string; tries?: 2 };
 export const ENDPOINT = /^[A-Za-z0-9 ./_-]{1,40}$/, OTHER_ENDPOINT = 'other';
-// onText may receive pieces before a later failure; only the return value is a complete answer.
-export type Controls = { signal?: AbortSignal; onText?: (delta: string) => unknown; timeoutMs?: number };
+// onText may receive pieces before a later failure; only the return value is a complete answer. onSpent hears of a
+// used up limit or balance as it is read, before the call ends, so that a caller with other calls under way can stop
+// them before they send anything more.
+export type Controls = { signal?: AbortSignal; onText?: (delta: string) => unknown; onSpent?: (error: ModelError) => void; timeoutMs?: number };
 
 // The caller's limit must also stop a text callback that never settles.
 export async function untilStopped<T>(work: () => T | PromiseLike<T>, signal: AbortSignal, until = Infinity): Promise<T> {
@@ -320,17 +322,20 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
   }
 
   return {
-    async respond(request: Request, { onText = async () => {}, signal, timeoutMs = 180_000 }: Controls = {}): Promise<Result> {
+    async respond(request: Request, { onText = async () => {}, onSpent = () => {}, signal, timeoutMs = 180_000 }: Controls = {}): Promise<Result> {
       const sent = responsesBody(request), body = JSON.stringify(sent);
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
       const until = performance.now() + timeoutMs;
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
-      // A used up limit that the service has told ends the request as it is read and is kept, so that the caller hears
-      // of it before the stream is let go, which may take until the deadline, and a stop or a timeout that comes
-      // meanwhile cannot hide it; a stop given for some reason of the caller is not taken for one.
+      // A used up limit that the service has told is kept, ends the request and goes to onSpent as it is read, so that
+      // the caller hears of it before the stream is let go, which may take until the deadline, and a stop or a timeout
+      // that comes meanwhile cannot hide it; a stop given for some reason of the caller is not taken for one.
       let spent: ModelError | undefined;
       const quota = new AbortController();
-      const told = (error: ModelError) => { if (error.code === 'budget_exceeded') { spent = error; quota.abort(error); } return error; };
+      const told = (error: ModelError) => {
+        if (error.code === 'budget_exceeded' && !spent) { spent = error; quota.abort(error); onSpent(error); }
+        return error;
+      };
       const current = AbortSignal.any([...(signal ? [signal] : []), timer, quota.signal]);
       if (signal?.aborted) throw new ModelError('cancelled');
       // A failure to save rotated tokens must not be hidden by a caller timeout.

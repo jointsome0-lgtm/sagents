@@ -34,6 +34,9 @@ and `ask` and `live` take nothing else. A program that calls `src/chatgpt.ts` it
 the text as the stream brings it, before the answer is known to be whole or to come from the model asked for, so a
 call that ends in a failure, `wrong_model` included, may have handed over a part by then. The same holds for
 `src/compatible.ts` with `SAGENTS_API_STREAM`; without it an `api:` server's text is handed over once, whole and checked.
+Given `onSpent`, either connection calls it with the `budget_exceeded` failure as soon as it reads that the plan's limit
+or the key's balance is used up, before the call itself ends, so that a program with other calls under way can stop
+them before they send anything more; `evolve` does so.
 `createChatgpt` in `src/chatgpt.ts` sends once more after two seconds only when the connection rejects before a response,
 within the same time limit and unless cancelled or timed out; a failure after any response is never sent again.
 

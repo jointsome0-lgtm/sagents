@@ -67,15 +67,16 @@ export function keepEvolve(dir: string, taskText: string, base: string) {
     }
     if (!isObject(run) || typeof run.cache !== 'string' || !run.cache || typeof run.base !== 'string') throw new EvolveError('The run directory\'s run.json cannot be read.');
     if (run.base !== base) throw new EvolveError('The run directory was begun with a task file in another directory, from which its evaluator runs: a kept run goes on only from there.');
+    // A request is numbered when it is sent, so the numbers go on after the highest kept, whether or not its end was
+    // kept. A request row whose fields are not of their kinds, as one edited by hand, is skipped as the map skips it,
+    // so that it moves neither the numbers nor the steps nor the models' turns, and is counted with the cut lines.
     const found = rowsOf(candidates), used = rowsOf(usage);
-    // A request is numbered when it is sent, so the numbers go on after the highest kept, whether or not its end was kept.
-    const calls = used.rows.reduce<number>((most, row) => isObject(row) && Number.isSafeInteger(row.n) ? Math.max(most, row.n as number) : most, 0);
+    const archive = found.rows.filter(row => isObject(row) && Number.isSafeInteger(row.id)) as Candidate[], requests = used.rows.filter(isUsage);
+    const calls = requests.reduce((most, row) => Math.max(most, row.n), 0);
     const path = (sha: string) => join(files, `${sha}.txt`);
     const store: Store = {
-      candidates: found.rows.filter(row => isObject(row) && Number.isSafeInteger(row.id)) as Candidate[], calls,
-      // A request row whose fields are not of their kinds, as one edited by hand, is left out as the map leaves it out,
-      // so that it cannot move the steps or the models' turns.
-      sent: used.rows.filter(row => isUsage(row) && 'sent' in row) as Sent[],
+      candidates: archive, calls,
+      sent: requests.filter((row): row is Sent => 'sent' in row),
       put: (sha, text) => {
         let held: Buffer | null = null;
         try { held = readFileSync(path(sha)); } catch (error) { if (!failed(error, 'ENOENT')) throw error; }
@@ -86,7 +87,8 @@ export function keepEvolve(dir: string, taskText: string, base: string) {
       add: candidate => appendFileSync(candidates, `${JSON.stringify(candidate)}\n`),
       usage: row => appendFileSync(usage, `${JSON.stringify(row)}\n`),
     };
-    return { store, cache: run.cache, unreadable: found.unreadable + used.unreadable, path, close: () => lock.close() };
+    const skipped = found.rows.length - archive.length + used.rows.length - requests.length;
+    return { store, cache: run.cache, unreadable: found.unreadable + used.unreadable + skipped, path, close: () => lock.close() };
   } catch (error) {
     lock.close();
     throw cannot(error);

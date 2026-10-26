@@ -271,7 +271,9 @@ export function evolveMap(run: EvolveRun): string {
   const cellTable = `<table><thead><tr><th>Cell</th><th>Bins</th><th>Elite</th><th>Family</th><th class="n">Score</th></tr></thead><tbody>${cellRows.join('')}</tbody></table>`;
 
   const used = (family: string | null) => ends.filter(row => row.family === family);
-  const tokens = (rows: UsageRow[], field: 'input' | 'cached' | 'output' | 'reasoning') => whole(rows.reduce((t, row) => t + (row[field] ?? 0), 0));
+  const tokens = (rows: UsageRow[], field: 'input' | 'cached' | 'written' | 'output' | 'reasoning') => whole(rows.reduce((t, row) => t + (row[field] ?? 0), 0));
+  // A count that no row has, as the plan's written tokens, is left blank rather than told as none.
+  const reported = (rows: UsageRow[], field: 'written' | 'reasoning') => rows.some(row => row[field] !== null) ? tokens(rows, field) : '';
   const familyRows = families.map(family => {
     const first = firstOf(family), mine = candidates.filter(c => c.family === family), top = bests.get(family), rows = used(family);
     return `<tr><td>${esc(family)}</td><td>${esc(first?.name ?? '')}</td><td>${esc(first?.idea ?? '')}</td><td class="n">${begun(family)}</td><td class="n">${mine.length}</td><td class="n">${mine.filter(c => c.valid).length}</td>`
@@ -298,7 +300,8 @@ export function evolveMap(run: EvolveRun): string {
     const input = done.reduce((t, row) => t + (row.input ?? 0), 0), cached = done.reduce((t, row) => t + (row.cached ?? 0), 0);
     return `<tr><td>${esc(model)}</td><td class="n">${whole(new Set(run.usage.filter(row => row.model === model).map(row => row.n)).size)}</td><td class="n">${whole(failed)}</td><td class="n">${whole(nothing)}</td>`
       + `<td class="n">${whole(mine.length)}</td><td class="n">${whole(mine.filter(c => c.valid).length)}</td><td class="n">${whole(mine.filter(c => gains.has(c.id)).length)}</td>`
-      + `<td class="n">${median === null ? '' : `${fmt(median / 1000)} s`}</td><td class="n">${whole(input)}</td><td class="n">${input ? `${Math.round(cached / input * 100)}%` : ''}</td><td class="n">${tokens(done, 'output')}</td></tr>`;
+      + `<td class="n">${median === null ? '' : `${fmt(median / 1000)} s`}</td><td class="n">${whole(input)}</td><td class="n">${input ? `${Math.round(cached / input * 100)}%` : ''}</td><td class="n">${reported(done, 'written')}</td>`
+      + `<td class="n">${tokens(done, 'output')}</td><td class="n">${reported(done, 'reasoning')}</td></tr>`;
   });
   const unnamed = run.usage.some(row => row.model === undefined);
   const errors = Object.entries(ends.reduce<{ [code: string]: number }>((count, row) => { if (row.error) count[row.error] = (count[row.error] ?? 0) + 1; return count; }, {}));
@@ -340,7 +343,7 @@ ${task ? `<details><summary>The task</summary><pre>${esc(task.spec)}</pre>${task
 <div class="legend">${legend}</div>${candidates.length || requests.length ? search : '<p>No request has been sent yet.</p>'}
 <h2 id="cells">The cells</h2>${elites.size ? `<p class="muted">The elite of every cell, the lowest score among its valid files.</p>${grid ? `<div class="legend"><span>higher score</span>${ramp}<span>lower, better</span></div>${grid}<details><summary>The cells as a table</summary>${cellTable}</details>` : cellTable}` : '<p>No cell has a valid file yet.</p>'}
 <h2 id="families">The families</h2><table><thead><tr><th>Family</th><th>Name</th><th>Idea</th><th class="n">From request</th><th class="n">Files</th><th class="n">Valid</th><th class="n">Best</th><th class="n">Cells</th><th class="n">Requests</th><th class="n">Tokens in</th><th class="n">Tokens out</th></tr></thead><tbody>${familyRows.join('')}</tbody></table>
-${modelRows.length ? `<h2 id="models">The models</h2><table><thead><tr><th>Model</th><th class="n">Requests</th><th class="n">Failed</th><th class="n">Nothing to use</th><th class="n">Files</th><th class="n">Valid</th><th class="n">Gains</th><th class="n">Median time</th><th class="n">Tokens in</th><th class="n">Cached</th><th class="n">Tokens out</th></tr></thead><tbody>${modelRows.join('')}</tbody></table>${unnamed ? '<p class="muted">Requests kept before the rows named their model are not in this table.</p>' : ''}` : ''}
+${modelRows.length ? `<h2 id="models">The models</h2><table><thead><tr><th>Model</th><th class="n">Requests</th><th class="n">Failed</th><th class="n">Nothing to use</th><th class="n">Files</th><th class="n">Valid</th><th class="n">Gains</th><th class="n">Median time</th><th class="n">Tokens in</th><th class="n">Cached</th><th class="n">Written</th><th class="n">Tokens out</th><th class="n">Reasoning</th></tr></thead><tbody>${modelRows.join('')}</tbody></table>${unnamed ? '<p class="muted">Requests kept before the rows named their model are not in this table.</p>' : ''}` : ''}
 <h2 id="discoveries">The discoveries</h2>${found.length ? `<ol class="found">${found.join('')}</ol>` : '<p>None yet.</p>'}
 <h2 id="files">The files</h2>${files.join('\n')}
 </body></html>

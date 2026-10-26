@@ -193,18 +193,21 @@ type Options = { fetch?: Fetch; env?: Env };
 
 export function createCompatible({ fetch: fetcher = globalThis.fetch, env = process.env }: Options = {}) {
   return {
-    async respond(request: Request, { onText = async () => {}, signal, timeoutMs = 180_000 }: Controls = {}): Promise<Result> {
+    async respond(request: Request, { onText = async () => {}, onSpent = () => {}, signal, timeoutMs = 180_000 }: Controls = {}): Promise<Result> {
       const { url, key, stream, again } = settingsOf(env);
       const body = JSON.stringify(completionsBody(request, env));
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
       const until = performance.now() + timeoutMs;
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
-      // A used up balance that the server has told ends the request as it is read and is kept, so that the caller hears
-      // of it before the answer is let go, which may take until the deadline, and a stop or a timeout that comes
-      // meanwhile cannot hide it; a stop given for some reason of the caller is not taken for one.
+      // A used up balance that the server has told is kept, ends the request and goes to onSpent as it is read, so that
+      // the caller hears of it before the answer is let go, which may take until the deadline, and a stop or a timeout
+      // that comes meanwhile cannot hide it; a stop given for some reason of the caller is not taken for one.
       let spent: ModelError | undefined;
       const quota = new AbortController();
-      const told = (error: ModelError) => { if (error.code === 'budget_exceeded') { spent = error; quota.abort(error); } return error; };
+      const told = (error: ModelError) => {
+        if (error.code === 'budget_exceeded' && !spent) { spent = error; quota.abort(error); onSpent(error); }
+        return error;
+      };
       const current = AbortSignal.any([...(signal ? [signal] : []), timer, quota.signal]);
       const stopped = () => signal?.aborted ? new ModelError('cancelled') : timer.aborted || performance.now() >= until ? new ModelError('timeout') : null;
       if (signal?.aborted) throw new ModelError('cancelled');

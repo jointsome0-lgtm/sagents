@@ -54,7 +54,7 @@ the file is a program, let the evaluator run it in a sandbox with no network and
 | `rules` | Optional. More instructions, such as "keep the command-line interface". |
 | `timeout` | Optional. The whole seconds an evaluation may take, from 1 to 3600, 60 by default. Past it the evaluator's process group is killed and the file is not valid. |
 | `size` | Optional. The most characters a file may have, a whole number from 1 to 80,000, 40,000 by default, since the plan connection ends an answer past 100,000 characters and the file comes inside JSON. A longer file is kept and not evaluated. |
-| `stale` | Optional. A whole number from 1 to 1,000,000: after this many steps that kept a file and improved no family's best, ideation runs again; 10 by default. |
+| `stale` | Optional. A whole number from 1, below 2^53: after this many steps that kept a file and improved no family's best, ideation runs again; 10 by default. |
 
 The evaluator prints, as the last line of its output, one JSON object: `valid`, true or false; when valid, `score`, a
 finite number, lower is better, and `features`, a number for every feature of `cells`; and `feedback`, a short text
@@ -93,7 +93,9 @@ stay as they are for the whole run, since nothing compares them between starts.
   `failures` and answers that gave nothing to use in `invalid`. In the summary `budget_exceeded` outranks any other
   end, a failure a stop, and a stop the end of the calls, whatever came first. A call is counted before its request
   is sent. When the calls are spent, requests and evaluations under way finish and are kept; a failure that ends the
-  run cuts the requests under way, whatever ended the run before it, so that none is sent again after it.
+  run cuts the requests under way, whatever ended the run before it, so that none is sent again after it. A used up
+  limit or balance ends the run as the connection reads it, before its own request is let go, so that no step under
+  way beside it sends anything more.
 
 In the summary `calls`, `added`, `invalid`, `failures` and `models` count this start, and `candidates`, `valid`,
 `cells`, `families` and `best` the whole archive, with what earlier starts kept. `models` gives for every name its
@@ -143,9 +145,9 @@ rows of their requests, a step that kept no file among them, so that the familie
 their turns on in order; and the steps with no gain from the kept files in the order they were kept, so that a run
 stopped and started again still turns to ideation after `stale` of them. Requests kept before their rows named a
 step give no turns, and files kept before steps were numbered give no steps with no gain. A request row whose fields
-are not of their kinds, as one edited by hand, is left out, as the map leaves it out, and the next numbers go on only
-from kept numbers that are whole from 1 and stay exact; a start is refused when those are so high that the next ones
-would not be exact. The model's `notes` are not kept.
+are not of their kinds, as one edited by hand, is skipped, as the map skips it, and counted on stderr with the lines
+a crash cut, and the next numbers go on only from kept numbers that are whole from 1 and stay exact; a start is
+refused when those are so high that the next ones would not be exact. The model's `notes` are not kept.
 
 ## The map
 
@@ -165,8 +167,9 @@ script, so it opens offline in any browser, in light or dark. It shows:
 - the cells and their elites, as a grid for one or two features and as a table past that;
 - the families with their requests and tokens, and the discoveries;
 - the models, when the rows name them, counted as the summary counts one start: their requests, failures, answers
-  with nothing to use, files, valid files and gains, the median time of an answer, and their tokens with the share
-  of the input that was cached;
+  with nothing to use, files, valid files and gains, the median time of an answer, their input tokens with the share
+  that was cached and those written to the cache, and their output tokens with those of reasoning, a count that no
+  row has left blank;
 - every file with its step and model, its feedback, the files shown beside its parent and its change against its
   parent, how many steps were shown the file itself, and the whole text of a file with no parent, of each family's
   best and of each elite.
