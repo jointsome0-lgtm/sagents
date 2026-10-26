@@ -13,25 +13,31 @@ export class EvolveError extends Error {}
 export type Task = { spec: string; file: string | null; evaluate: string[]; timeout: number; cells: { [feature: string]: number[] }; rules: string; size: number; stale: number };
 export type Evaluation = { valid: boolean; score: number | null; features: { [feature: string]: number } | null; feedback: string };
 export type Kind = 'seed' | 'idea' | 'try' | 'submit';
+// `name` and `idea` are the model's words for a family, on the row of its first file only.
 export type Candidate = Evaluation & { id: number; at: string; kind: Kind; family: string; parent: number | null; sha: string; chars: number; cell: string | null;
-  same: number | null; discoveries: string[]; call: number | null };
+  same: number | null; discoveries: string[]; call: number | null; name?: string; idea?: string };
+// A request has a row when it is sent and another when it ends; one that a kill cut short has only the first.
+export type Sent = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; sent: true };
 export type UsageRow = { n: number; at: string; kind: 'ideate' | 'iterate'; family: string | null; ms: number; input: number | null; cached: number | null; written: number | null;
-  output: number | null; reasoning: number | null; error?: string };
+  output: number | null; reasoning: number | null; error?: string; tries?: 2 };
 // What a run keeps: `put` must leave the text where `evaluate` finds it by its sha.
 export type Store = { candidates: Candidate[]; calls: number; put: (sha: string, text: string) => void; text: (sha: string) => string;
-  add: (candidate: Candidate) => void; usage: (row: UsageRow) => void };
+  add: (candidate: Candidate) => void; usage: (row: Sent | UsageRow) => void };
 export type Evolve = { task: Task; store: Store; respond: Respond; model: string; evaluate: (sha: string, signal: AbortSignal) => Promise<Evaluation>;
   calls: number; parallel?: number; tries?: number; cache: string; seed?: string; signal?: AbortSignal; onCandidate?: (candidate: Candidate) => void };
 export type EvolveReport = { status: 'done' | 'stopped' | 'failed'; reason: string; httpStatus?: number; providerCode?: string; param?: string; calls: number; invalid: number;
   candidates: number; added: number; valid: number; cells: number; families: number; best: { id: number; family: string; score: number } | null };
 
-const FEEDBACK = 4000, DISCOVERY = 300, DISCOVERIES = 20, FAMILIES = 5, NAME = 40, EXPLORE = 4, UNUSABLE = 5, IDEAS = 3;
+// The plan connection ends an answer past 100,000 characters, and a file comes inside JSON: what one answer may
+// carry is kept well under that.
+const ANSWER = 80_000;
+const FEEDBACK = 4000, DISCOVERY = 300, DISCOVERIES = 20, FAMILIES = 5, NAME = 40, IDEA = 300, EXPLORE = 4, UNUSABLE = 5, IDEAS = 3;
 export const clip = (text: string, chars: number) => text.length <= chars ? text : `${text.slice(0, chars).replace(/[\uD800-\uDBFF]$/, '')}…`;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const whole = (value: unknown, least: number) => Number.isSafeInteger(value) && (value as number) >= least;
 
 const TASK = 'The task file cannot be used: it needs `spec`, a text; `evaluate`, a list of strings that begins with a program and holds the element "{file}" once; '
-  + 'and `cells`, an object of 1 to 4 features, each a list of 1 to 20 ascending finite numbers. `file` and `rules` are texts, `timeout` (seconds, up to 3600), `size` (characters, up to 90,000) and `stale` are whole numbers above zero.';
+  + `and \`cells\`, an object of 1 to 4 features, each a list of 1 to 20 ascending finite numbers. \`file\` and \`rules\` are texts, \`timeout\` (seconds, up to 3600), \`size\` (characters, up to ${ANSWER}) and \`stale\` are whole numbers above zero.`;
 export function readTask(value: unknown): Task {
   if (!isObject(value) || typeof value.spec !== 'string' || !value.spec.trim() || !Array.isArray(value.evaluate) || !value.evaluate.length
     || !value.evaluate.every(part => typeof part === 'string') || !value.evaluate[0] || value.evaluate[0] === '{file}' || value.evaluate.filter(part => part === '{file}').length !== 1
@@ -41,7 +47,7 @@ export function readTask(value: unknown): Task {
     || !edges.every((edge, i) => finite(edge) && (i === 0 || edge > edges[i - 1])))) throw new EvolveError(TASK);
   const { file = null, rules = '', timeout = 60, size = 40_000, stale = 10 } = value;
   if (!(file === null || (typeof file === 'string' && file)) || typeof rules !== 'string' || !whole(timeout, 1) || (timeout as number) > 3600
-    || !whole(size, 1) || (size as number) > 90_000 || !whole(stale, 1)) throw new EvolveError(TASK);
+    || !whole(size, 1) || (size as number) > ANSWER || !whole(stale, 1)) throw new EvolveError(TASK);
   return { spec: value.spec, file: file as string | null, evaluate: value.evaluate as string[], timeout: timeout as number, cells: value.cells as Task['cells'], rules, size: size as number, stale: stale as number };
 }
 
@@ -61,6 +67,8 @@ export function readEvaluation(line: string, task: Task): Evaluation {
 // A value below the first edge is in bin 0 and one at or past the last in the last bin, so no value falls outside.
 export const cellOf = (features: { [feature: string]: number }, task: Task) =>
   Object.entries(task.cells).map(([name, edges]) => edges.filter(edge => features[name] >= edge).length).join(',');
+// As many families as one answer can carry whole files for.
+export const ideasOf = (task: Task) => Math.max(1, Math.min(FAMILIES, Math.floor(ANSWER / task.size)));
 
 function instructionsOf(task: Task): string {
   return [`You improve one text file, a program or another document, against an evaluator. The evaluator runs the file and says whether it is valid, its score, where lower is better, the numbers that place it in an archive, and feedback, such as errors, counterexamples and what the score is made of. The archive keeps the best valid file in every cell of those numbers, so different good files are kept side by side. A family is a line of files that descend from one first idea.
@@ -97,23 +105,34 @@ function readIdeated(text: string): Ideated | null {
 
 const placed = (candidate: Candidate) => `score ${candidate.score}, ${Object.entries(candidate.features ?? {}).map(([name, value]) => `${name} ${value}`).join(', ')}`;
 const verdict = (candidate: Candidate) => `${candidate.valid ? `valid, ${placed(candidate)}` : 'not valid'}${candidate.same === null ? '' : `; the same file as #${candidate.same}`}${candidate.feedback ? `\nFeedback:\n${candidate.feedback}` : ''}`;
+const byScore = (a: Candidate, b: Candidate) => a.score! - b.score!;
+// A failure outranks a stop, and a stop the end of the calls, whatever came first.
+const rank = (reason: string) => reason === 'calls' ? 0 : reason === 'stopped' ? 1 : 2;
 
 export async function runEvolve({ task, store, respond, model, evaluate, calls: most, parallel = 1, tries = 2, cache, seed, signal: outer, onCandidate }: Evolve): Promise<EvolveReport> {
   if (!whole(most, 1) || !whole(parallel, 1) || parallel > 16 || !whole(tries, 0) || tries > 10) throw new EvolveError('The calls and parallel limits must be whole numbers above zero, parallel at most 16, and tries a whole number from 0 to 10.');
-  const all = store.candidates, system = instructionsOf(task), signal = outer ?? new AbortController().signal;
+  const all = store.candidates, system = instructionsOf(task), ideas = ideasOf(task);
   const owned = createHash('sha256').update(JSON.stringify([cache, 'evolve'])).digest('hex').slice(0, 32);
+  // A failure of the connection cuts the requests under way, so that none of them is sent again after it;
+  // evaluations end only with a stop.
+  const halt = new AbortController(), stopped = outer ?? new AbortController().signal;
+  const requests = outer ? AbortSignal.any([outer, halt.signal]) : halt.signal;
   const report: EvolveReport = { status: 'done', reason: 'calls', calls: 0, invalid: 0, candidates: 0, added: 0, valid: 0, cells: 0, families: 0, best: null };
-  let ended: string | null = null, nextId = all.reduce((most, candidate) => Math.max(most, candidate.id), 0) + 1, turns = 0, explored = 0, sinceGain = 0, unusable = 0, emptyIdeas = 0;
+  let ended: string | null = null, nextId = all.reduce((most, candidate) => Math.max(most, candidate.id), 0) + 1;
+  let turns = 0, cursor = 0, explored = 0, sinceGain = 0, unusable = 0, emptyIdeas = 0;
   let ideating: Promise<void> | null = null;
   const end = (reason: string, error?: ModelError) => {
-    if (ended !== null) return;
+    if (ended !== null && rank(reason) <= rank(ended)) return;
     ended = reason;
-    if (error) Object.assign(report, { ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}), ...(error.providerCode ? { providerCode: error.providerCode } : {}), ...(error.param ? { param: error.param } : {}) });
+    if (error) {
+      Object.assign(report, { ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}), ...(error.providerCode ? { providerCode: error.providerCode } : {}), ...(error.param ? { param: error.param } : {}) });
+      halt.abort();
+    }
   };
-  // An end lets requests and evaluations under way finish: they are paid for already.
+  // The end of the calls lets requests and evaluations under way finish: they are paid for already.
   // A call is counted before its request is sent, so neither a crash nor a parallel worker can spend past the limit.
   const take = () => {
-    if (ended !== null || signal.aborted) return null;
+    if (ended !== null || requests.aborted) return null;
     if (report.calls >= most) { end('calls'); return null; }
     report.calls += 1;
     return store.calls + report.calls;
@@ -131,118 +150,141 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
     for (const candidate of all) if (candidate.valid && candidate.cell !== null && (!cells.has(candidate.cell) || candidate.score! < cells.get(candidate.cell)!.score!)) cells.set(candidate.cell, candidate);
     return [...cells.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, candidate]) => candidate);
   };
+  const named = (family: string) => {
+    const first = all.find(candidate => candidate.family === family && candidate.name !== undefined);
+    return first ? `${family}, "${first.name}"` : family;
+  };
   const discoveries = () => all.flatMap(candidate => candidate.discoveries).slice(-DISCOVERIES);
   const told = () => { const found = discoveries(); return found.length ? `Discoveries so far, the latest last:\n${found.map(line => `- ${line}`).join('\n')}` : 'No discoveries yet.'; };
 
-  const record = async (kind: Kind, family: string, parent: number | null, text: string, call: number | null, found: string[]): Promise<Candidate | null> => {
-    const sha = createHash('sha256').update(text).digest('hex'), earlier = all.find(candidate => candidate.sha === sha);
-    let evaluation: Evaluation;
-    if (earlier) evaluation = { valid: earlier.valid, score: earlier.score, features: earlier.features, feedback: earlier.feedback };
-    else {
-      store.put(sha, text);
-      if (text.length > task.size) evaluation = { valid: false, score: null, features: null, feedback: `The file has ${text.length} characters, over the limit of ${task.size}.` };
-      else {
+  // One evaluation per file, even when the same file comes twice at once.
+  const pending = new Map<string, Promise<Evaluation | null>>();
+  const evaluationOf = (sha: string, text: string) => {
+    let work = pending.get(sha);
+    if (!work) {
+      work = (async () => {
+        store.put(sha, text);
+        if (text.length > task.size) return { valid: false, score: null, features: null, feedback: `The file has ${text.length} characters, over the limit of ${task.size}.` };
         await slot();
         // A file whose evaluation a stop cut short is kept, but has no verdict to archive.
-        try { if (signal.aborted) return null; evaluation = await evaluate(sha, signal); } finally { release(); }
-        if (signal.aborted) return null;
-      }
+        try { return stopped.aborted ? null : await evaluate(sha, stopped); } finally { release(); }
+      })();
+      pending.set(sha, work);
+      void work.then(() => pending.delete(sha), () => pending.delete(sha));
     }
-    const gain = evaluation.valid && (() => { const top = best(family); return !top || evaluation.score! < top.score!; })();
+    return work;
+  };
+  const record = async (kind: Kind, family: string, parent: number | null, text: string, call: number | null, found: string[], words: { name: string; idea: string } | null = null) => {
+    const sha = createHash('sha256').update(text).digest('hex'), earlier = all.find(candidate => candidate.sha === sha);
+    const evaluation = earlier ? { valid: earlier.valid, score: earlier.score, features: earlier.features, feedback: earlier.feedback } : await evaluationOf(sha, text);
+    if (!evaluation || stopped.aborted) return null;
+    const top = best(family), gain = evaluation.valid && (!top || evaluation.score! < top.score!);
     const candidate: Candidate = { id: nextId++, at: new Date().toISOString(), kind, family, parent, sha, chars: text.length, ...evaluation,
-      cell: evaluation.valid ? cellOf(evaluation.features!, task) : null, same: earlier?.id ?? null, discoveries: found.slice(0, 3).map(line => clip(line.trim(), DISCOVERY)).filter(Boolean), call };
+      cell: evaluation.valid ? cellOf(evaluation.features!, task) : null, same: (earlier ?? all.find(other => other.sha === sha))?.id ?? null,
+      discoveries: found.slice(0, 3).map(line => clip(line.trim(), DISCOVERY)).filter(Boolean), call, ...(words ?? {}) };
     all.push(candidate);
     store.add(candidate);
     report.added += 1;
-    if (gain) sinceGain = 0;
     onCandidate?.(candidate);
-    return candidate;
+    return { candidate, gain };
   };
 
+  // An answer that gives nothing to use, a cut one and a declined one among them, counts toward the end at UNUSABLE in a row.
+  const unused = () => { report.invalid += 1; if (++unusable >= UNUSABLE) end('invalid'); };
   // The answer's text, or null when this request gave nothing to use; a failure that ends the run ends it here.
   const ask = async (kind: UsageRow['kind'], family: string | null, n: number, messages: Message[], schema: object): Promise<string | null> => {
-    const row: UsageRow = { n, at: new Date().toISOString(), kind, family, ms: 0, input: null, cached: null, written: null, output: null, reasoning: null };
+    const at = new Date().toISOString();
+    store.usage({ n, at, kind, family, sent: true });
+    const row: UsageRow = { n, at, kind, family, ms: 0, input: null, cached: null, written: null, output: null, reasoning: null };
     const began = performance.now();
     try {
-      const answer = await respond({ model, system, messages, schema, cache: owned }, { signal });
+      const answer = await respond({ model, system, messages, schema, cache: owned }, { signal: requests });
       Object.assign(row, { input: answer.usage?.inputTokens ?? null, cached: answer.usage?.cachedInputTokens ?? null, written: answer.usage?.writtenInputTokens ?? null,
         output: answer.usage?.outputTokens ?? null, reasoning: answer.usage?.reasoningTokens ?? null });
+      if (answer.tries === 2) row.tries = 2;
       return answer.text;
     } catch (error) {
-      if (signal.aborted && !(error instanceof ModelError)) { row.error = 'stopped'; return null; }
+      if (error instanceof ModelError && error.tries === 2) row.tries = 2;
+      // Cut short by the run's own end: that end is already decided.
+      if (requests.aborted) { row.error = error instanceof ModelError ? error.code : 'cancelled'; return null; }
       if (!(error instanceof ModelError)) throw error;
       row.error = error.code;
-      if (!['output_limit', 'declined'].includes(error.code)) end(error.code, error);
+      if (['output_limit', 'declined'].includes(error.code)) unused(); else end(error.code, error);
       return null;
     } finally {
       row.ms = Math.round(performance.now() - began);
       store.usage(row);
     }
   };
-  const unused = () => { report.invalid += 1; if (++unusable >= UNUSABLE) end('invalid'); };
 
   const ideate = async () => {
     const n = take();
     if (n === null) return;
     sinceGain = 0;
-    const named = families();
-    const content = [`Begin up to ${FAMILIES} families of solutions. Each is a different approach, not a variant of another: give it a short \`name\`, its \`idea\` in one line, and its first \`file\`, which should be valid even if its score is poor.`,
-      named.length ? `Families that exist already, which the new ones should differ from: ${named.join(', ')}.` : 'No family exists yet.', told()].join('\n\n');
+    const known = families(), taken = new Set(known);
+    let k = 1;
+    const fresh = () => { while (taken.has(`f${k}`)) k += 1; taken.add(`f${k}`); return `f${k}`; };
+    const content = [`Begin up to ${ideas} ${ideas === 1 ? 'family' : 'families'} of solutions. Each is a different approach, not a variant of another: give it a short \`name\`, its \`idea\` in one line, and its first \`file\`, which should be valid even if its score is poor. Each file has at most ${task.size} characters, and all of them together at most ${ideas * task.size}.`,
+      known.length ? `Families that exist already, which the new ones should differ from:\n${known.map(family => {
+        const idea = all.find(candidate => candidate.family === family && candidate.idea !== undefined)?.idea;
+        return `- ${named(family)}${idea ? `: ${idea}` : ''}`;
+      }).join('\n')}` : 'No family exists yet.', told()].join('\n\n');
     const text = await ask('ideate', null, n, [{ role: 'user', content }], IDEATE_SCHEMA);
     const answer = text === null ? null : readIdeated(text);
     if (text !== null && !answer) unused();
     if (!answer) return;
     unusable = 0;
-    const found = await Promise.all(answer.families.slice(0, FAMILIES).map((family, index) => {
-      const base = family.name.trim().replace(/\s+/g, ' ').slice(0, NAME) || 'family';
-      let name = base;
-      for (let k = 2; named.includes(name); k += 1) name = `${base} ${k}`;
-      named.push(name);
-      return record('idea', name, null, family.file, n, index ? [] : answer.discoveries);
-    }));
-    if (found.some(candidate => candidate?.valid)) emptyIdeas = 0;
+    // Every first file is settled before this returns, so that none is written after a failure has ended the run.
+    const settled = await Promise.allSettled(answer.families.slice(0, ideas).map((family, index) => record('idea', fresh(), null, family.file, n, index ? [] : answer.discoveries,
+      { name: clip(family.name.trim().replace(/\s+/g, ' '), NAME) || 'unnamed', idea: clip(family.idea.trim(), IDEA) })));
+    const failure = settled.find(result => result.status === 'rejected');
+    if (failure) throw failure.reason;
+    if (settled.some(result => result.status === 'fulfilled' && result.value?.candidate.valid)) emptyIdeas = 0;
     else if (++emptyIdeas >= IDEAS && !active().length) end('no_valid_start');
   };
 
-  const iterate = async (turn: number) => {
+  // Whether the step improved its family's best.
+  const iterate = async (turn: number): Promise<boolean> => {
     const tops = active(), cells = elites();
-    let parent = tops[turn % tops.length];
-    // Now and then the parent is an elite of the archive, so that a cell no family leads still gets worked on.
-    if (turn % EXPLORE === EXPLORE - 1 && cells.length > 1) parent = cells[explored++ % cells.length];
-    const others = [...tops.filter(candidate => candidate.family !== parent.family), ...cells.filter(candidate => candidate.cell !== parent.cell)]
-      .sort((a, b) => a.score! - b.score!).filter((candidate, i, list) => candidate.id !== parent.id && list.findIndex(other => other.id === candidate.id) === i).slice(0, 2);
-    const shown = (candidate: Candidate) => `#${candidate.id}, family ${candidate.family}, ${placed(candidate)}:\n${store.text(candidate.sha)}`;
+    // Every EXPLORE-th step takes an elite of the archive, so that a cell no family leads still gets worked on;
+    // the families take their turns among the other steps.
+    const parent = turn % EXPLORE === EXPLORE - 1 && cells.length > 1 ? cells[explored++ % cells.length] : tops[cursor++ % tops.length];
+    const others = [...tops.filter(candidate => candidate.family !== parent.family).sort(byScore), ...cells.filter(candidate => candidate.cell !== parent.cell).sort(byScore)]
+      .filter((candidate, i, list) => candidate.id !== parent.id && list.findIndex(other => other.id === candidate.id) === i).slice(0, 2);
+    const shown = (candidate: Candidate) => `#${candidate.id}, family ${named(candidate.family)}, ${placed(candidate)}:\n${store.text(candidate.sha)}`;
     const messages: Message[] = [{ role: 'user', content: [`The parent, to improve: ${shown(parent)}`, parent.feedback ? `Its feedback:\n${parent.feedback}` : 'The evaluator gave no feedback on it.',
       others.length ? `Other files of the archive, to borrow from:\n\n${others.map(shown).join('\n\n')}` : 'There are no other files in the archive yet.', told(),
       tries ? `You have ${tries} ${tries === 1 ? 'try' : 'tries'}: with \`try\` the evaluator runs your file and you see what it says; with \`submit\` your file is evaluated and kept, and this work ends.` : 'Use `submit`: your file is evaluated and kept, and this work ends.'].join('\n\n') }];
+    let gained = false;
     for (let t = 0; ; t += 1) {
       const n = take();
-      if (n === null) return;
+      if (n === null) return gained;
       const last = t >= tries, text = await ask('iterate', parent.family, n, messages, iterateSchema(last));
       const answer = text === null ? null : readIterated(text, last);
       if (text !== null && !answer) unused();
-      if (!answer || text === null) return;
+      if (!answer || text === null) return gained;
       unusable = 0;
-      const candidate = await record(answer.tool, parent.family, parent.id, answer.file, n, answer.discoveries);
-      if (!candidate || answer.tool === 'submit') return;
+      const kept = await record(answer.tool, parent.family, parent.id, answer.file, n, answer.discoveries);
+      if (!kept) return gained;
+      gained ||= kept.gain;
+      if (answer.tool === 'submit') return gained;
       const left = tries - t - 1;
-      messages.push({ role: 'assistant', content: text }, { role: 'user', content: `The evaluator on your file: ${verdict(candidate)}\n\n${left ? `${left} ${left === 1 ? 'try' : 'tries'} left.` : 'No tries are left: your next answer must use `submit`, and the schema allows only that.'}` });
+      messages.push({ role: 'assistant', content: text }, { role: 'user', content: `The evaluator on your file: ${verdict(kept.candidate)}\n\n${left ? `${left} ${left === 1 ? 'try' : 'tries'} left.` : 'No tries are left: your next answer must use `submit`, and the schema allows only that.'}` });
     }
   };
 
   const stop = () => end('stopped');
-  outer?.addEventListener('abort', stop, { once: true });
+  if (outer?.aborted) stop(); else outer?.addEventListener('abort', stop, { once: true });
   // A worker that fails ends the others before the failure is passed on, so that nothing writes after the caller closes the store.
   let crash: { error: unknown } | null = null;
   try {
     if (seed !== undefined && !all.length) await record('seed', 'seed', null, seed, null, []);
     const worker = async () => {
       try {
-        while (ended === null && !signal.aborted) {
+        while (ended === null) {
           if (ideating) { await ideating; continue; }
           if (!active().length || sinceGain >= task.stale) { ideating = ideate().finally(() => { ideating = null; }); await ideating; continue; }
-          await iterate(turns++);
-          sinceGain += 1;
+          if (await iterate(turns++)) sinceGain = 0; else sinceGain += 1;
         }
       } catch (error) { crash ??= { error }; end('unexpected'); }
     };
@@ -252,8 +294,8 @@ export async function runEvolve({ task, store, respond, model, evaluate, calls: 
 
   report.reason = ended ?? 'calls';
   report.status = report.reason === 'calls' ? 'done' : report.reason === 'stopped' ? 'stopped' : 'failed';
-  const valid = all.filter(candidate => candidate.valid), top = active().sort((a, b) => a.score! - b.score!)[0];
-  Object.assign(report, { candidates: all.length, valid: valid.length, cells: elites().length, families: families().length,
+  const top = active().sort(byScore)[0];
+  Object.assign(report, { candidates: all.length, valid: all.filter(candidate => candidate.valid).length, cells: elites().length, families: families().length,
     best: top ? { id: top.id, family: top.family, score: top.score! } : null });
   return report;
 }

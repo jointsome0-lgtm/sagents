@@ -69,7 +69,7 @@ line:
 | `src/eval.ts` | Reads a saved journal with log, show and diff for a judge, checks quotes by their words and keeps its report with findings and bounded refusal details, with no disk access. |
 | `src/numbers.ts` | Counts the story's time, actions and requests from kept event and usage files, with no model and no writes; it uses the lab's file reader and never opens SQLite. |
 | `src/evolve.ts` | `evolve`: the search loop, the archive and its requests, with the store and the evaluator given, and no disk access. |
-| `src/evolve-kept.ts` | `evolve`: the run directory, which only grows, and the evaluator as a child process with no shell. |
+| `src/evolve-kept.ts` | `evolve`: the run directory, which only grows, with its lock, and the evaluator as a child process with no shell. |
 | `src/kept.ts` | Beside the live mode, writes the directory of `live --run`: it only makes files where there are none and adds lines to them. |
 | `lab/data.ts` | The lab, `sagents lab`: reads the experiments under the directories it is given and writes nothing. |
 | `lab/server.ts` | The lab: serves the page at `/` and `/view/<id>` on `127.0.0.1`, usually port 4747. |
@@ -94,7 +94,9 @@ that list true.
 - A comment says why, never what. Comments are whole lines that begin with `//` after indentation.
   `npm run size` counts their token share of the core against a 10 percent bound, a reason to look and not a ban.
 - `npm test` needs no `npm install` and no network. A test goes in only where a failure would cost money, leak
-  something or lose data unnoticed.
+  something or lose data unnoticed. The owner wants few tests: each takes room on disk and in the head. A test
+  checks what must hold for the user, not how the code does it, so that a change that keeps the behavior changes no
+  test; extend a test that is there before adding another.
 - A request to the model holds what the caller gave and nothing else. Do not add default instructions, tools or
   metadata to it.
 - The core of the live mode (`world.ts`, `time.ts`, `action.ts`, `answer.ts`, `things.ts`, `journal.ts`, `laws.ts`, `sleep.ts`, `weather.ts`, `memory.ts`,

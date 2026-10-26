@@ -261,22 +261,24 @@ else if (command === 'numbers') {
         throw new EvolveError('The task file cannot be read as JSON.');
       }
       const task = readTask(value);
+      const kept = keepEvolve(given.positionals[0], taskText, base);
+      close = kept.close;
+      // The seed is read only for a run that has nothing yet, so that a kept run goes on without it.
       let seed: string | undefined;
-      if (task.file !== null) {
+      if (task.file !== null && !kept.store.candidates.length) {
         try { seed = readFileSync(resolve(base, task.file), 'utf8'); } catch (error) {
           if (!(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
           throw new EvolveError('The task\'s `file` cannot be read; it is a path from the task file\'s directory.');
         }
       }
-      const kept = keepEvolve(given.positionals[0], taskText);
-      close = kept.close;
       if (kept.unreadable) console.error(`${kept.unreadable} cut or unreadable lines in the kept files were skipped`);
       const stop = new AbortController();
       for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
       const result = await runEvolve({ task, store: kept.store, ...modelFor(given.values.model as string), calls, parallel, tries, cache: kept.cache, seed, signal: stop.signal,
         // The evaluator's command runs from the task file's directory, as its paths are written there.
         evaluate: (sha, signal) => runEvaluator(task, kept.path(sha), base, signal),
-        onCandidate: candidate => console.error(`#${candidate.id} ${candidate.kind} ${JSON.stringify(candidate.family)}${candidate.parent === null ? '' : ` from #${candidate.parent}`}: ${
+        // A family is shown by its number: its name is the model's words, which go only into the archive.
+        onCandidate: candidate => console.error(`#${candidate.id} ${candidate.kind} ${candidate.family}${candidate.parent === null ? '' : ` from #${candidate.parent}`}: ${
           candidate.valid ? `score ${candidate.score}, cell ${candidate.cell}` : 'not valid'}${candidate.same === null ? '' : `, as #${candidate.same}`}`) });
       console.log(JSON.stringify(result));
       if (result.status === 'failed') process.exitCode = 1;
