@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
 import { closeSync, fstatSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createChatgpt, ModelError, signIn, SignInError } from './chatgpt.ts';
 import type { Message, Request } from './chatgpt.ts';
@@ -26,6 +26,10 @@ sagents live <world.json> [--model <id>] [--cast <character>=<id>]... [--world-m
 sagents eval <dir> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
 sagents eval --state <file> --world <world.json> --model <id> --ask <questions.json> [--calls <n>] [--window <words>] [--out <file>]
                                a judge reads a finished live journal with log, show and diff, and gives a report
+sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>]
+                               a model improves one text file against the task's evaluator, keeping in the directory
+                               an archive of the best valid file of every cell; a second start goes on with the same task;
+                               a line for every file evaluated on stderr, and the summary as one JSON line on stdout
 sagents numbers <dir>... [--json] [--prices <file>]
                                the story's time, actions and requests counted from kept files, with no model
                                --prices adds dollars from the file's prices per million tokens for each model
@@ -239,6 +243,49 @@ else if (command === 'numbers') {
       }
     }
   }
+} else if (command === 'evolve') {
+  let close = () => {};
+  try {
+    const given = argumentsOf({ task: { type: 'string' }, model: { type: 'string' }, calls: { type: 'string' }, parallel: { type: 'string' }, tries: { type: 'string' } }, 1);
+    const calls = Number(given?.values.calls), parallel = Number(given?.values.parallel ?? 1), tries = Number(given?.values.tries ?? 2);
+    if (!given || given.positionals.length !== 1 || !given.values.task || !given.values.model || !Number.isSafeInteger(calls) || calls < 1
+      || !Number.isSafeInteger(parallel) || parallel < 1 || parallel > 16 || !Number.isSafeInteger(tries) || tries < 0 || tries > 10) {
+      console.error(USAGE);
+      process.exitCode = 1;
+    } else {
+      const { EvolveError, readTask, runEvolve } = await import('./evolve.ts'), { keepEvolve, runEvaluator } = await import('./evolve-kept.ts');
+      const taskPath = given.values.task as string, base = dirname(resolve(taskPath));
+      let taskText: string, value: unknown;
+      try { taskText = readFileSync(taskPath, 'utf8'); value = JSON.parse(taskText); } catch (error) {
+        if (!(error instanceof SyntaxError) && !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
+        throw new EvolveError('The task file cannot be read as JSON.');
+      }
+      const task = readTask(value);
+      let seed: string | undefined;
+      if (task.file !== null) {
+        try { seed = readFileSync(resolve(base, task.file), 'utf8'); } catch (error) {
+          if (!(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
+          throw new EvolveError('The task\'s `file` cannot be read; it is a path from the task file\'s directory.');
+        }
+      }
+      const kept = keepEvolve(given.positionals[0], taskText);
+      close = kept.close;
+      if (kept.unreadable) console.error(`${kept.unreadable} cut or unreadable lines in the kept files were skipped`);
+      const stop = new AbortController();
+      for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
+      const result = await runEvolve({ task, store: kept.store, ...modelFor(given.values.model as string), calls, parallel, tries, cache: kept.cache, seed, signal: stop.signal,
+        // The evaluator's command runs from the task file's directory, as its paths are written there.
+        evaluate: (sha, signal) => runEvaluator(task, kept.path(sha), base, signal),
+        onCandidate: candidate => console.error(`#${candidate.id} ${candidate.kind} ${JSON.stringify(candidate.family)}${candidate.parent === null ? '' : ` from #${candidate.parent}`}: ${
+          candidate.valid ? `score ${candidate.score}, cell ${candidate.cell}` : 'not valid'}${candidate.same === null ? '' : `, as #${candidate.same}`}`) });
+      console.log(JSON.stringify(result));
+      if (result.status === 'failed') process.exitCode = 1;
+    }
+  } catch (error) {
+    const { EvolveError } = await import('./evolve.ts');
+    console.error(`failed: ${error instanceof EvolveError ? error.message : 'unexpected'}`);
+    process.exitCode = 1;
+  } finally { close(); }
 } else if (command === 'live') {
   try {
     const given = argumentsOf({ model: { type: 'string' }, cast: { type: 'string', multiple: true }, 'world-model': { type: 'string' }, minutes: { type: 'string' }, calls: { type: 'string' }, tokens: { type: 'string' },

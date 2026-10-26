@@ -153,6 +153,20 @@ refused answers and falling asleep at the limit of being awake.
 [docs/judge.md](docs/judge.md) says the rest: what is read, what the judge is told, its tools, how
 quotes are compared and findings taken back, the limits and the report.
 
+### An evolutionary search
+
+`runEvolve` in `src/evolve.ts` holds the loop and the archive; `keepEvolve` in `src/evolve-kept.ts` keeps its directory.
+
+```sh
+sagents evolve <dir> --task <task.json> --model <id> --calls <n> [--parallel <k>] [--tries <t>]
+```
+
+`evolve` lets a model improve one text file against an evaluator command that the task file names, in fresh
+requests, and keeps every file it evaluated with an archive of the best valid file of each cell of the evaluator's
+numbers. Nothing in it knows what the file is: a program, a world file or any other text.
+
+- [An evolutionary search](docs/evolve.md): What is in the task file, what does a step send, and what is kept?
+
 ### Numbers of kept runs
 
 `numbersOf`, `numbersTable` and `numbersJSON` in `src/numbers.ts` hold the counts and the two outputs.
