@@ -325,15 +325,17 @@ export function createChatgpt({ fetch: fetcher = globalThis.fetch, path = ACCOUN
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
       const until = performance.now() + timeoutMs;
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
-      const current = signal ? AbortSignal.any([signal, timer]) : timer;
+      // A used up limit that the service has told ends the request as it is read and is kept, so that the caller hears
+      // of it before the stream is let go, which may take until the deadline, and a stop or a timeout that comes
+      // meanwhile cannot hide it; a stop given for some reason of the caller is not taken for one.
+      let spent: ModelError | undefined;
+      const quota = new AbortController();
+      const told = (error: ModelError) => { if (error.code === 'budget_exceeded') { spent = error; quota.abort(error); } return error; };
+      const current = AbortSignal.any([...(signal ? [signal] : []), timer, quota.signal]);
       if (signal?.aborted) throw new ModelError('cancelled');
       // A failure to save rotated tokens must not be hidden by a caller timeout.
       const token = await accessToken().catch(error => { throw error instanceof ModelError ? error : new ModelError('internal_error'); });
       let status: number | undefined, tries: 2 | undefined;
-      // A used up limit that the service has told is kept as it is read, so that a stop or a timeout that comes while
-      // the stream is let go cannot hide it, and a stop given for some reason of the caller is not taken for one.
-      let spent: ModelError | undefined;
-      const told = (error: ModelError) => { if (error.code === 'budget_exceeded') spent = error; return error; };
       try {
         return await untilStopped(async () => {
           current.throwIfAborted();

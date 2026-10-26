@@ -54,7 +54,7 @@ the file is a program, let the evaluator run it in a sandbox with no network and
 | `rules` | Optional. More instructions, such as "keep the command-line interface". |
 | `timeout` | Optional. The whole seconds an evaluation may take, from 1 to 3600, 60 by default. Past it the evaluator's process group is killed and the file is not valid. |
 | `size` | Optional. The most characters a file may have, a whole number from 1 to 80,000, 40,000 by default, since the plan connection ends an answer past 100,000 characters and the file comes inside JSON. A longer file is kept and not evaluated. |
-| `stale` | Optional. A whole number from 1: after this many steps that kept a file and improved no family's best, ideation runs again; 10 by default. |
+| `stale` | Optional. A whole number from 1 to 1,000,000: after this many steps that kept a file and improved no family's best, ideation runs again; 10 by default. |
 
 The evaluator prints, as the last line of its output, one JSON object: `valid`, true or false; when valid, `score`, a
 finite number, lower is better, and `features`, a number for every feature of `cells`; and `feedback`, a short text
@@ -72,9 +72,9 @@ stay as they are for the whole run, since nothing compares them between starts.
   five, so two at the default size. Each first file is evaluated, and a valid one starts its family. Ideation runs
   when no family has a valid file and once `stale` steps have kept a file and improved nothing since the last gain
   or ideation. Such a step counts at its last file, in the order the files were kept, so one whose files came before
-  a gain does not count, and neither does a step whose request failed or whose answer gave nothing to use. An
-  ideation that gives nothing, by a failure, an answer that cannot be used or one that begins no family, is asked
-  again rather than put off by `stale` more steps. While no family has a valid file, three ideations that begin
+  a gain does not count, and neither does one that kept no file, its request failed or its answer gave nothing to
+  use. An ideation that gives nothing, by a failure, an answer that cannot be used or one that begins no family, is
+  asked again rather than put off by `stale` more steps. While no family has a valid file, three ideations that begin
   none, failed and unusable ones among them, end the run with `no_valid_start`.
 - **A step** takes the best file of a family, the families in turn; every fourth step takes instead an elite of the
   archive, the cells in turn, so that a cell no family leads still gets worked on. The request holds the parent with
@@ -142,8 +142,10 @@ counts the loop chooses by are taken from the kept rows as the loop counts them:
 rows of their requests, a step that kept no file among them, so that the families, the cells and the models take
 their turns on in order; and the steps with no gain from the kept files in the order they were kept, so that a run
 stopped and started again still turns to ideation after `stale` of them. Requests kept before their rows named a
-step give no turns, and files kept before steps were numbered give no steps with no gain. A start is refused when
-rows edited by hand number so high that the next numbers would not be exact. The model's `notes` are not kept.
+step give no turns, and files kept before steps were numbered give no steps with no gain. A request row whose fields
+are not of their kinds, as one edited by hand, is left out, as the map leaves it out, and the next numbers go on only
+from kept numbers that are whole from 1 and stay exact; a start is refused when those are so high that the next ones
+would not be exact. The model's `notes` are not kept.
 
 ## The map
 
@@ -169,7 +171,7 @@ script, so it opens offline in any browser, in light or dark. It shows:
   parent, how many steps were shown the file itself, and the whole text of a file with no parent, of each family's
   best and of each elite.
 
-A mark opens its file. A run that has kept no file yet is drawn with its counts, its models and its task. A line
+A mark opens its file. A run that has kept no file yet is drawn with its requests, its counts and its models. A line
 the run is still writing is left out, and so is a row whose fields are not of their kinds, as one edited by hand,
 and the text of a file of `files/` that a kill cut short. The page holds the archive's text, the model's files and
 the evaluator's feedback, so share it as you would share the directory.

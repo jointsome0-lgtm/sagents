@@ -21,6 +21,10 @@ const unreadable = (error: unknown) => {
 const isId = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 1;
 const isCount = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
 const isText = (value: unknown) => typeof value === 'string';
+// The run.json that `evolve` writes as a run starts, with the run's cache name and its task's folder.
+const isRun = (text: string | null) => {
+  try { const run: unknown = JSON.parse(text ?? 'null'); return isObject(run) && isText(run.cache) && isText(run.base); } catch (error) { if (error instanceof SyntaxError) return false; throw error; }
+};
 const absentOr = (value: unknown, kind: (value: unknown) => boolean) => value === undefined || kind(value);
 const isCandidate = (row: unknown): row is Candidate => isObject(row) && isId(row.id) && isText(row.at) && ['seed', 'idea', 'try', 'submit'].includes(row.kind as string)
   && isText(row.family) && (row.parent === null || isId(row.parent)) && typeof row.sha === 'string' && /^[0-9a-f]{64}$/.test(row.sha) && isCount(row.chars) && isText(row.feedback)
@@ -29,7 +33,7 @@ const isCandidate = (row: unknown): row is Candidate => isObject(row) && isId(ro
   && (row.same === null || isId(row.same)) && Array.isArray(row.discoveries) && row.discoveries.every(isText) && (row.call === null || isId(row.call))
   && absentOr(row.step, step => step === null || isId(step)) && absentOr(row.model, isText) && absentOr(row.others, others => Array.isArray(others) && others.every(isId))
   && absentOr(row.name, isText) && absentOr(row.idea, isText);
-const isUsage = (row: unknown): row is Sent | UsageRow => isObject(row) && isId(row.n) && isText(row.at) && (row.kind === 'ideate' || row.kind === 'iterate')
+export const isUsage = (row: unknown): row is Sent | UsageRow => isObject(row) && isId(row.n) && isText(row.at) && (row.kind === 'ideate' || row.kind === 'iterate')
   && (row.family === null || isText(row.family)) && absentOr(row.model, isText) && absentOr(row.step, isId) && absentOr(row.turn, turn => turn === 'family' || turn === 'cell')
   && ('ms' in row ? isCount(row.ms) && ['input', 'cached', 'written', 'output', 'reasoning'].every(field => row[field] === null || isCount(row[field]))
     && absentOr(row.error, isText) && absentOr(row.tries, tries => tries === 2) && absentOr(row.unusable, unusable => unusable === true) : row.sent === true);
@@ -43,9 +47,9 @@ export function readEvolveRun(dir: string): EvolveRun {
   const rows = (text: string | null) => (text ?? '').split('\n').flatMap(line => {
     try { return [JSON.parse(line) as unknown]; } catch (error) { if (error instanceof SyntaxError) return []; throw error; }
   });
-  // A run whose requests have kept no file yet has no candidates.jsonl, but it has its run.json from its start.
+  // A run whose requests have kept no file yet has no candidates.jsonl, but it has the run.json its start wrote.
   const found = read('candidates.jsonl');
-  if (found === null && read('run.json') === null) throw new EvolveError('The directory has no candidates.jsonl and no run.json: it is not the directory of an evolve run.');
+  if (found === null && !isRun(read('run.json'))) throw new EvolveError('The directory has no candidates.jsonl and no run.json of a run: it is not the directory of an evolve run.');
   let task: Task | null = null;
   try { task = readTask(JSON.parse(read('task.json') ?? 'null')); } catch (error) { if (!(error instanceof EvolveError || error instanceof SyntaxError)) throw error; }
   return { path, task, candidates: rows(found).filter(isCandidate), usage: rows(read('usage.jsonl')).filter(isUsage),
@@ -333,7 +337,7 @@ export function evolveMap(run: EvolveRun): string {
 <p class="muted">Tokens: ${whole(sum('input'))} in, ${whole(sum('cached'))} of them cached, ${whole(sum('output'))} out, ${whole(sum('reasoning'))} of them reasoning; ${whole(minutes)} minutes in requests, added up over those that ran at once${errors.length ? `; failed: ${errors.map(([code, count]) => `${esc(code)} ${count}`).join(', ')}` : ''}${requests.length > ends.length ? `; ${requests.length - ends.length} with no end kept` : ''}.</p>
 ${task ? `<details><summary>The task</summary><pre>${esc(task.spec)}</pre>${task.rules.trim() ? `<p class="muted">Rules</p><pre>${esc(task.rules)}</pre>` : ''}<p class="muted">Evaluator: ${esc(task.evaluate.join(' '))}; at most ${whole(task.size)} characters, ${task.timeout} s, ideation after ${task.stale} steps with no gain.</p></details>` : ''}
 <h2 id="search">The search</h2><p class="muted">Every file evaluated, by the request that brought it and its score, lower and better at the top, with a line to its parent. Each family with a valid file has a lane; the others share the last. A mark opens its file below.</p>
-<div class="legend">${legend}</div>${candidates.length ? search : '<p>No file has been evaluated yet.</p>'}
+<div class="legend">${legend}</div>${candidates.length || requests.length ? search : '<p>No request has been sent yet.</p>'}
 <h2 id="cells">The cells</h2>${elites.size ? `<p class="muted">The elite of every cell, the lowest score among its valid files.</p>${grid ? `<div class="legend"><span>higher score</span>${ramp}<span>lower, better</span></div>${grid}<details><summary>The cells as a table</summary>${cellTable}</details>` : cellTable}` : '<p>No cell has a valid file yet.</p>'}
 <h2 id="families">The families</h2><table><thead><tr><th>Family</th><th>Name</th><th>Idea</th><th class="n">From request</th><th class="n">Files</th><th class="n">Valid</th><th class="n">Best</th><th class="n">Cells</th><th class="n">Requests</th><th class="n">Tokens in</th><th class="n">Tokens out</th></tr></thead><tbody>${familyRows.join('')}</tbody></table>
 ${modelRows.length ? `<h2 id="models">The models</h2><table><thead><tr><th>Model</th><th class="n">Requests</th><th class="n">Failed</th><th class="n">Nothing to use</th><th class="n">Files</th><th class="n">Valid</th><th class="n">Gains</th><th class="n">Median time</th><th class="n">Tokens in</th><th class="n">Cached</th><th class="n">Tokens out</th></tr></thead><tbody>${modelRows.join('')}</tbody></table>${unnamed ? '<p class="muted">Requests kept before the rows named their model are not in this table.</p>' : ''}` : ''}

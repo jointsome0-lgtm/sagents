@@ -199,12 +199,14 @@ export function createCompatible({ fetch: fetcher = globalThis.fetch, env = proc
       if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new ModelError('invalid_request');
       const until = performance.now() + timeoutMs;
       const timer = AbortSignal.timeout(Math.min(Math.floor(timeoutMs), 2 ** 31 - 1));
-      const current = signal ? AbortSignal.any([signal, timer]) : timer;
-      const stopped = () => signal?.aborted ? new ModelError('cancelled') : timer.aborted || performance.now() >= until ? new ModelError('timeout') : null;
-      // A used up balance that the server has told is kept as it is read, so that a stop or a timeout that comes while
-      // the answer is read or let go cannot hide it, and a stop given for some reason of the caller is not taken for one.
+      // A used up balance that the server has told ends the request as it is read and is kept, so that the caller hears
+      // of it before the answer is let go, which may take until the deadline, and a stop or a timeout that comes
+      // meanwhile cannot hide it; a stop given for some reason of the caller is not taken for one.
       let spent: ModelError | undefined;
-      const told = (error: ModelError) => { if (error.code === 'budget_exceeded') spent = error; return error; };
+      const quota = new AbortController();
+      const told = (error: ModelError) => { if (error.code === 'budget_exceeded') { spent = error; quota.abort(error); } return error; };
+      const current = AbortSignal.any([...(signal ? [signal] : []), timer, quota.signal]);
+      const stopped = () => signal?.aborted ? new ModelError('cancelled') : timer.aborted || performance.now() >= until ? new ModelError('timeout') : null;
       if (signal?.aborted) throw new ModelError('cancelled');
       let response: Response | undefined, answer: unknown, streamed = false, sent = false;
       try {
